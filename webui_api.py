@@ -551,6 +551,39 @@ async def h_works(plugin) -> dict:
     return ok({"works": works, "version": _version_of()})
 
 
+async def h_workflows(plugin) -> dict:
+    """转发萌绘 comfyui_workflows：列出已配置工作流 + [支持图生图]/【Anima】标记。
+
+    工具签名只收 event（不收 source/external 等 kwargs），传桩事件即可；
+    解析失败/超时不阻塞工坊——前端下拉退化为手动输入。
+    """
+    handler = draw._get_tool_handler(plugin.context, "comfyui_workflows")
+    if handler is None:
+        return ok({"available": False, "workflows": [], "reason": "萌绘未安装"})
+    try:
+        raw = await asyncio.wait_for(handler(_synthetic_event()), timeout=15)
+    except asyncio.TimeoutError:
+        return ok({"available": False, "workflows": [], "reason": "查询工作流超时"})
+    except Exception as exc:
+        return ok({"available": False, "workflows": [], "reason": f"{exc.__class__.__name__}: {exc}"[:150]})
+    workflows = []
+    for line in str(raw or "").splitlines():
+        line = line.strip()
+        if not line.startswith("- "):
+            continue
+        rest = line[2:]
+        name = rest.split(" [")[0].strip()
+        if not name or name == "(未命名)":
+            continue
+        workflows.append({
+            "name": name,
+            "img2img": "支持图生图" in rest,
+            "anima": "【Anima】" in rest,
+        })
+    reason = "" if workflows else "萌绘侧未配置任何工作流"
+    return ok({"available": bool(workflows), "workflows": workflows, "reason": reason})
+
+
 # ---------- 配置（schema 白名单 + 类型校验，星语同款） ----------
 
 _SKIP = object()
@@ -578,6 +611,8 @@ def _coerce(value, meta):
             if isinstance(value, bool):
                 return value
             return str(value).strip().lower() in ("1", "true", "on", "yes")
+        if value is None:  # 下拉 clearable 会给 null → 存空串（= 回落默认）
+            return ""
         s = str(value)
         opts = (meta or {}).get("options")
         if isinstance(opts, list) and opts and s not in [str(o) for o in opts]:
@@ -649,6 +684,7 @@ def register(plugin) -> None:
     routes = [
         ("/pools", h_pools, ["GET"]),
         ("/works", h_works, ["GET"]),
+        ("/workflows", h_workflows, ["GET"]),
         ("/pools/save_entry", h_save_entry, ["POST"]),
         ("/pools/delete_entry", h_delete_entry, ["POST"]),
         ("/pools/set_pack", h_set_pack, ["POST"]),

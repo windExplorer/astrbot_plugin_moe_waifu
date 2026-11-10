@@ -142,13 +142,24 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int, even
             if not Path(ref).exists():
                 return None, "error", f"参考图文件不存在：{ref}", 0
             image = str(Path(ref).resolve())
-        # img2img 不带 workflow（那是文生图槽位）；图生图工作流走 strategy.img2img_workflow
+        # img2img 不带 workflow（那是文生图槽位）；图生图工作流三级解析：
+        # 条目 strategy.img2img_workflow → 全局配置 img2img_workflow → 留空（萌绘默认）
         kwargs = _base_kwargs(cfg, build_prompt(entry), seed_int, with_workflow=False)
-        kwargs["image"] = image
-        kwargs["denoise"] = float(cfg.get("img2img_denoise", 0.65))
-        img_workflow = str(strategy.get("img2img_workflow") or "").strip()
+        img_workflow = (
+            str(strategy.get("img2img_workflow") or "").strip()
+            or str(cfg.get("img2img_workflow") or "").strip()
+        )
         if img_workflow:
             kwargs["img2img_workflow"] = img_workflow
+        kwargs["image"] = image
+        # denoise：条目 strategy.denoise 优先（逐角色调重绘强度）→ 全局配置兜底
+        try:
+            kwargs["denoise"] = float(
+                strategy.get("denoise") if strategy.get("denoise") is not None
+                else cfg.get("img2img_denoise", 0.65)
+            )
+        except (TypeError, ValueError):
+            kwargs["denoise"] = 0.65
     else:
         tool_name = "comfyui_draw"
         handler = _get_tool_handler(context, tool_name)

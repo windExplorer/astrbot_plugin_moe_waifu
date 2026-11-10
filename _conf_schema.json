@@ -42,8 +42,14 @@
     "default": false
   },
   "draw_workflow": {
-    "description": "生图工作流",
-    "hint": "交给萌绘的工作流名；留空使用萌绘自己的默认动漫工作流",
+    "description": "文生图工作流",
+    "hint": "base/lora 策略交给萌绘的工作流名；留空使用萌绘自己的默认动漫工作流",
+    "type": "string",
+    "default": ""
+  },
+  "img2img_workflow": {
+    "description": "图生图工作流",
+    "hint": "img2img 策略条目未单独指定工作流时的全局兜底；留空使用萌绘默认图生图工作流",
     "type": "string",
     "default": ""
   },

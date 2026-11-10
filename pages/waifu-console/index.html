@@ -281,6 +281,9 @@
                                     :step="0.05" style="width: 220px;"></n-input-number>
                     <n-select v-else-if="it.options" v-model:value="configModel[it.key]"
                               :options="optOpts(it)" style="width: 280px;"></n-select>
+                    <n-select v-else-if="isWorkflowKey(it.key)" v-model:value="configModel[it.key]"
+                              :options="wfOpts(it.key === 'img2img_workflow')" filterable tag clearable
+                              placeholder="留空用萌绘默认" style="width: 340px;"></n-select>
                     <n-input v-else-if="isMulti(it)" v-model:value="configModel[it.key]"
                              type="textarea" :rows="4"></n-input>
                     <n-input v-else v-model:value="configModel[it.key]" style="width: 420px;"></n-input>
@@ -340,10 +343,13 @@
                    type="textarea" :rows="2"
                    placeholder="LoRA 名:权重，每行一个，如 miku_char_v2:0.8（须已在萌绘/ComfyUI 侧安装）"></n-input>
           <div v-if="form.strategy_type === 'img2img'">
+            <n-select v-model:value="form.strategy_img2img_workflow" :options="wfOpts(true)"
+                      filterable tag clearable
+                      placeholder="图生图工作流（留空=全局配置→萌绘默认）"></n-select>
             <n-input v-model:value="form.strategy_ref"
                      placeholder="参考图 URL 或本地路径（干净的官方单人立绘）"></n-input>
-            <n-input v-model:value="form.strategy_img2img_workflow"
-                     placeholder="图生图工作流名（可留空用萌绘默认）"></n-input>
+            <n-input-number v-model:value="form.strategy_denoise" :step="0.05" :min="0.2" :max="0.95"
+                            placeholder="重绘强度" style="width: 220px;"></n-input-number>
           </div>
           <n-input v-model:value="form.tags_en" type="textarea" :rows="4"
                    placeholder="英文 danbooru 角色 tag（必填）。角色 tag + 系列 tag + 稳定外观特征；括号写成 \\( \\) 转义，如 rem \\(re:zero\\)"></n-input>
@@ -487,9 +493,37 @@
       function stratLabel(e) {
         var t = e.strategy_type || "base";
         if (t === "lora") return "lora";
-        if (t === "img2img") return "img2img 参考图";
+        if (t === "img2img") {
+          var wf = (e.strategy && e.strategy.img2img_workflow) || "";
+          return wf ? "img2img · " + wf : "img2img 参考图";
+        }
         return "base 直出";
       }
+
+      // ---- 萌绘工作流列表（配置页/编辑抽屉的下拉选项） ----
+      var workflows = Vue.ref([]);
+      var workflowsLoaded = Vue.ref(false);
+      async function loadWorkflows(force) {
+        if (workflowsLoaded.value && !force) return;
+        try {
+          var res = await apiGet("workflows");
+          if (res && res.workflows) {
+            workflows.value = res.workflows;
+            workflowsLoaded.value = true;
+          }
+        } catch (e) { /* 已提示；下拉退化为手动输入 */ }
+      }
+      function wfOpts(onlyImg2img) {
+        return workflows.value
+          .filter(function (w) { return !onlyImg2img || w.img2img; })
+          .map(function (w) {
+            return {
+              label: w.name + (w.img2img ? " [图生图]" : " [仅文生图]") + (w.anima ? " 【动漫】" : ""),
+              value: w.name
+            };
+          });
+      }
+      function isWorkflowKey(key) { return key === "draw_workflow" || key === "img2img_workflow"; }
 
       // 两段确认（sandbox 无 confirm/alert）
       var delArm = Vue.ref("");
@@ -519,7 +553,8 @@
         return {
           id: "", name: "", series: "", pack: (meta.value.packs[0] || {}).pack || "",
           category: "anime", tier: "S", strategy_type: "base",
-          strategy_loras: "", strategy_ref: "", strategy_img2img_workflow: "",
+          strategy_loras: "", strategy_ref: "", strategy_img2img_workflow: null,
+          strategy_denoise: null,
           tags_en: "", quote: "", color: "#E8B4C8", verified: false
         };
       };
@@ -546,6 +581,9 @@
           if (f.strategy_img2img_workflow) {
             strategy.img2img_workflow = String(f.strategy_img2img_workflow).trim();
           }
+          if (f.strategy_denoise !== null && f.strategy_denoise !== undefined) {
+            strategy.denoise = f.strategy_denoise;
+          }
         }
         return {
           id: String(f.id || "").trim(), name: String(f.name || "").trim(),
@@ -563,7 +601,8 @@
           strategy_type: e.strategy_type || "base",
           strategy_loras: Array.isArray(st.loras) ? st.loras.join("\n") : (st.loras || ""),
           strategy_ref: st.ref || "",
-          strategy_img2img_workflow: st.img2img_workflow || "",
+          strategy_img2img_workflow: st.img2img_workflow || null,
+          strategy_denoise: (st.denoise !== undefined && st.denoise !== null) ? Number(st.denoise) : null,
           tags_en: e.tags_en || "", quote: e.quote || "",
           color: e.color || "#E8B4C8", verified: !!e.verified
         };
@@ -874,9 +913,9 @@
       var CONFIG_SECTIONS = [
         { title: "基础", keys: ["timezone", "salt", "reroll_daily_limit", "portraits_per_char",
                                 "allow_unverified", "disabled_groups"] },
-        { title: "萌绘生图", keys: ["draw_workflow", "draw_width", "draw_height", "draw_timeout",
-                                    "img2img_denoise", "draw_negative_enabled", "draw_negative_prompt",
-                                    "announce_enabled"] }
+        { title: "萌绘生图", keys: ["draw_workflow", "img2img_workflow", "draw_width", "draw_height",
+                                    "draw_timeout", "img2img_denoise", "draw_negative_enabled",
+                                    "draw_negative_prompt", "announce_enabled"] }
       ];
       var MULTILINE_KEYS = ["disabled_groups", "draw_negative_prompt"];
       var configItems = Vue.ref([]);
@@ -958,7 +997,7 @@
         }
       }
       loadAll().then(function () {
-        return Promise.all([loadGallery(), loadConfig(), loadWorks()]);
+        return Promise.all([loadGallery(), loadConfig(), loadWorks(), loadWorkflows()]);
       });
 
       return {
@@ -987,7 +1026,8 @@
         bindText: bindText, parsedBind: parsedBind, bindSaving: bindSaving,
         doSaveBind: doSaveBind,
         configSections: configSections, configModel: configModel, configSaving: configSaving,
-        saveConfig: saveConfig, optOpts: optOpts, isMulti: isMulti
+        saveConfig: saveConfig, optOpts: optOpts, isMulti: isMulti,
+        isWorkflowKey: isWorkflowKey, wfOpts: wfOpts
       };
     }
   });
