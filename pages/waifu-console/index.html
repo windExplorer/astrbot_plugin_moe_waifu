@@ -262,9 +262,12 @@
   var message = NS.createDiscreteApi(["message"]).message;
   var h = Vue.h;
 
-  // ---- 桥：Dashboard 会在 </body> 前注入 bridge-sdk.js（晚于本脚本执行），
+  // ---- 桥：Dashboard 会在文档末尾自动注入 bridge-sdk.js（晚于本脚本执行），
   // 必须轮询等它出现、找到才挂载（box member_panel 同款）。v0.2.2 及以前是
   // 「3 秒等不到就降级内置桩」——真机上注入稍慢就整页空数据 + 假横幅，已废弃。
+  // ⚠️ 本文件任何位置（含注释/字符串）不得出现 body 闭合标签字面量：
+  // 服务端按「第一个匹配」注入桥标签，命中脚本内字面量会把主脚本拦腰截断
+  // （v0.2.3 真机「整页都是代码」的根因），tests/test_html_integrity.py 有守卫。
   var bridge = null;
 
   function bridgeCtx() {
