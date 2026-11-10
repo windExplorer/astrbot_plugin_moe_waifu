@@ -1,0 +1,92 @@
+{
+  "timezone": {
+    "description": "时区",
+    "hint": "「今天」按此时区计算（每日零点换老婆）。IANA 名称，如 Asia/Shanghai、UTC",
+    "type": "string",
+    "default": "Asia/Shanghai"
+  },
+  "salt": {
+    "description": "种子盐值",
+    "hint": "与日期、用户号一起派生抽卡结果。修改后所有人当天会重新洗牌，请勿随意变更",
+    "type": "string",
+    "default": "moe-waifu"
+  },
+  "disabled_groups": {
+    "description": "停用群",
+    "hint": "每行一个群号；这些群不响应抽卡指令。私聊不受影响",
+    "type": "string",
+    "default": ""
+  },
+  "group_pools": {
+    "description": "分群角色库",
+    "hint": "每行一条「群号=卷名,卷名」，限制该群只在指定卷里抽；留空=全部启用卷",
+    "type": "string",
+    "default": ""
+  },
+  "reroll_daily_limit": {
+    "description": "每日换老婆次数",
+    "hint": "每人每天可用 /换老婆 重抽的次数；0 = 禁用换老婆",
+    "type": "int",
+    "default": 1
+  },
+  "portraits_per_char": {
+    "description": "每角色立绘配额",
+    "hint": "每个角色最多沉淀多少张立绘；满了之后直接从库存随机取图，不再消耗绘图算力",
+    "type": "int",
+    "default": 5
+  },
+  "allow_unverified": {
+    "description": "未验证角色可抽",
+    "hint": "默认只有试画验证过（verified）的角色才会被抽到；开启后未验证角色也参与抽卡（赌一把）",
+    "type": "bool",
+    "default": false
+  },
+  "draw_workflow": {
+    "description": "生图工作流",
+    "hint": "交给萌绘的工作流名；留空使用萌绘自己的默认动漫工作流",
+    "type": "string",
+    "default": ""
+  },
+  "draw_width": {
+    "description": "立绘宽度",
+    "hint": "生成图与卡布同为竖版，建议保持 700×1200 不变",
+    "type": "int",
+    "default": 700
+  },
+  "draw_height": {
+    "description": "立绘高度",
+    "hint": "见「立绘宽度」",
+    "type": "int",
+    "default": 1200
+  },
+  "draw_timeout": {
+    "description": "生图超时（秒）",
+    "hint": "超过该时长视为生成失败：报错不出卡（可稍后重试）",
+    "type": "int",
+    "default": 120
+  },
+  "draw_negative_enabled": {
+    "description": "启用负面提示词",
+    "hint": "关闭后完全交给用户工作流（含下方内容也不再传）",
+    "type": "bool",
+    "default": true
+  },
+  "draw_negative_prompt": {
+    "description": "负面提示词",
+    "hint": "留空使用内置兜底（排除男性特征与 NSFW）；填写则整体覆盖",
+    "type": "string",
+    "default": ""
+  },
+  "img2img_denoise": {
+    "description": "重绘强度（参考图模式）",
+    "hint": "img2img 策略的降噪值，0.5~0.7 之间保脸保配色；过高会丢特征",
+    "type": "float",
+    "default": 0.65
+  },
+  "announce_enabled": {
+    "description": "召唤提示",
+    "hint": "真去生成新立绘时先发一句「正在召唤…」的过程提示（萌绘单张 20~120 秒）",
+    "type": "bool",
+    "default": true
+  }
+}

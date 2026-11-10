@@ -1,0 +1,265 @@
+{
+  "packs": [
+    {
+      "pack": "anime",
+      "title": "动漫卷",
+      "enabled": true,
+      "entries": [
+        {
+          "id": "hatsune_miku",
+          "name": "初音未来",
+          "series": "VOCALOID",
+          "category": "anime",
+          "tier": "S",
+          "strategy": {"type": "base"},
+          "tags_en": "hatsune miku, vocaloid, twintails, very long hair, teal hair, headset, sleeveless shirt, grey skirt, thighhighs",
+          "quote": "初次见面，我是初音未来！从今天起，就是你的专属歌姬了哦。",
+          "color": "#39C5BB",
+          "verified": false
+        },
+        {
+          "id": "makima",
+          "name": "玛奇玛",
+          "series": "电锯人",
+          "category": "anime",
+          "tier": "S",
+          "strategy": {"type": "base"},
+          "tags_en": "makima \\(chainsaw man\\), chainsaw man, red hair, long hair, low twintails, braid, yellow eyes, ringed eyes, suit, white shirt, necktie",
+          "quote": "真是条好狗呢。那么今天，也请多指教了。",
+          "color": "#B03A3A",
+          "verified": false
+        },
+        {
+          "id": "rem",
+          "name": "雷姆",
+          "series": "Re:从零开始的异世界生活",
+          "category": "anime",
+          "tier": "S",
+          "strategy": {"type": "base"},
+          "tags_en": "rem \\(re:zero\\), re:zero kara hajimeru isekai seikatsu, blue hair, short hair, maid, maid headdress, hair over one eye",
+          "quote": "雷姆，从今天起就是专属于你的女仆了。",
+          "color": "#6FB7E8",
+          "verified": false
+        },
+        {
+          "id": "frieren",
+          "name": "芙莉莲",
+          "series": "葬送的芙莉莲",
+          "category": "anime",
+          "tier": "S",
+          "strategy": {"type": "base"},
+          "tags_en": "frieren, sousou no frieren, white hair, very long hair, low twintails, elf, pointy ears, green eyes, sortie dress",
+          "quote": "不过是区区一百年而已。陪你一天，还是可以的。",
+          "color": "#8FBFAF",
+          "verified": false
+        },
+        {
+          "id": "misaka_mikoto",
+          "name": "御坂美琴",
+          "series": "某科学的超电磁炮",
+          "category": "anime",
+          "tier": "S",
+          "strategy": {"type": "base"},
+          "tags_en": "misaka mikoto, toaru kagaku no railgun, brown hair, short hair, hairpin, school uniform, sailor collar",
+          "quote": "我只是个随处可见的初中生哦？……偶尔也放放电什么的。",
+          "color": "#E6A23C",
+          "verified": false
+        },
+        {
+          "id": "tokisaki_kurumi",
+          "name": "时崎狂三",
+          "series": "Date A Live",
+          "category": "anime",
+          "tier": "A",
+          "strategy": {"type": "base"},
+          "tags_en": "tokisaki kurumi, date a live, black hair, very long hair, asymmetrical hair, heterochromia, red eyes, hair ribbon, gothic dress",
+          "quote": "呵呵，我的「时间」，还很充裕哦。",
+          "color": "#7A3B5E",
+          "verified": false
+        },
+        {
+          "id": "kaname_madoka",
+          "name": "鹿目圆",
+          "series": "魔法少女小圆",
+          "category": "anime",
+          "tier": "A",
+          "strategy": {"type": "base"},
+          "tags_en": "kaname madoka, mahou shoujo madoka magica, pink hair, twintails, red bows, hair ribbons",
+          "quote": "我想成为能守护大家的人——今天，先守护你的心情吧。",
+          "color": "#F2A7C3",
+          "verified": false
+        },
+        {
+          "id": "violet_evergarden",
+          "name": "薇尔莉特",
+          "series": "紫罗兰永恒花园",
+          "category": "anime",
+          "tier": "A",
+          "strategy": {"type": "base"},
+          "tags_en": "violet evergarden \\(character\\), violet evergarden \\(anime\\), blonde hair, braided bangs, blue eyes, emerald brooch",
+          "quote": "自动手记人偶服务，随时恭候。今天想写点什么？",
+          "color": "#7FA8D9",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "pack": "gal",
+      "title": "galgame卷",
+      "enabled": true,
+      "entries": [
+        {
+          "id": "tomotake_yoshino",
+          "name": "朝武芳乃",
+          "series": "千恋万花",
+          "category": "gal",
+          "tier": "A",
+          "strategy": {"type": "base"},
+          "tags_en": "tomotake yoshino, senren banka, dark purple hair, long hair, hair ornament, japanese clothes",
+          "quote": "芳乃可是神明大人的化身哦，要好好珍惜哦。",
+          "color": "#A48BC8",
+          "verified": false
+        },
+        {
+          "id": "hitachi_mako",
+          "name": "常陆茉子",
+          "series": "千恋万花",
+          "category": "gal",
+          "tier": "B",
+          "strategy": {"type": "base"},
+          "tags_en": "hitachi mako, senren banka, black hair, long hair, hair ornament, purple eyes",
+          "quote": "茉子会一直陪在您身边的——请放心吧。",
+          "color": "#6E5E8E",
+          "verified": false
+        },
+        {
+          "id": "atri",
+          "name": "亚托莉",
+          "series": "ATRI -My Dear Summer-",
+          "category": "gal",
+          "tier": "A",
+          "strategy": {"type": "base"},
+          "tags_en": "atri \\(atri my dear summer\\), atri my dear summer, white hair, long hair, hair ornament, blue eyes, knee socks",
+          "quote": "欢迎回来，主人！今天也要一起努力活下去哦！",
+          "color": "#58B7C4",
+          "verified": false
+        },
+        {
+          "id": "arisaka_mashiro",
+          "name": "有坂真白",
+          "series": "苍之彼方的四重奏",
+          "category": "gal",
+          "tier": "B",
+          "strategy": {"type": "base"},
+          "tags_en": "arisaka mashiro, ao no kanata no four rhythm, white hair, twintails, hair ornament, blue eyes",
+          "quote": "真白最喜欢甜的了！……还有，最喜欢你。",
+          "color": "#C9C4D9",
+          "verified": false
+        }
+      ]
+    },
+    {
+      "pack": "game",
+      "title": "游戏卷",
+      "enabled": true,
+      "entries": [
+        {
+          "id": "ganyu",
+          "name": "甘雨",
+          "series": "原神",
+          "category": "game",
+          "tier": "S",
+          "strategy": {"type": "base"},
+          "tags_en": "ganyu, genshin impact, blue hair, long hair, black horns, red tips hair, bell, bodysuit",
+          "quote": "这份文件……嗯，再核对一遍就可以交给你了。",
+          "color": "#6E8FBF",
+          "verified": false
+        },
+        {
+          "id": "raiden_shogun",
+          "name": "雷电将军",
+          "series": "原神",
+          "category": "game",
+          "tier": "S",
+          "strategy": {"type": "base"},
+          "tags_en": "raiden shogun, genshin impact, purple hair, very long hair, single braid, hair ornament",
+          "quote": "此乃，雷电的一闪。……开玩笑的，今天陪你散散步。",
+          "color": "#9B72C9",
+          "verified": false
+        },
+        {
+          "id": "hu_tao",
+          "name": "胡桃",
+          "series": "原神",
+          "category": "game",
+          "tier": "A",
+          "strategy": {"type": "base"},
+          "tags_en": "hu tao, genshin impact, twintails, sidelocks, hair ornament, plum blossoms, short hair with long locks",
+          "quote": "往生堂七十七代堂主，胡桃是也！生意……就不向你介绍了。",
+          "color": "#C96F4A",
+          "verified": false
+        },
+        {
+          "id": "march_7th",
+          "name": "三月七",
+          "series": "崩坏：星穹铁道",
+          "category": "game",
+          "tier": "S",
+          "strategy": {"type": "base"},
+          "tags_en": "march 7th \\(honkai star rail\\), honkai: star rail, pink hair, multicolored hair, gradient hair, hair ornament, ice",
+          "quote": "三月七，随时待命！今天也要拍张好看的照片哦！",
+          "color": "#F2B8CB",
+          "verified": false
+        },
+        {
+          "id": "sparkle",
+          "name": "花火",
+          "series": "崩坏：星穹铁道",
+          "category": "game",
+          "tier": "A",
+          "strategy": {"type": "base"},
+          "tags_en": "sparkle \\(honkai star rail\\), honkai: star rail, brown hair, long hair, hair ornament, mask on head",
+          "quote": "嘘——好戏，开场咯～",
+          "color": "#C95B5B",
+          "verified": false
+        },
+        {
+          "id": "exusiai",
+          "name": "能天使",
+          "series": "明日方舟",
+          "category": "game",
+          "tier": "A",
+          "strategy": {"type": "base"},
+          "tags_en": "exusiai, arknights, red hair, long hair, halo, black wings, apple",
+          "quote": "外卖到了！咻——今天的外卖，是你哦。",
+          "color": "#C94F3D",
+          "verified": false
+        },
+        {
+          "id": "amiya",
+          "name": "阿米娅",
+          "series": "明日方舟",
+          "category": "game",
+          "tier": "A",
+          "strategy": {"type": "base"},
+          "tags_en": "amiya \\(arknights\\), arknights, animal ears, rabbit ears, grey hair, bowtie, short hair",
+          "quote": "为了罗德岛的未来……也为了今天的你。",
+          "color": "#5E9E9B",
+          "verified": false
+        },
+        {
+          "id": "sunaookami_shiroko",
+          "name": "砂狼白子",
+          "series": "蔚蓝档案",
+          "category": "game",
+          "tier": "S",
+          "strategy": {"type": "base"},
+          "tags_en": "sunaookami shiroko, blue archive, grey hair, short hair, wolf ears, hood, blue eyes",
+          "quote": "……嗯，出发吧。计划里，今天有你的行程。",
+          "color": "#7E9BB8",
+          "verified": false
+        }
+      ]
+    }
+  ]
+}
