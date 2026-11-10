@@ -23,6 +23,7 @@
   .work-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .work-initial { font-size: 36px; color: #fff; opacity: .9; font-weight: 700;
     letter-spacing: 2px; }
+  .cover-switch { position: absolute; top: 6px; right: 6px; }
 </style>
 </head>
 <body>
@@ -37,7 +38,7 @@
       <n-layout-content content-style="padding: 18px 22px;">
         <n-space vertical size="large">
           <n-space align="center">
-            <n-tag :bordered="false" type="info" size="small">v{{ meta.version || "?" }}</n-tag>
+            <n-tag :bordered="false" type="info" size="small">{{ meta.version || "v?" }}</n-tag>
             <n-tag :bordered="false" size="small" :type="meta.anima_ready ? 'success' : 'error'">
               {{ meta.anima_ready ? "萌绘已就绪" : "萌绘未安装/未启用" }}
             </n-tag>
@@ -47,6 +48,10 @@
           <!-- ============ 角色库 ============ -->
           <div v-if="menu === 'chars'">
             <n-space align="center" :wrap="true">
+              <n-radio-group v-model:value="charsMode" size="small">
+                <n-radio-button value="card">卡片</n-radio-button>
+                <n-radio-button value="list">列表</n-radio-button>
+              </n-radio-group>
               <n-select v-model:value="filterPack" :options="packOpts" size="small"
                         style="width: 140px;"></n-select>
               <n-select v-model:value="filterCat" :options="catOpts" size="small"
@@ -66,7 +71,51 @@
                           @click="togglePack(p)">{{ p.enabled ? "停用" : "启用" }}</n-button>
               </n-tag>
             </n-space>
-            <n-data-table :columns="entryCols" :data="filteredEntries" :row-key="rowKey"
+
+            <!-- 卡片视图（默认） -->
+            <div v-if="charsMode === 'card'">
+              <n-grid :cols="4" :x-gap="12" :y-gap="12">
+                <n-gi v-for="e in pagedEntries" :key="e.id">
+                  <n-card size="small" :bordered="true" class="work-card">
+                    <div class="work-cover" :style="{ background: 'linear-gradient(135deg,' + e.color + 'cc,' + e.color + '55)' }">
+                      <img v-if="e.thumb" :src="e.thumb" class="work-cover-img">
+                      <span v-else class="work-initial">{{ e.name.slice(0, 1) }}</span>
+                      <n-switch class="cover-switch" size="small" :value="e.verified"
+                                @update:value="doToggleVerified(e)"></n-switch>
+                    </div>
+                    <n-space size="small" align="center" style="margin-top: 8px;">
+                      <b>{{ e.name }}</b>
+                      <n-tag v-if="e.tier" size="tiny" :bordered="false">{{ e.tier }}</n-tag>
+                      <n-tag size="tiny" :bordered="false">{{ catLabel(e.category) }}</n-tag>
+                    </n-space>
+                    <div class="bind-tip">{{ e.id }} · {{ e.series || "未填作品" }} · 立绘 {{ portraitCount(e.id) }}/{{ meta.quota }}</div>
+                    <n-space size="small" style="margin-top: 6px;">
+                      <n-button size="tiny" type="primary" secondary
+                                @click="gotoTryFromChars(e)">试画</n-button>
+                      <n-button size="tiny" @click="gotoGallery(e.id)">立绘</n-button>
+                      <n-button size="tiny" @click="openEdit(e)">编辑</n-button>
+                      <n-button size="tiny" type="error"
+                                :secondary="delArm !== 'entry:' + e.id"
+                                @click="doDeleteEntry(e)">
+                        {{ delArm === 'entry:' + e.id ? "确认删除" : "删除" }}
+                      </n-button>
+                    </n-space>
+                  </n-card>
+                </n-gi>
+              </n-grid>
+              <n-empty v-if="!loadingAll && filteredEntries.length === 0"
+                       description="没有匹配的角色"></n-empty>
+              <n-space justify="center" style="margin-top: 14px;"
+                       v-if="filteredEntries.length > cardPageSize">
+                <n-pagination :item-count="filteredEntries.length"
+                              :page-size="cardPageSize"
+                              v-model:page="cardPage"></n-pagination>
+              </n-space>
+            </div>
+
+            <!-- 列表视图 -->
+            <n-data-table v-if="charsMode === 'list'" :columns="entryCols"
+                          :data="filteredEntries" :row-key="rowKey"
                           :pagination="{ pageSize: 20 }" size="small"></n-data-table>
           </div>
 
@@ -114,6 +163,8 @@
                     </n-space>
                     <n-space size="small" align="center" style="margin-top: 4px;">
                       <span class="bind-tip">{{ c.id }} · 立绘 {{ c.portraits }}</span>
+                      <n-button size="tiny" quaternary type="primary"
+                                @click.stop="gotoGallery(c.id)">立绘</n-button>
                       <n-button size="tiny" quaternary type="primary"
                                 @click.stop="openEditById(c.id)">编辑</n-button>
                     </n-space>
@@ -563,6 +614,28 @@
         } catch (err2) { /* 已提示 */ }
       }
 
+      // 卡片/列表双视图（默认卡片）+ 分页
+      var charsMode = Vue.ref("card");
+      var cardPageSize = 12;
+      var cardPage = Vue.ref(1);
+      var pagedEntries = Vue.computed(function () {
+        var s = (cardPage.value - 1) * cardPageSize;
+        return filteredEntries.value.slice(s, s + cardPageSize);
+      });
+      Vue.watch([filterPack, filterCat, filterVerified, keyword], function () {
+        cardPage.value = 1;
+      });
+      function gotoTryFromChars(e) {
+        tryCharId.value = e.id;
+        menu.value = "try";
+      }
+      function gotoGallery(charId) {
+        // galCharId 的 watch（gallery 段）会自动装载该角色立绘列表
+        galCharId.value = charId;
+        currentWork.value = null;
+        menu.value = "gallery";
+      }
+
       // ---- 角色表格 ----
       var entryCols = Vue.computed(function () {
         return [
@@ -603,6 +676,10 @@
                   size: "tiny", type: "primary", secondary: true,
                   onClick: function () { tryCharId.value = row.id; menu.value = "try"; }
                 }, { default: function () { return "试画"; } }),
+                h(NS.NButton, {
+                  size: "tiny", secondary: true,
+                  onClick: function () { gotoGallery(row.id); }
+                }, { default: function () { return "立绘"; } }),
                 h(NS.NButton, {
                   size: "tiny", type: row.verified ? "default" : "warning", secondary: true,
                   onClick: function () { doToggleVerified(row); }
@@ -887,6 +964,9 @@
       return {
         theme: theme, menu: menu, menuOpts: menuOpts, onMenu: onMenu,
         meta: meta, loadingAll: loadingAll, loadAll: loadAll, rowKey: rowKey,
+        charsMode: charsMode, cardPage: cardPage, cardPageSize: cardPageSize,
+        pagedEntries: pagedEntries, gotoTryFromChars: gotoTryFromChars,
+        gotoGallery: gotoGallery,
         filterPack: filterPack, filterCat: filterCat, filterVerified: filterVerified,
         keyword: keyword, packOpts: packOpts, catOpts: catOpts, verifiedOpts: verifiedOpts,
         filteredEntries: filteredEntries, entryCols: entryCols,

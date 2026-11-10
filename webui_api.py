@@ -101,11 +101,39 @@ def _json_save(path: Path, data) -> None:
     Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _version_of(plugin) -> str:
+def _version_of() -> str:
+    """读 metadata.yaml 的 version（带 v 前缀）。
+
+    ⚠️ 不能找 plugin._plugin_version —— 那是 main.py 的模块级函数而非类方法，
+    hasattr 永远 False，页面版本号就会显示成 v?（v0.3.1 及以前真机如此）。
+    """
     try:
-        return str(plugin._plugin_version()) if hasattr(plugin, "_plugin_version") else ""
+        text = (Path(__file__).resolve().parent / "metadata.yaml").read_text(encoding="utf-8")
+        m = re.search(r"(?m)^\s*version:\s*v?([0-9][^\s#]*)", text)
+        return f"v{m.group(1).strip()}" if m else ""
     except Exception:
         return ""
+
+
+_THUMB_CACHE: dict = {}
+
+
+def _thumb_cached(path, max_w: int = 160) -> str | None:
+    """缩略 data URL（带 mtime 缓存）：/pools 每次装载都会全量重取，别每次重编码。"""
+    p = Path(path)
+    if not p.is_file():
+        return None
+    key = f"{p}|{max_w}"
+    try:
+        mtime = p.stat().st_mtime
+    except Exception:
+        return None
+    cached = _THUMB_CACHE.get(key)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    durl = _thumb_data_url(str(p), max_w)
+    _THUMB_CACHE[key] = (mtime, durl)
+    return durl
 
 
 def _thumb_data_url(image_path: str, max_w: int = 420) -> str | None:
@@ -164,6 +192,7 @@ def _synthetic_event():
 async def h_pools(plugin) -> dict:
     packs = pool.load_packs(_pools_dir(plugin), logger)
     counts: dict = {}
+    thumbs: dict = {}
     out_packs = []
     for pack in packs:
         entries = []
@@ -172,7 +201,12 @@ async def h_pools(plugin) -> dict:
             if entry is None:
                 continue
             if entry["id"] not in counts:
-                counts[entry["id"]] = plugin._store.count_portraits(entry["id"]) if plugin._store else 0
+                rows = plugin._store.list_portraits(entry["id"]) if plugin._store else []
+                counts[entry["id"]] = len(rows)
+                if rows:  # 卡片视图封面：首张立绘缩略（带缓存）
+                    thumbs[entry["id"]] = _thumb_cached(
+                        Path(plugin._data_dir) / rows[0]["file"], 160
+                    )
             entries.append(entry)
         out_packs.append({"pack": pack["pack"], "title": pack["title"],
                           "enabled": pack["enabled"], "entries": entries})
@@ -180,7 +214,8 @@ async def h_pools(plugin) -> dict:
     return ok({
         "packs": out_packs,
         "counts": counts,
-        "version": _version_of(plugin),
+        "thumbs": thumbs,
+        "version": _version_of(),
         "anima_ready": anima_ready,
         "quota": int(plugin._cfg("portraits_per_char", 5)),
         "allow_unverified": bool(plugin._cfg("allow_unverified", False)),
@@ -490,11 +525,13 @@ async def h_works(plugin) -> dict:
             w["total"] += 1
             if e["verified"]:
                 w["verified"] += 1
-            n = plugin._store.count_portraits(e["id"])
+            rows = plugin._store.list_portraits(e["id"])
+            n = len(rows)
             w["portrait_count"] += n
             w["characters"].append({
                 "id": e["id"], "name": e["name"], "tier": e["tier"],
                 "color": e["color"], "verified": e["verified"], "portraits": n,
+                "thumb": _thumb_cached(Path(plugin._data_dir) / rows[0]["file"], 160) if rows else None,
             })
     works = []
     for w in work_map.values():
@@ -505,13 +542,13 @@ async def h_works(plugin) -> dict:
             if rows:
                 full = Path(plugin._data_dir) / rows[0]["file"]
                 if full.is_file():
-                    cover = _thumb_data_url(str(full), 320)
+                    cover = _thumb_cached(full, 320)
                     if cover:
                         break
         w["cover"] = cover
         works.append(w)
     works.sort(key=lambda w: (-w["total"], w["series"]))
-    return ok({"works": works, "version": _version_of(plugin)})
+    return ok({"works": works, "version": _version_of()})
 
 
 # ---------- 配置（schema 白名单 + 类型校验，星语同款） ----------
@@ -567,7 +604,7 @@ async def h_config_get(plugin) -> dict:
             "default": default,
             "value": plugin._cfg(key, default),
         })
-    return ok({"items": items, "version": _version_of(plugin)})
+    return ok({"items": items, "version": _version_of()})
 
 
 async def h_config_set(plugin) -> dict:
