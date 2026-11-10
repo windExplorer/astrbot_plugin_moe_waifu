@@ -38,6 +38,7 @@
   .dropzone { border: 1.5px dashed rgba(160,120,150,.4); border-radius: 10px;
     padding: 12px; transition: background .15s ease, border-color .15s ease; }
   .dropzone.drag { background: rgba(214,51,132,.07); border-color: #d63384; }
+  .ref-selected { outline: 3px solid #d63384; outline-offset: -1px; }
   .drag-overlay { position: fixed; inset: 0; background: rgba(214,51,132,.10);
     border: 2.5px dashed #d63384; z-index: 9999; display: flex;
     align-items: center; justify-content: center; pointer-events: none; }
@@ -208,8 +209,10 @@
                             @click="doTry">开始试画</n-button>
                   <n-button v-if="tryOk && !tryEntryVerified" size="small" type="success"
                             @click="doMarkVerified">画对了，标记 verified</n-button>
-                  <n-button v-if="tryOk && !tryArchived" size="small"
-                            @click="doArchive">存入立绘库</n-button>
+                  <n-button v-if="tryOk && !tryArchived" size="small" type="success"
+                            @click="doArchive">✓ 确认，存入立绘库</n-button>
+                  <n-button v-if="tryOk" size="small" type="warning" secondary
+                            @click="discardTry">✗ 舍弃本次结果</n-button>
                   <n-button v-if="tryOk" size="small" type="info" secondary
                             @click="adoptTryParams">按本次参数保存到角色</n-button>
                 </n-space>
@@ -232,16 +235,37 @@
                        @drop.prevent="onDropTry($event)">
                     <n-space :wrap="true" size="small" align="center">
                       <n-input v-model:value="tryOverride.ref"
-                               placeholder="参考图 URL / 本地路径 / 上传或拖入（留空=随机用已绑定参考图）"
+                               placeholder="留空=按种子从下方参考图随机选一张；也可填 URL / 路径"
                                style="width: 340px;"></n-input>
                       <n-button size="small" :loading="uploading"
-                                @click="refFileInput && refFileInput.click()">上传参考图</n-button>
+                              @click="refFileInput && refFileInput.click()">上传参考图</n-button>
                       <n-input-number v-model:value="tryOverride.denoise" :step="0.05" :min="0.2"
                                       :max="0.95" placeholder="重绘强度"
                                       style="width: 150px;"></n-input-number>
                     </n-space>
-                    <div class="bind-tip">文生图画不出像的角色用这个：上传/拖入一张官方立绘（干净单人图），
-                      本次试画按参考图重绘；参考图留空且该角色已绑定参考图时，按种子随机选一张。</div>
+                    <div class="bind-tip">上传/拖入官方立绘（干净单人图），点缩略图选中为本次参考图；
+                      参考图留空时按种子从已绑定参考图里随机选一张（同种子同图）。</div>
+                  </div>
+                  <n-grid :cols="6" :x-gap="8" :y-gap="8" v-if="tryRefs.length > 0"
+                          style="margin-top: 10px;">
+                    <n-gi v-for="r in tryRefs" :key="r.path">
+                      <div class="gal-item" :class="{ 'ref-selected': tryOverride.ref === r.path }"
+                           @click="selectTryRef(r.path)">
+                        <img v-if="r.thumb" :src="r.thumb" alt="参考图">
+                        <div v-else class="gal-meta">文件丢失</div>
+                        <n-tag v-if="tryOverride.ref === r.path" class="gal-del" size="tiny"
+                               :bordered="false" type="success">本次</n-tag>
+                        <n-button class="gal-del" style="right: 58px;" size="tiny" quaternary
+                                  type="error" @click.stop="deleteTryRef(r)">
+                          {{ delArm === r.path ? "确认删" : "删" }}
+                        </n-button>
+                        <div class="gal-meta">{{ tryOverride.ref === r.path ? "本次参考" : "点击选用" }}</div>
+                      </div>
+                    </n-gi>
+                  </n-grid>
+                  <div class="bind-tip" v-if="tryRefsLoading">参考图加载中…</div>
+                  <div class="bind-tip" v-if="tryRefs.length === 0 && !tryRefsLoading">
+                    该角色还没有绑定参考图：上传/拖入后会自动绑定并存起来，之后随时选用。
                   </div>
                   <input type="file" accept="image/png,image/jpeg,image/webp"
                          style="display: none;" ref="refFileInput" @change="onRefFile">
@@ -1070,9 +1094,10 @@
             // 上传的参考图同步绑进该角色的参考图库（存起来，后续可指定/随机）
             apiPost("refs/bind", { id: tryEntry.value.id, path: (res && res.path) || "" })
               .then(function () { return loadAll(); })
+              .then(function () { return loadTryRefs(); })
               .catch(function () { /* 绑定失败不影响本次试画 */ });
           }
-          message.success("参考图已上传：" + ((res && res.rel) || ""));
+          message.success("参考图已上传并选用：" + ((res && res.rel) || ""));
         } catch (e) { /* 已提示 */ } finally {
           uploading.value = false;
           if (ev.target) ev.target.value = "";
@@ -1197,8 +1222,9 @@
       }
       async function doTry() {
         if (!tryCharId.value || tryRunning.value) return;
-        if (tryMode.value === "img2img" && !String(tryOverride.value.ref || "").trim()) {
-          message.error("图生图重绘需要参考图：先上传图片或填 URL / 本地路径");
+        if (tryMode.value === "img2img" && !String(tryOverride.value.ref || "").trim()
+            && tryRefs.value.length === 0) {
+          message.error("图生图重绘需要参考图：先上传/拖入一张，或给条目绑定参考图");
           return;
         }
         if (tryMode.value === "lora" && !String(tryOverride.value.loras || "").trim()) {
@@ -1249,6 +1275,49 @@
         } catch (err2) { /* 已提示 */ }
       }
       function backFromTry() { menu.value = cameFrom.value; }
+      function discardTry() {
+        // 舍弃本次结果：清预览，不存立绘库（萌绘侧原图保留在其图库，不影响我们）
+        tryPreview.value = "";
+        tryOk.value = false;
+        tryJobId.value = "";
+        tryArchived.value = false;
+        tryError.value = "已舍弃本次结果（未存入立绘库）";
+      }
+      // 参考图缩略墙（v0.5.3）：试画台直接展示/选用/增删该角色绑定的参考图
+      var tryRefs = Vue.ref([]);
+      var tryRefsLoading = Vue.ref(false);
+      function loadTryRefs() {
+        if (!tryCharId.value) { tryRefs.value = []; return; }
+        tryRefsLoading.value = true;
+        apiGet("refs/list", { id: tryCharId.value }).then(function (res) {
+          tryRefs.value = (res && res.items) || [];
+        }).catch(function () { tryRefs.value = []; }).finally(function () {
+          tryRefsLoading.value = false;
+        });
+      }
+      function selectTryRef(path) {
+        // 再点一次取消选中 → 回到按种子随机
+        tryOverride.value.ref = (tryOverride.value.ref === path) ? "" : path;
+      }
+      async function deleteTryRef(r) {
+        if (!armDelete(r.path)) return;
+        try {
+          var res = await apiPost("refs/unbind",
+            { id: tryCharId.value, path: r.path, delete_file: true });
+          if (tryOverride.value.ref === r.path) { tryOverride.value.ref = ""; }
+          message.success("已删除参考图" + (res && res.file_deleted ? "（文件已删）" : ""));
+          delArm.value = "";
+          await loadTryRefs();
+        } catch (e) { /* 已提示 */ }
+      }
+      Vue.watch(function () {
+        return [tryCharId.value, tryMode.value];
+      }, function (v) {
+        if (v[0] && v[1] === "img2img") {
+          tryOverride.value.ref = "";   // 换角色/换模式回随机，避免残留别的角色的参考图
+          loadTryRefs();
+        } else { tryRefs.value = []; }
+      });
       async function doMarkVerified() {
         if (!tryEntry.value) return;
         try {
@@ -1510,6 +1579,8 @@
         tryMode: tryMode, tryOverride: tryOverride, tryElapsed: tryElapsed,
         uploading: uploading, refFileInput: refFileInput, onRefFile: onRefFile,
         cancelTryWait: cancelTryWait, adoptTryParams: adoptTryParams, backFromTry: backFromTry,
+        tryRefs: tryRefs, tryRefsLoading: tryRefsLoading, selectTryRef: selectTryRef,
+        deleteTryRef: deleteTryRef, discardTry: discardTry,
         tryDrag: tryDrag, onDropTry: onDropTry,
         works: works, worksLoading: worksLoading, currentWork: currentWork,
         openWork: openWork, backWorks: backWorks, gotoTry: gotoTry, openEditById: openEditById,

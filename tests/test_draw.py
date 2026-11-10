@@ -86,4 +86,10 @@ check("无覆盖=原样", eff3["strategy"]["type"] == "base")
 eff4 = draw.effective_entry(base_entry, {"strategy_type": "lora", "loras": ["m:0.8", " "]})
 check("lora 覆盖", eff4["strategy"]["loras"] == ["m:0.8"])
 
+# _first_sentence（v0.5.3：萌绘失败文本取首句，不吐提示语尾巴）
+check("失败文本取首句", draw._first_sentence(
+    "本次生图失败。请用一句话简短向用户说明生成遇到问题即可，不要复述本提示。") == "本次生图失败")
+check("空文本兜底", draw._first_sentence("") == "萌绘未返回结果")
+check("无句号截断限长", len(draw._first_sentence("x" * 200)) <= 80)
+
 print("test_draw: ALL OK")

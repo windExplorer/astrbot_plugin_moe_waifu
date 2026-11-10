@@ -36,6 +36,16 @@ _PROMPT_BASE = "1girl, solo, best quality, looking at viewer"
 _STATUS_NO_ANIMA = "skipped_no_anima"  # 界面文案「萌绘未安装」；历史落库枚举
 
 
+def _first_sentence(raw: str, limit: int = 80) -> str:
+    """取萌绘失败文本的首句（萌绘失败时会附一句给 LLM 的提示语，别原样吐给用户）。"""
+    text = str(raw or "").strip()
+    if not text:
+        return "萌绘未返回结果"
+    m = re.split(r"[。\n]", text)
+    first = (m[0] if m else text).strip()
+    return first[:limit] if first else text[:limit]
+
+
 def parse_draw_response(raw) -> list:
     """解析萌绘 comfyui_draw/img2img 的返回文本 → 本地图片路径列表。
 
@@ -190,7 +200,11 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int, even
 
     paths = parse_draw_response(raw)
     if not paths:
-        return None, "error", f"萌绘未返回图片路径: {str(raw)[:150]}", duration
+        # 萌绘失败时的返回是一句话（如「本次生图失败。请用一句话简短…」），
+        # 只取首句 + 提示看萌绘日志，不再把整段提示语拼进错误里
+        return None, "error", (
+            f"萌绘侧生成失败：{_first_sentence(raw)}（请检查所选图生图工作流与"
+            "参考图是否匹配，详见萌绘日志）"), duration
     first = Path(paths[0])
     if not first.exists():
         return None, "error", f"萌绘返回的路径不存在: {paths[0]}", duration
