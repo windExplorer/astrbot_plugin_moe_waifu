@@ -2,6 +2,25 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.3.6 (2026-11-11)
+
+图生图能力判定改按新版萌绘逻辑（版本 v0.3.5 -> v0.3.6）。
+
+- **背景（用户指正）**：「你确定吗，翻一下萌绘的代码，新版好像不是根据这个来的」。
+  翻码证实：新版工作流（base_id 引用基础工作流库）节点定位**以解析为准**，
+  配置条目上的 image_node 字段不参与（schema hint 明言留空自动查找 LoadImage）；
+  而 `comfyui_workflows` 的 [支持图生图] 标记只看手填 image_node——对新版必然失真，
+  这正是「图生图列表缺少图生图的」的根因。
+- **新判定**（`draw.workflow_img2img_capable`，用户口径）：
+  ① 绑定了基础工作流 → 查 `anima.workflow_store` 的解析注记里有没有图节点；
+  ② 未绑定 → 名字带「图生图」；③ 手填 image_node 亦可用；
+  绑定了但注记查询失败按可用兜底（不误伤）。
+- **实现**：不再解析 `comfyui_workflows` 文本（连同 v0.3.4 的标记行解析一并废弃）；
+  `/workflows` 改为经 `context.get_registered_star("astrbot_plugin_comfyui_anima").star_cls`
+  直接读萌绘配置的 workflows 条目与 `workflow_store`（4.29.4 实测接口）。
+  严格互斥下拉口径不变：文生图只列判定为纯文生图的，图生图只列可图生图的。
+- `parse_workflow_list` 及其测试移除，替换为能力判定的六个用例。
+
 ## v0.3.5 (2026-11-11)
 
 工作流下拉改严格互斥口径（版本 v0.3.4 -> v0.3.5）。

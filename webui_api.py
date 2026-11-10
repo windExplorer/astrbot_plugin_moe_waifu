@@ -552,23 +552,49 @@ async def h_works(plugin) -> dict:
 
 
 async def h_workflows(plugin) -> dict:
-    """转发萌绘 comfyui_workflows：列出已配置工作流 + [支持图生图]/【Anima】标记。
+    """直接读萌绘配置的工作流条目，按用户口径计算图生图能力（v0.3.6）。
 
-    工具签名只收 event（不收 source/external 等 kwargs），传桩事件即可；
-    解析失败/超时不阻塞工坊——前端下拉退化为手动输入。
+    不再解析 comfyui_workflows 文本——其 [支持图生图] 标记只看手填 image_node，
+    新版工作流（base_id 引用基础工作流库）节点以解析为准、配置字段不参与，
+    标记必然失真（用户指出的「新版不是根据这个来的」）。
+    现逻辑：绑定基础工作流 → 查 anima.workflow_store 的解析注记里有没有图节点；
+    未绑定 → 名字带「图生图」；手填 image_node 亦可用。
+    萌绘实例经 context.get_registered_star("astrbot_plugin_comfyui_anima").star_cls
+    获取（4.29.4 实测接口），其 config/workflow_store 均为插件自身属性。
     """
-    handler = draw._get_tool_handler(plugin.context, "comfyui_workflows")
-    if handler is None:
-        return ok({"available": False, "workflows": [], "reason": "萌绘未安装"})
+    meta = None
     try:
-        raw = await asyncio.wait_for(handler(_synthetic_event()), timeout=15)
-    except asyncio.TimeoutError:
-        return ok({"available": False, "workflows": [], "reason": "查询工作流超时"})
-    except Exception as exc:
-        return ok({"available": False, "workflows": [], "reason": f"{exc.__class__.__name__}: {exc}"[:150]})
-    workflows = draw.parse_workflow_list(raw)
-    reason = "" if workflows else "萌绘侧未配置任何工作流"
-    return ok({"available": bool(workflows), "workflows": workflows, "reason": reason})
+        meta = plugin.context.get_registered_star("astrbot_plugin_comfyui_anima")
+    except Exception:
+        meta = None
+    anima = getattr(meta, "star_cls", None) if meta is not None else None
+    cfg = getattr(anima, "config", None)
+    raw = cfg.get("workflows") if isinstance(cfg, dict) else None
+    if not isinstance(raw, list) or not raw:
+        return ok({"available": False, "workflows": [],
+                   "reason": "萌绘未安装或未配置任何工作流"})
+    store = getattr(anima, "workflow_store", None)
+    workflows = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            continue
+        base_roles = None
+        base_id = str(entry.get("base_id") or "").strip()
+        if base_id and store is not None:
+            try:
+                rec = store.get(int(base_id))
+                base_roles = (rec or {}).get("roles") or {}
+            except Exception:
+                base_roles = None  # 查询失败按可用兜底（见 draw.workflow_img2img_capable）
+        workflows.append({
+            "name": name,
+            "img2img": draw.workflow_img2img_capable(entry, base_roles),
+            "anima": bool(entry.get("is_anima", True)),
+        })
+    return ok({"available": bool(workflows), "workflows": workflows, "reason": ""})
 
 
 # ---------- 配置（schema 白名单 + 类型校验，星语同款） ----------

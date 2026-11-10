@@ -191,32 +191,25 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int, even
     return str(first), "ok", "", duration
 
 
-def parse_workflow_list(raw) -> list:
-    """解析萌绘 comfyui_workflows 的返回文本 → [{name, img2img, anima}]。
+def workflow_img2img_capable(entry: dict, base_roles: dict | None = None) -> bool:
+    """判断工作流能否图生图（用户口径 v0.3.6，替代 comfyui_workflows 的失真标记）。
 
-    只认同时带「- 」前缀和 [支持图生图]/[仅文生图] 标记的行——返回末尾的
-    「默认工作流：」小节也是 - 开头但没有标记，必须排除（v0.3.3 曾混进下拉，
-    被用户指出筛选错乱）；「· 描述/用法说明」等缩进说明行天然跳过。
+    新版萌绘（工作流绑定了基础工作流库，base_id 非空）节点定位「以解析为准」，
+    配置条目上的 image_node 字段不参与——所以能不能图生图要看**基础工作流的
+    解析注记**里有没有图节点（base_roles["image_node"]，由调用方从
+    anima.workflow_store 查询传入）；
+    未绑定基础工作流的旧版工作流：名字里带「图生图」即视为图生图专用；
+    手填 image_node 的旧配置显式可用。
+    绑定了但解析注记查询失败（base_roles=None）时按可用兜底，不误伤。
     """
-    out = []
-    for line in str(raw or "").splitlines():
-        line = line.strip()
-        if not line.startswith("- "):
-            continue
-        rest = line[2:]
-        img2img = "支持图生图" in rest
-        txt_only = "仅文生图" in rest
-        if not img2img and not txt_only:
-            continue  # 「默认工作流」等无标记行
-        name = rest.split(" [")[0].strip()
-        if not name or name == "(未命名)":
-            continue
-        out.append({
-            "name": name,
-            "img2img": img2img,
-            "anima": "【Anima】" in rest,
-        })
-    return out
+    if str(entry.get("image_node") or "").strip():
+        return True
+    base_id = str(entry.get("base_id") or "").strip()
+    if base_id:
+        if base_roles is None:
+            return True
+        return bool(str(base_roles.get("image_node") or "").strip())
+    return "图生图" in str(entry.get("name") or "")
 
 
 def archive_portrait(src: str, data_dir: Path, char_id: str, date_str: str,

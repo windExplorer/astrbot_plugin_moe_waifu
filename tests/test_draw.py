@@ -54,22 +54,19 @@ with tempfile.TemporaryDirectory() as td:
     check("归档文件存在且内容一致", dest.is_file() and dest.read_bytes() == b"PNGDATA")
     check("归档路径形状", rel == "portraits/miku/2026-11-11_000_12345.png")
 
-# parse_workflow_list（v0.3.4：默认工作流小节必须排除）
-ANIMA_RAW = """已配置的工作流列表：
-- 动漫-通用 [支持图生图] 【Anima】 [底模 NoobAI]
-  · 描述：主力动漫工作流（这行说明里也提到图生图三个字，不能被误当条目）
-- 动漫-文生图专用 [仅文生图] 【Anima】
-- 真人-通用 [支持图生图]
-默认工作流：
-- 动漫文生图: 动漫-通用
-- 真人图生图: 真人-通用
-"""
-wf = draw.parse_workflow_list(ANIMA_RAW)
-check("解析出 3 条工作流", len(wf) == 3)
-check("默认工作流小节被排除", all("动漫文生图:" not in w["name"] for w in wf))
-check("图生图支持标记", [w["name"] for w in wf if w["img2img"]] == ["动漫-通用", "真人-通用"])
-check("Anima 标记", [w["name"] for w in wf if w["anima"]] == ["动漫-通用", "动漫-文生图专用"])
-check("说明行不误入", all("描述" not in w["name"] for w in wf))
-check("空输入", draw.parse_workflow_list("") == [])
+# workflow_img2img_capable（v0.3.6 用户口径：绑定基础工作流以解析注记为准，
+# 未绑定看名字，手填 image_node 亦可用）
+check("新版绑定+解析有图节点", draw.workflow_img2img_capable(
+    {"base_id": "12"}, {"image_node": "12"}) is True)
+check("新版绑定+解析无图节点", draw.workflow_img2img_capable(
+    {"base_id": "12"}, {"image_node": ""}) is False)
+check("新版绑定+注记查询失败兜底可用", draw.workflow_img2img_capable(
+    {"base_id": "12"}, None) is True)
+check("未绑定+名字带图生图", draw.workflow_img2img_capable(
+    {"name": "动漫图生图专用"}) is True)
+check("未绑定+手填 image_node", draw.workflow_img2img_capable(
+    {"name": "moe", "image_node": "12"}) is True)
+check("未绑定纯文生图", draw.workflow_img2img_capable(
+    {"name": "动漫文生图"}) is False)
 
 print("test_draw: ALL OK")
