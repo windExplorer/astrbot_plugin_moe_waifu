@@ -5,30 +5,44 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>萌萌今日老婆 · 工坊</title>
 <style>
-  html, body { margin: 0; padding: 0; height: 100%; background: transparent; }
+  html, body { margin: 0; padding: 0; height: 100%; background: #faf7fb; }
   [v-cloak] { display: none; }
-  .waifu-logo { font-weight: 700; font-size: 16px; padding: 14px 18px 6px; color: #d63384; }
-  .waifu-sub { font-size: 11px; padding: 0 18px 10px; opacity: .6; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: rgba(140,120,140,.28); border-radius: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  .waifu-logo { font-weight: 700; font-size: 17px; padding: 16px 18px 4px;
+    background: linear-gradient(120deg, #d63384, #9b72c9);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    width: fit-content; }
+  .waifu-sub { font-size: 11px; padding: 0 18px 12px; opacity: .55; letter-spacing: 1px; }
   .entry-name { font-weight: 600; }
   .entry-id { font-size: 11px; opacity: .55; }
-  .try-img { max-width: 100%; max-height: 560px; border-radius: 10px; display: block; }
-  .gal-item { position: relative; border-radius: 10px; overflow: hidden; background: rgba(128,128,128,.12); }
+  .try-img { max-width: 100%; max-height: 560px; border-radius: 10px; display: block;
+    box-shadow: 0 4px 18px rgba(120,80,120,.12); }
+  .gal-item { position: relative; border-radius: 10px; overflow: hidden;
+    background: rgba(128,128,128,.12);
+    transition: transform .15s ease, box-shadow .15s ease; }
+  .gal-item:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(120,80,120,.14); }
   .gal-item img { width: 100%; height: 150px; object-fit: cover; display: block; }
   .gal-meta { font-size: 11px; opacity: .65; padding: 4px 8px; }
   .gal-del { position: absolute; top: 6px; right: 6px; }
-  .bind-tip { font-size: 12px; opacity: .65; margin-top: 8px; }
-  .work-card { cursor: pointer; }
+  .bind-tip { font-size: 12px; opacity: .62; margin-top: 8px; }
+  .work-card { cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; }
+  .work-card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(150,90,130,.14); }
   .work-cover { height: 140px; border-radius: 8px; overflow: hidden; display: flex;
     align-items: center; justify-content: center; }
   .work-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .work-initial { font-size: 36px; color: #fff; opacity: .9; font-weight: 700;
     letter-spacing: 2px; }
   .cover-switch { position: absolute; top: 6px; right: 6px; }
+  .dropzone { border: 1.5px dashed rgba(160,120,150,.4); border-radius: 10px;
+    padding: 12px; transition: background .15s ease, border-color .15s ease; }
+  .dropzone.drag { background: rgba(214,51,132,.07); border-color: #d63384; }
 </style>
 </head>
 <body>
 <div id="app" v-cloak>
-  <n-config-provider :theme="theme">
+  <n-config-provider :theme="theme" :theme-overrides="themeOverrides">
     <n-layout has-sider style="height: 100vh;">
       <n-layout-sider bordered :width="176">
         <div class="waifu-logo">♥ 萌萌今日老婆</div>
@@ -543,6 +557,26 @@
   var app = Vue.createApp({
     setup: function () {
       var theme = bridgeCtx().isDark ? NS.darkTheme : null;
+
+      // 全局主题（品牌色萌萌粉 + 圆角；暗色跟随 Dashboard）
+      var isDark = !!bridgeCtx().isDark;
+      var theme = isDark ? NS.darkTheme : null;
+      var themeOverrides = (function (dark) {
+        var o = {
+          common: {
+            primaryColor: dark ? "#e879b5" : "#d63384",
+            primaryColorHover: dark ? "#f093c4" : "#e04f97",
+            primaryColorPressed: dark ? "#d75ba6" : "#c22a75",
+            primaryColorSuppl: dark ? "#f093c4" : "#e04f97",
+            borderRadius: "6px"
+          }
+        };
+        if (!dark) {
+          o.Layout = { color: "#faf7fb", siderColor: "#ffffff" };
+          o.Card = { borderRadius: "10px" };
+        }
+        return o;
+      })(isDark);
 
       // ---- 全局 ----
       var menu = Vue.ref("chars");
@@ -1342,7 +1376,8 @@
       });
 
       return {
-        theme: theme, menu: menu, menuOpts: menuOpts, onMenu: onMenu,
+        theme: theme, themeOverrides: themeOverrides,
+        menu: menu, menuOpts: menuOpts, onMenu: onMenu,
         meta: meta, loadingAll: loadingAll, loadAll: loadAll, rowKey: rowKey,
         charsMode: charsMode, cardPage: cardPage, cardPageSize: cardPageSize,
         pagedEntries: pagedEntries, gotoTryFromChars: gotoTryFromChars,
