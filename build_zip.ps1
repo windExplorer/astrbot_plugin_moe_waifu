@@ -58,14 +58,16 @@ if (Test-Path $zipPath) {
 }
 
 # --- files that go into the release ---
-# Keep this in sync with main.py's reload list (store / card / pool / draw).
+# Keep this in sync with main.py's reload list (store / card / pool / draw / webui_api).
 $includeList = @(
     "main.py",
     "pool.py",
     "draw.py",
     "card.py",
     "store.py",
+    "webui_api.py",
     "seed_pool.json",
+    "pages",
     "_conf_schema.json",
     "metadata.yaml",
     "README.md",

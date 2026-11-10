@@ -214,6 +214,15 @@ class Store:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_portraits_all(self) -> list:
+        """全部立绘行（工坊孤立图发现用）。"""
+        rows = self._conn.execute("SELECT * FROM portraits ORDER BY char_id, seq ASC").fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_portrait(self, file: str) -> None:
+        self._conn.execute("DELETE FROM portraits WHERE file=?", (file,))
+        self._conn.commit()
+
     # ---------- draw_jobs ----------
 
     def log_job(self, char_id: str, date: str, mode: str, status: str,

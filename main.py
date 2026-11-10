@@ -51,6 +51,8 @@ class MoeWaifuPlugin(Star):
         self._data_dir = None
         # 同一 (uid,date) 只允许一条召唤流程在飞：防连点触发重复生图/重复计数
         self._inflight: set = set()
+        # 工坊后台试画/补图 job（webui_api 用）：job_id -> dict
+        self._jobs: dict = {}
         self._reload_modules()
 
     # ---------- 生命周期 ----------
@@ -59,7 +61,7 @@ class MoeWaifuPlugin(Star):
         """热重载自研子模块（依赖序）。main 里全部走模块属性访问（pool.xxx），
         reload 后自动生效，无需重新绑定函数对象。"""
         pkg = __package__
-        for name in ("store", "card", "pool", "draw"):
+        for name in ("store", "card", "pool", "draw", "webui_api"):
             mod = sys.modules.get(f"{pkg}.{name}")
             if mod is not None:
                 try:
@@ -74,6 +76,11 @@ class MoeWaifuPlugin(Star):
             bundled = Path(__file__).resolve().parent / "seed_pool.json"
             pool.install_seed_pool(self._data_dir / "pools", bundled, logger)
             self._store = store.Store(self._data_dir / "waifu.db")
+            try:  # 角色库工坊（Dashboard 登录墙内，仅管理员使用）
+                from . import webui_api
+                webui_api.register(self)
+            except Exception:
+                logger.error(f"[{PLUGIN_NAME}] 工坊 WebUI 注册失败\n{traceback.format_exc()}")
             try:  # 清理过期卡图（只删渲染产物，不动 draws 行与立绘库）
                 removed = await asyncio.to_thread(self._prune_cards, self._data_dir)
                 if removed:
@@ -279,60 +286,14 @@ class MoeWaifuPlugin(Star):
         yield event.plain_result(
             "♥ 萌萌今日老婆 ♥\n"
             "/今日老婆（别名 /老婆）：抽今天的老婆，萌绘立绘卡片，一人一天一位\n"
-            "/换老婆：重新抽一位（受「每日换老婆次数」限制）\n"
-            "/老婆试画 <角色id或名字>：管理员试画，不入库\n\n"
+            "/换老婆：重新抽一位（受「每日换老婆次数」限制）\n\n"
+            "角色库管理 / 试画 / 立绘库维护都在 AstrBot Dashboard 的插件 Page「工坊」里做"
+            "（仅管理员）。\n"
             "本插件依赖萌绘（astrbot_plugin_comfyui_anima v7.7.58+）生成立绘，"
             "需要生图而萌绘不可用时会报错不出卡。\n"
             "立绘会沉淀进「立绘库」：每角色攒满配额后直接从库里取图，不再消耗绘图算力。\n"
             "角色库：data/plugin_data/astrbot_plugin_moe_waifu/pools/（一卷一 JSON）"
         )
-
-    @filter.command("老婆试画")
-    @filter.permission_type(filter.PermissionType.ADMIN)
-    async def try_draw_cmd(self, event: AstrMessageEvent, ident: str = ""):
-        """管理员试画：按角色策略生成立绘并发原图（不入库，PRD M1 过渡端点）。"""
-        if self._data_dir is None:
-            yield event.plain_result("插件未初始化完成，稍后再试～")
-            return
-        ident = str(ident or "").strip()
-        if not ident:
-            yield event.plain_result("用法：/老婆试画 <角色id或名字>，如 /老婆试画 初音未来")
-            return
-        packs = self._load_packs()
-        entry = pool.find_entry(packs, ident)
-        if entry is None:
-            yield event.plain_result(f"角色库里找不到「{ident}」（可用 id 或名字）")
-            return
-        date = self._today()
-        salt = str(self._cfg("salt", "moe-waifu"))
-        char_id = entry["id"]
-        today_row = self._store.portrait_by_date(char_id, date)
-        if today_row is not None:
-            src = self._data_dir / today_row["file"]
-            if src.is_file():
-                yield event.chain_result([
-                    Image.fromFileSystem(str(src)),
-                    Plain(f"「{pool.entry_label(entry)}」今天已经生成过这张（种子决定论），"
-                          "群聊抽到她时同样用这张"),
-                ])
-                return
-        seq = self._store.count_portraits(char_id)
-        seed_int = pool.portrait_seed_int(char_id, date, seq, salt)
-        if bool(self._cfg("announce_enabled", True)):
-            await self._send_plain(event, f"♥ 试画「{entry['name']}」中，请稍候……")
-        src, status, err, dur = await draw.generate_portrait(
-            self.context, self._draw_cfg(), entry, seed_int, event
-        )
-        self._store.log_job(char_id, date, "generated", status, str(event.get_sender_id() or ""),
-                            entry["strategy_type"], seed_int, err, dur, src or "")
-        if src is None:
-            yield event.plain_result(self._draw_error_text(status, err))
-            return
-        yield event.chain_result([
-            Image.fromFileSystem(src),
-            Plain(f"「{pool.entry_label(entry)}」试画成功（未入库）。"
-                  "群聊里抽到她时会自动存入立绘库；画错请改 tags/策略后重试"),
-        ])
 
     # ---------- 核心产出 ----------
 

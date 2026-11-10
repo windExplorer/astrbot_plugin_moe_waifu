@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>萌萌今日老婆 · 工坊</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: transparent; }
+  [v-cloak] { display: none; }
+  .waifu-logo { font-weight: 700; font-size: 16px; padding: 14px 18px 6px; color: #d63384; }
+  .waifu-sub { font-size: 11px; padding: 0 18px 10px; opacity: .6; }
+  .entry-name { font-weight: 600; }
+  .entry-id { font-size: 11px; opacity: .55; }
+  .try-img { max-width: 100%; max-height: 560px; border-radius: 10px; display: block; }
+  .gal-item { position: relative; border-radius: 10px; overflow: hidden; background: rgba(128,128,128,.12); }
+  .gal-item img { width: 100%; height: 150px; object-fit: cover; display: block; }
+  .gal-meta { font-size: 11px; opacity: .65; padding: 4px 8px; }
+  .gal-del { position: absolute; top: 6px; right: 6px; }
+  .bind-tip { font-size: 12px; opacity: .65; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div id="app" v-cloak>
+  <n-config-provider :theme="theme">
+    <n-layout has-sider style="height: 100vh;">
+      <n-layout-sider bordered :width="176">
+        <div class="waifu-logo">♥ 萌萌今日老婆</div>
+        <div class="waifu-sub">角色库工坊</div>
+        <n-menu :value="menu" :options="menuOpts" @update:value="onMenu"></n-menu>
+      </n-layout-sider>
+      <n-layout-content content-style="padding: 18px 22px;">
+        <n-space vertical size="large">
+          <n-space align="center">
+            <n-tag :bordered="false" type="info" size="small">v{{ meta.version || "?" }}</n-tag>
+            <n-tag :bordered="false" size="small" :type="meta.anima_ready ? 'success' : 'error'">
+              {{ meta.anima_ready ? "萌绘已就绪" : "萌绘未安装/未启用" }}
+            </n-tag>
+            <n-tag :bordered="false" size="small">立绘配额 {{ meta.quota }}/角色</n-tag>
+            <n-tag v-if="bridgeMissing" :bordered="false" type="warning" size="small">
+              未检测到 AstrBot 桥：请在 Dashboard 内打开本页
+            </n-tag>
+          </n-space>
+
+          <!-- ============ 角色库 ============ -->
+          <div v-if="menu === 'chars'">
+            <n-space align="center" :wrap="true">
+              <n-select v-model:value="filterPack" :options="packOpts" size="small"
+                        style="width: 140px;"></n-select>
+              <n-select v-model:value="filterCat" :options="catOpts" size="small"
+                        style="width: 120px;"></n-select>
+              <n-select v-model:value="filterVerified" :options="verifiedOpts" size="small"
+                        style="width: 120px;"></n-select>
+              <n-input v-model:value="keyword" placeholder="搜 id / 名字 / 作品" size="small"
+                       clearable style="width: 200px;"></n-input>
+              <n-button type="primary" size="small" @click="openNew">新增角色</n-button>
+              <n-button size="small" :loading="loadingAll" @click="loadAll">刷新</n-button>
+            </n-space>
+            <n-space :wrap="true">
+              <n-tag v-for="p in meta.packs" :key="p.pack" size="small"
+                     :type="p.enabled ? 'default' : 'warning'" :bordered="false">
+                {{ p.title }} · {{ p.entries.length }} 条
+                <n-button quaternary size="tiny" style="margin-left: 6px;"
+                          @click="togglePack(p)">{{ p.enabled ? "停用" : "启用" }}</n-button>
+              </n-tag>
+            </n-space>
+            <n-data-table :columns="entryCols" :data="filteredEntries" :row-key="rowKey"
+                          :pagination="{ pageSize: 20 }" size="small"></n-data-table>
+          </div>
+
+          <!-- ============ 试画台 ============ -->
+          <div v-if="menu === 'try'">
+            <n-card size="small" :bordered="true">
+              <n-space vertical size="medium">
+                <n-space align="center" :wrap="true">
+                  <n-select v-model:value="tryCharId" :options="charOpts" filterable
+                            placeholder="选择要试画的角色" style="width: 320px;"></n-select>
+                  <n-button type="primary" :loading="tryRunning" :disabled="!tryCharId"
+                            @click="doTry">开始试画</n-button>
+                  <n-button v-if="tryOk && !tryEntryVerified" size="small" type="success"
+                            @click="doMarkVerified">画对了，标记 verified</n-button>
+                  <n-button v-if="tryOk && !tryArchived" size="small"
+                            @click="doArchive">存入立绘库</n-button>
+                </n-space>
+                <div v-if="tryEntry">
+                  <n-space size="small" :wrap="true" style="margin-bottom: 8px;">
+                    <n-tag size="small" :bordered="false">{{ catLabel(tryEntry.category) }}</n-tag>
+                    <n-tag v-if="tryEntry.tier" size="small" :bordered="false">{{ tryEntry.tier }}</n-tag>
+                    <n-tag size="small" :bordered="false" :type="tryEntry.verified ? 'success' : 'warning'">
+                      {{ tryEntry.verified ? "已验证" : "未验证" }}
+                    </n-tag>
+                    <n-tag size="small" :bordered="false">策略 {{ stratLabel(tryEntry) }}</n-tag>
+                    <n-tag size="small" :bordered="false">立绘 {{ portraitCount(tryEntry.id) }}/{{ meta.quota }}</n-tag>
+                  </n-space>
+                  <div class="bind-tip">tags：{{ tryEntry.tags_en }}</div>
+                </div>
+                <n-alert v-if="tryError" type="error" :bordered="false">{{ tryError }}</n-alert>
+                <n-spin v-if="tryRunning" size="small">萌绘生成中（20~120 秒），可去别的页签，回来仍会更新…</n-spin>
+                <img v-if="tryPreview" class="try-img" :src="tryPreview" alt="试画结果">
+                <div v-if="tryOk" class="bind-tip">
+                  同角色同日同序号的种子恒定；改 tags / 策略保存后重新试画会出新图。
+                  满意后「标记 verified」参与群内抽卡、「存入立绘库」提前沉淀（补图不占当日配额逻辑）。
+                </div>
+              </n-space>
+            </n-card>
+          </div>
+
+          <!-- ============ 立绘库 ============ -->
+          <div v-if="menu === 'gallery'">
+            <n-space align="center" :wrap="true">
+              <n-select v-model:value="galCharId" :options="galCharOpts" filterable
+                        placeholder="选择角色（按立绘数）" style="width: 300px;"></n-select>
+              <n-button size="small" type="primary" :loading="refillRunning" :disabled="!galCharId"
+                        @click="doRefill">补一张</n-button>
+              <n-button size="small" :loading="loadingGal" @click="loadGallery">刷新</n-button>
+            </n-space>
+            <n-alert v-if="refillError" type="error" :bordered="false">{{ refillError }}</n-alert>
+            <n-spin v-if="refillRunning" size="small">萌绘生成中（20~120 秒）…</n-spin>
+            <n-empty v-if="!galLoading && galItems.length === 0"
+                     description="该角色还没有立绘：去试画台试一张，或点「补一张」"></n-empty>
+            <n-grid :cols="5" :x-gap="10" :y-gap="10" v-if="galItems.length > 0">
+              <n-gi v-for="it in galItems" :key="it.file">
+                <div class="gal-item">
+                  <img v-if="it.thumb" :src="it.thumb" alt="立绘缩略">
+                  <div v-else class="gal-meta">文件丢失</div>
+                  <n-button class="gal-del" size="tiny" type="error" quaternary
+                            @click="doDeletePortrait(it)">
+                    {{ delArm === it.file ? "确认删除" : "删除" }}
+                  </n-button>
+                  <div class="gal-meta">#{{ it.seq }} · {{ it.date }} · seed {{ it.seed }}</div>
+                </div>
+              </n-gi>
+            </n-grid>
+          </div>
+
+          <!-- ============ 分群绑定 ============ -->
+          <div v-if="menu === 'bind'">
+            <n-card size="small" :bordered="true">
+              <n-space vertical size="medium">
+                <n-input v-model:value="bindText" type="textarea" :rows="8"
+                         placeholder="每行一条：群号=卷名,卷名&#10;例如：123456=anime,game"></n-input>
+                <n-space size="small" :wrap="true" v-if="parsedBind.length > 0">
+                  <n-tag v-for="g in parsedBind" :key="g.gid" size="small" :bordered="false">
+                    {{ g.gid }} ← {{ g.packs.join(", ") }}
+                  </n-tag>
+                </n-space>
+                <div class="bind-tip">
+                  只在「该群绑定卷 ∩ verified」里抽；未列出的群用全部启用卷。
+                  卷名对应 pools/ 下的 pack 字段。保存即时生效（写插件配置）。
+                </div>
+                <n-space>
+                  <n-button type="primary" :loading="bindSaving" @click="doSaveBind">保存</n-button>
+                </n-space>
+              </n-space>
+            </n-card>
+          </div>
+        </n-space>
+      </n-layout-content>
+    </n-layout>
+
+    <!-- ============ 编辑抽屉（新增/编辑角色） ============ -->
+    <n-drawer v-model:show="showDrawer" :width="540">
+      <n-drawer-content :title="drawerTitle" closable>
+        <n-space vertical size="medium">
+          <n-grid :cols="2" :x-gap="10">
+            <n-gi>
+              <n-input v-model:value="form.id" :disabled="!isNew" placeholder="id（英文唯一标识）"></n-input>
+            </n-gi>
+            <n-gi>
+              <n-select v-model:value="form.pack" :options="drawerPackOpts"
+                        placeholder="所在卷"></n-select>
+            </n-gi>
+          </n-grid>
+          <n-grid :cols="2" :x-gap="10">
+            <n-gi>
+              <n-input v-model:value="form.name" placeholder="角色名（必填）"></n-input>
+            </n-gi>
+            <n-gi>
+              <n-input v-model:value="form.series" placeholder="作品名"></n-input>
+            </n-gi>
+          </n-grid>
+          <n-grid :cols="3" :x-gap="10">
+            <n-gi>
+              <n-select v-model:value="form.category" :options="catOpts"></n-select>
+            </n-gi>
+            <n-gi>
+              <n-select v-model:value="form.tier" :options="tierOpts"></n-select>
+            </n-gi>
+            <n-gi>
+              <n-color-picker v-model:value="form.color" :show-alpha="false"
+                              :modes="['hex']" :swatches="['#39C5BB','#F2A7C3','#9B72C9','#C94F3D','#6E8FBF']"></n-color-picker>
+            </n-gi>
+          </n-grid>
+          <n-space align="center">
+            <span style="font-size:13px;">画法策略：</span>
+            <n-radio-group v-model:value="form.strategy_type">
+              <n-radio-button value="base">base 直出</n-radio-button>
+              <n-radio-button value="lora">lora</n-radio-button>
+              <n-radio-button value="img2img">img2img 参考图</n-radio-button>
+            </n-radio-group>
+          </n-space>
+          <n-input v-if="form.strategy_type === 'lora'" v-model:value="form.strategy_loras"
+                   type="textarea" :rows="2"
+                   placeholder="LoRA 名:权重，每行一个，如 miku_char_v2:0.8（须已在萌绘/ComfyUI 侧安装）"></n-input>
+          <div v-if="form.strategy_type === 'img2img'">
+            <n-input v-model:value="form.strategy_ref"
+                     placeholder="参考图 URL 或本地路径（干净的官方单人立绘）"></n-input>
+            <n-input v-model:value="form.strategy_img2img_workflow"
+                     placeholder="图生图工作流名（可留空用萌绘默认）"></n-input>
+          </div>
+          <n-input v-model:value="form.tags_en" type="textarea" :rows="4"
+                   placeholder="英文 danbooru 角色 tag（必填）。角色 tag + 系列 tag + 稳定外观特征；括号写成 \\( \\) 转义，如 rem \\(re:zero\\)"></n-input>
+          <n-input v-model:value="form.quote" placeholder="一句角色印象语（可选，显示在卡片上）"></n-input>
+          <n-space align="center">
+            <n-switch v-model:value="form.verified"></n-switch>
+            <span style="font-size:13px;">verified：画对验证过，参与群内抽卡</span>
+          </n-space>
+          <n-space>
+            <n-button type="primary" :loading="saving" @click="saveForm">保存</n-button>
+            <n-button @click="showDrawer = false">取消</n-button>
+          </n-space>
+        </n-space>
+      </n-drawer-content>
+    </n-drawer>
+  </n-config-provider>
+</div>
+
+<script src="assets/vue.global.prod.js"></script>
+<script src="assets/naive-ui.min.js"></script>
+<script>
+/* 萌萌今日老婆 · 角色库工坊（单文件 in-DOM Vue3 + NaiveUI，box member_panel 同款形态）。
+   模板纪律（踩过的坑）：自定义元素禁止自闭合；v-else-if 必须是相邻兄弟；
+   setup() 里模板用到的每一个绑定都必须 return（漏一个整页白屏）。 */
+(function () {
+  var NS = naive;
+  var message = NS.createDiscreteApi(["message"]).message;
+  var h = Vue.h;
+
+  // ---- 桥：Dashboard 内注入 window.AstrBotPluginPage；file:// 冒烟时回落桩 ----
+  function realBridge() {
+    var b = window.AstrBotPluginPage;
+    return (b && typeof b.apiGet === "function") ? b : null;
+  }
+  function stubBridge() {
+    return {
+      apiGet: function () { return Promise.resolve({}); },
+      apiPost: function () { return Promise.resolve({}); },
+      getContext: function () { return { isDark: false }; }
+    };
+  }
+  var bridgeMissing = !realBridge();
+  var bridge = realBridge() || stubBridge();
+
+  function bridgeCtx() {
+    try { return bridge.getContext() || {}; } catch (e) { return {}; }
+  }
+
+  async function apiGet(path, params) {
+    try {
+      return await bridge.apiGet(path, params || {});
+    } catch (e) {
+      message.error(String((e && e.message) || e));
+      throw e;
+    }
+  }
+  async function apiPost(path, body) {
+    try {
+      return await bridge.apiPost(path, body || {});
+    } catch (e) {
+      message.error(String((e && e.message) || e));
+      throw e;
+    }
+  }
+
+  var CAT_LABELS = { anime: "动漫", gal: "galgame", game: "游戏", other: "其他" };
+
+  var app = Vue.createApp({
+    setup: function () {
+      var theme = bridgeCtx().isDark ? NS.darkTheme : null;
+
+      // ---- 全局 ----
+      var menu = Vue.ref("chars");
+      var loadingAll = Vue.ref(false);
+      var meta = Vue.ref({ packs: [], counts: {}, version: "", anima_ready: false, quota: 5 });
+      function rowKey(row) { return row.id; }
+
+      var menuOpts = [
+        { label: "角色库", key: "chars" },
+        { label: "试画台", key: "try" },
+        { label: "立绘库", key: "gallery" },
+        { label: "分群绑定", key: "bind" }
+      ];
+      function onMenu(key) { menu.value = key; }
+
+      // ---- 角色库 ----
+      var filterPack = Vue.ref("");
+      var filterCat = Vue.ref("");
+      var filterVerified = Vue.ref("");
+      var keyword = Vue.ref("");
+
+      var packOpts = Vue.computed(function () {
+        var opts = [{ label: "全部卷", value: "" }];
+        (meta.value.packs || []).forEach(function (p) {
+          opts.push({ label: p.title || p.pack, value: p.pack });
+        });
+        return opts;
+      });
+      var catOpts = [
+        { label: "全部分类", value: "" },
+        { label: "动漫", value: "anime" },
+        { label: "galgame", value: "gal" },
+        { label: "游戏", value: "game" },
+        { label: "其他", value: "other" }
+      ];
+      var verifiedOpts = [
+        { label: "全部", value: "" },
+        { label: "已验证", value: "yes" },
+        { label: "未验证", value: "no" }
+      ];
+
+      var allEntries = Vue.computed(function () {
+        var out = [];
+        (meta.value.packs || []).forEach(function (p) {
+          (p.entries || []).forEach(function (e) { out.push(e); });
+        });
+        return out;
+      });
+      var filteredEntries = Vue.computed(function () {
+        return allEntries.value.filter(function (e) {
+          if (filterPack.value && e.pack !== filterPack.value) return false;
+          if (filterCat.value && e.category !== filterCat.value) return false;
+          if (filterVerified.value === "yes" && !e.verified) return false;
+          if (filterVerified.value === "no" && e.verified) return false;
+          if (keyword.value) {
+            var kw = keyword.value.toLowerCase();
+            var hay = (e.id + " " + e.name + " " + (e.series || "")).toLowerCase();
+            if (hay.indexOf(kw) < 0) return false;
+          }
+          return true;
+        });
+      });
+      function portraitCount(id) { return meta.value.counts[id] || 0; }
+      function catLabel(c) { return CAT_LABELS[c] || "其他"; }
+      function stratLabel(e) {
+        var t = e.strategy_type || "base";
+        if (t === "lora") return "lora";
+        if (t === "img2img") return "img2img 参考图";
+        return "base 直出";
+      }
+
+      // 两段确认（sandbox 无 confirm/alert）
+      var delArm = Vue.ref("");
+      var delTimer = null;
+      function armDelete(key) {
+        if (delArm.value === key) { return true; }
+        delArm.value = key;
+        if (delTimer) clearTimeout(delTimer);
+        delTimer = setTimeout(function () { delArm.value = ""; }, 3000);
+        return false;
+      }
+
+      async function togglePack(p) {
+        try {
+          await apiPost("pools/set_pack", { pack: p.pack, enabled: !p.enabled });
+          p.enabled = !p.enabled;
+          message.success((p.enabled ? "已启用" : "已停用") + "：" + (p.title || p.pack));
+        } catch (e) { /* 已提示 */ }
+      }
+
+      // ---- 编辑抽屉 ----
+      var showDrawer = Vue.ref(false);
+      var drawerTitle = Vue.ref("");
+      var isNew = Vue.ref(false);
+      var saving = Vue.ref(false);
+      var emptyForm = function () {
+        return {
+          id: "", name: "", series: "", pack: (meta.value.packs[0] || {}).pack || "",
+          category: "anime", tier: "S", strategy_type: "base",
+          strategy_loras: "", strategy_ref: "", strategy_img2img_workflow: "",
+          tags_en: "", quote: "", color: "#E8B4C8", verified: false
+        };
+      };
+      var form = Vue.ref(emptyForm());
+
+      var tierOpts = [
+        { label: "S", value: "S" }, { label: "A", value: "A" },
+        { label: "B", value: "B" }, { label: "（不显示）", value: "" }
+      ];
+      var drawerPackOpts = Vue.computed(function () {
+        return (meta.value.packs || []).map(function (p) {
+          return { label: p.title || p.pack, value: p.pack };
+        });
+      });
+
+      function formToEntry(f) {
+        var strategy = { type: f.strategy_type };
+        if (f.strategy_type === "lora") {
+          strategy.loras = String(f.strategy_loras || "").split(/[\n,]+/)
+            .map(function (s) { return s.trim(); }).filter(Boolean);
+        }
+        if (f.strategy_type === "img2img") {
+          strategy.ref = String(f.strategy_ref || "").trim();
+          if (f.strategy_img2img_workflow) {
+            strategy.img2img_workflow = String(f.strategy_img2img_workflow).trim();
+          }
+        }
+        return {
+          id: String(f.id || "").trim(), name: String(f.name || "").trim(),
+          series: String(f.series || "").trim(), category: f.category,
+          tier: f.tier || "", strategy: strategy,
+          tags_en: String(f.tags_en || "").trim(), quote: String(f.quote || "").trim(),
+          color: f.color || "#E8B4C8", verified: !!f.verified
+        };
+      }
+      function entryToForm(e) {
+        var st = e.strategy || {};
+        return {
+          id: e.id, name: e.name, series: e.series || "", pack: e.pack,
+          category: e.category || "other", tier: e.tier || "",
+          strategy_type: e.strategy_type || "base",
+          strategy_loras: Array.isArray(st.loras) ? st.loras.join("\n") : (st.loras || ""),
+          strategy_ref: st.ref || "",
+          strategy_img2img_workflow: st.img2img_workflow || "",
+          tags_en: e.tags_en || "", quote: e.quote || "",
+          color: e.color || "#E8B4C8", verified: !!e.verified
+        };
+      }
+      function openNew() {
+        isNew.value = true;
+        form.value = emptyForm();
+        drawerTitle.value = "新增角色";
+        showDrawer.value = true;
+      }
+      function openEdit(e) {
+        isNew.value = false;
+        form.value = entryToForm(e);
+        drawerTitle.value = "编辑：" + e.name;
+        showDrawer.value = true;
+      }
+      async function saveForm() {
+        var f = form.value;
+        if (!String(f.id || "").trim() || !String(f.name || "").trim()
+            || !String(f.tags_en || "").trim()) {
+          message.error("id / 名字 / tags_en 都不能为空");
+          return;
+        }
+        saving.value = true;
+        try {
+          await apiPost("pools/save_entry", { pack: f.pack, entry: formToEntry(f) });
+          message.success("已保存：" + f.name);
+          showDrawer.value = false;
+          await loadAll();
+        } catch (e) { /* 已提示 */ } finally {
+          saving.value = false;
+        }
+      }
+      async function doDeleteEntry(e) {
+        if (!armDelete("entry:" + e.id)) return;
+        try {
+          await apiPost("pools/delete_entry", { pack: e.pack, id: e.id });
+          message.success("已删除：" + e.name + "（立绘文件保留，可在立绘库看到孤立图）");
+          delArm.value = "";
+          await loadAll();
+        } catch (err2) { /* 已提示 */ }
+      }
+      async function doToggleVerified(e) {
+        try {
+          await apiPost("pools/set_verified", { id: e.id, verified: !e.verified });
+          e.verified = !e.verified;
+          message.success(e.name + (e.verified ? " 已参与群内抽卡" : " 已移出抽卡池"));
+        } catch (err2) { /* 已提示 */ }
+      }
+
+      // ---- 角色表格 ----
+      var entryCols = Vue.computed(function () {
+        return [
+          {
+            title: "角色", key: "name", width: 190,
+            render: function (row) {
+              return h("div", [
+                h("div", { class: "entry-name" }, row.name),
+                h("div", { class: "entry-id" }, row.id),
+              ]);
+            }
+          },
+          { title: "作品", key: "series", width: 170, ellipsis: { tooltip: true } },
+          { title: "分类", key: "category", width: 80,
+            render: function (row) { return catLabel(row.category); } },
+          { title: "稀有度", key: "tier", width: 70,
+            render: function (row) { return row.tier || "-"; } },
+          { title: "策略", key: "strategy_type", width: 110,
+            render: function (row) { return stratLabel(row); } },
+          { title: "立绘", width: 70,
+            render: function (row) { return portraitCount(row.id) + "/" + meta.value.quota; } },
+          {
+            title: "验证", key: "verified", width: 80,
+            render: function (row) {
+              return h(NS.NSwitch, {
+                size: "small", value: !!row.verified,
+                "onUpdate:value": function (v) { row.verified = v; doToggleVerified(row); }
+              });
+            }
+          },
+          {
+            title: "操作", key: "ops", width: 230,
+            render: function (row) {
+              return h("div", { style: "display:flex;gap:6px;" }, [
+                h(NS.NButton, { size: "tiny", onClick: function () { openEdit(row); } },
+                  { default: function () { return "编辑"; } }),
+                h(NS.NButton, {
+                  size: "tiny", type: "primary", secondary: true,
+                  onClick: function () { tryCharId.value = row.id; menu.value = "try"; }
+                }, { default: function () { return "试画"; } }),
+                h(NS.NButton, {
+                  size: "tiny", type: row.verified ? "default" : "warning", secondary: true,
+                  onClick: function () { doToggleVerified(row); }
+                }, { default: function () { return row.verified ? "取消验证" : "标记验证"; } }),
+                h(NS.NButton, {
+                  size: "tiny", type: "error",
+                  secondary: delArm.value !== "entry:" + row.id,
+                  onClick: function () { doDeleteEntry(row); }
+                }, { default: function () { return delArm.value === "entry:" + row.id ? "确认删除" : "删除"; } }),
+              ]);
+            }
+          }
+        ];
+      });
+
+      // ---- 试画台 ----
+      var tryCharId = Vue.ref("");
+      var tryRunning = Vue.ref(false);
+      var tryError = Vue.ref("");
+      var tryPreview = Vue.ref("");
+      var tryOk = Vue.ref(false);
+      var tryJobId = Vue.ref("");
+      var tryArchived = Vue.ref(false);
+      var tryPollTimer = null;
+      var tryStartedAt = 0;
+
+      var charOpts = Vue.computed(function () {
+        return allEntries.value.map(function (e) {
+          return {
+            label: e.name + "（" + (e.series || catLabel(e.category)) + "）"
+              + (e.verified ? "" : " · 未验证"),
+            value: e.id
+          };
+        });
+      });
+      var tryEntry = Vue.computed(function () {
+        return allEntries.value.find(function (e) { return e.id === tryCharId.value; }) || null;
+      });
+      var tryEntryVerified = Vue.computed(function () {
+        return !!(tryEntry.value && tryEntry.value.verified);
+      });
+
+      function stopTryPoll() {
+        if (tryPollTimer) { clearInterval(tryPollTimer); tryPollTimer = null; }
+      }
+      function pollJob(jobId, onDone, onFail) {
+        stopTryPoll();
+        tryStartedAt = Date.now();
+        tryPollTimer = setInterval(async function () {
+          try {
+            var st = await apiGet("jobs/status", { job_id: jobId });
+            if (!st || !st.status) return; // 桩桥/瞬时失败：继续等
+            if (st.status === "running") {
+              if (Date.now() - tryStartedAt > 180000) {
+                stopTryPoll();
+                onFail("轮询超时（>180s），请稍后刷新查看 draw_jobs 记录");
+              }
+              return;
+            }
+            stopTryPoll();
+            if (st.status === "ok") { onDone(st); } else { onFail(st.error || st.status); }
+          } catch (e) { /* 网络抖动：继续轮询 */ }
+        }, 1500);
+      }
+      async function doTry() {
+        if (!tryCharId.value || tryRunning.value) return;
+        tryRunning.value = true;
+        tryError.value = ""; tryPreview.value = ""; tryOk.value = false;
+        tryArchived.value = false;
+        try {
+          var res = await apiPost("jobs/start", { kind: "try", id: tryCharId.value });
+          tryJobId.value = (res && res.job_id) || "";
+          pollJob(tryJobId.value, function (st) {
+            tryRunning.value = false;
+            tryOk.value = true;
+            tryPreview.value = st.preview || "";
+            if (!st.preview) { tryError.value = "生成成功但预览缩略失败（原图已保留，可存入立绘库）"; }
+          }, function (why) {
+            tryRunning.value = false;
+            tryError.value = String(why || "试画失败");
+          });
+        } catch (e) {
+          tryRunning.value = false;
+        }
+      }
+      async function doMarkVerified() {
+        if (!tryEntry.value) return;
+        try {
+          await apiPost("pools/set_verified", { id: tryEntry.value.id, verified: true });
+          message.success(tryEntry.value.name + " 已标记 verified，参与群内抽卡");
+          await loadAll();
+        } catch (e) { /* 已提示 */ }
+      }
+      async function doArchive() {
+        if (!tryJobId.value) return;
+        try {
+          var res = await apiPost("jobs/archive", { job_id: tryJobId.value });
+          tryArchived.value = true;
+          message.success("已存入立绘库：" + ((res && res.archived) || ""));
+          await loadAll();
+        } catch (e) { /* 已提示 */ }
+      }
+
+      // ---- 立绘库 ----
+      var galChars = Vue.ref([]);
+      var galCharId = Vue.ref("");
+      var galItems = Vue.ref([]);
+      var loadingGal = Vue.ref(false);
+      var refillRunning = Vue.ref(false);
+      var refillError = Vue.ref("");
+      var refillJobId = Vue.ref("");
+
+      var galCharOpts = Vue.computed(function () {
+        return galChars.value.map(function (c) {
+          return { label: c.name + " · " + c.count + " 张" + (c.pack ? "" : " · 孤立"), value: c.id };
+        });
+      });
+      async function loadGallery() {
+        loadingGal.value = true;
+        try {
+          var idx = await apiGet("portraits/index");
+          galChars.value = (idx && idx.chars) || [];
+          if (!galCharId.value && galChars.value.length > 0) {
+            galCharId.value = galChars.value[0].id;
+          }
+          await loadGalItems();
+        } catch (e) { /* 已提示 */ } finally {
+          loadingGal.value = false;
+        }
+      }
+      async function loadGalItems() {
+        if (!galCharId.value) { galItems.value = []; return; }
+        try {
+          var res = await apiGet("portraits/list", { char_id: galCharId.value });
+          galItems.value = (res && res.items) || [];
+        } catch (e) { galItems.value = []; }
+      }
+      Vue.watch(galCharId, function () { loadGalItems(); });
+      async function doDeletePortrait(it) {
+        if (!armDelete(it.file)) return;
+        try {
+          await apiPost("portraits/delete", { file: it.file });
+          message.success("已删除 #" + it.seq + "（低于配额时会自动补生）");
+          delArm.value = "";
+          await loadGallery();
+        } catch (e) { /* 已提示 */ }
+      }
+      async function doRefill() {
+        if (!galCharId.value || refillRunning.value) return;
+        refillRunning.value = true;
+        refillError.value = "";
+        try {
+          var res = await apiPost("jobs/start", { kind: "refill", id: galCharId.value });
+          refillJobId.value = (res && res.job_id) || "";
+          pollJob(refillJobId.value, function () {
+            refillRunning.value = false;
+            message.success("补图完成，已存入立绘库");
+            loadGallery();
+          }, function (why) {
+            refillRunning.value = false;
+            refillError.value = String(why || "补图失败");
+          });
+        } catch (e) { refillRunning.value = false; }
+      }
+
+      // ---- 分群绑定 ----
+      var bindText = Vue.ref("");
+      var bindSaving = Vue.ref(false);
+      var parsedBind = Vue.computed(function () {
+        var out = [];
+        String(bindText.value || "").split(/\n+/).forEach(function (line) {
+          var idx = line.indexOf("=");
+          if (idx <= 0) return;
+          var gid = line.slice(0, idx).trim();
+          var packs = line.slice(idx + 1).replace(/，/g, ",").split(",")
+            .map(function (s) { return s.trim(); }).filter(Boolean);
+          if (gid && packs.length) out.push({ gid: gid, packs: packs });
+        });
+        return out;
+      });
+      async function doSaveBind() {
+        bindSaving.value = true;
+        try {
+          await apiPost("group_pools", { text: bindText.value });
+          message.success("分群绑定已保存并即时生效");
+        } catch (e) { /* 已提示 */ } finally {
+          bindSaving.value = false;
+        }
+      }
+
+      // ---- 装载 ----
+      async function loadAll() {
+        loadingAll.value = true;
+        try {
+          var res = await apiGet("pools");
+          if (res && res.packs) { meta.value = res; }
+        } catch (e) { /* 已提示 */ } finally {
+          loadingAll.value = false;
+        }
+      }
+      loadAll().then(function () { return loadGallery(); });
+
+      return {
+        theme: theme, menu: menu, menuOpts: menuOpts, onMenu: onMenu,
+        meta: meta, loadingAll: loadingAll, loadAll: loadAll, rowKey: rowKey,
+        bridgeMissing: bridgeMissing,
+        filterPack: filterPack, filterCat: filterCat, filterVerified: filterVerified,
+        keyword: keyword, packOpts: packOpts, catOpts: catOpts, verifiedOpts: verifiedOpts,
+        filteredEntries: filteredEntries, entryCols: entryCols,
+        showDrawer: showDrawer, drawerTitle: drawerTitle, isNew: isNew,
+        form: form, saving: saving, tierOpts: tierOpts, drawerPackOpts: drawerPackOpts,
+        openNew: openNew, openEdit: openEdit, saveForm: saveForm,
+        doDeleteEntry: doDeleteEntry, doToggleVerified: doToggleVerified, togglePack: togglePack,
+        catLabel: catLabel, stratLabel: stratLabel, portraitCount: portraitCount, delArm: delArm,
+        tryCharId: tryCharId, charOpts: charOpts, tryEntry: tryEntry,
+        tryRunning: tryRunning, tryError: tryError, tryPreview: tryPreview, tryOk: tryOk,
+        tryArchived: tryArchived, tryEntryVerified: tryEntryVerified,
+        doTry: doTry, doMarkVerified: doMarkVerified, doArchive: doArchive,
+        galCharId: galCharId, galCharOpts: galCharOpts, galItems: galItems,
+        loadingGal: loadingGal, refillRunning: refillRunning, refillError: refillError,
+        doRefill: doRefill, doDeletePortrait: doDeletePortrait, loadGallery: loadGallery,
+        bindText: bindText, parsedBind: parsedBind, bindSaving: bindSaving,
+        doSaveBind: doSaveBind
+      };
+    }
+  });
+
+  app.use(NS);
+  // 等 Dashboard 注入桥再挂载（box 同款轮询；file:// 冒烟时桩桥立即就绪）
+  var waited = 0;
+  var timer = setInterval(function () {
+    if (window.AstrBotPluginPage || waited >= 3000) {
+      clearInterval(timer);
+      app.mount("#app");
+    }
+    waited += 100;
+  }, 100);
+})();
+</script>
+</body>
+</html>
