@@ -467,6 +467,53 @@ async def h_group_pools_set(plugin) -> dict:
     return ok({"groups": parsed})
 
 
+# ---------- 作品库（按 series 聚合） ----------
+
+async def h_works(plugin) -> dict:
+    """按条目 series 聚合作品：封面取该作品第一个有立绘角色的缩略图。
+
+    没有 series 的条目不进作品库（仍在角色库可见）。
+    """
+    if not plugin._store:
+        return err("插件未初始化完成")
+    work_map: dict = {}
+    for pack in pool.load_packs(_pools_dir(plugin), logger):
+        for raw in pack["entries"]:
+            e = pool.normalize_entry(raw, pack["pack"])
+            if e is None or not e["series"]:
+                continue
+            w = work_map.setdefault(e["series"], {
+                "series": e["series"], "category": e["category"],
+                "color": e["color"], "total": 0, "verified": 0,
+                "portrait_count": 0, "characters": [],
+            })
+            w["total"] += 1
+            if e["verified"]:
+                w["verified"] += 1
+            n = plugin._store.count_portraits(e["id"])
+            w["portrait_count"] += n
+            w["characters"].append({
+                "id": e["id"], "name": e["name"], "tier": e["tier"],
+                "color": e["color"], "verified": e["verified"], "portraits": n,
+            })
+    works = []
+    for w in work_map.values():
+        w["characters"].sort(key=lambda c: (not c["verified"], c["id"]))
+        cover = None
+        for c in w["characters"]:
+            rows = plugin._store.list_portraits(c["id"])
+            if rows:
+                full = Path(plugin._data_dir) / rows[0]["file"]
+                if full.is_file():
+                    cover = _thumb_data_url(str(full), 320)
+                    if cover:
+                        break
+        w["cover"] = cover
+        works.append(w)
+    works.sort(key=lambda w: (-w["total"], w["series"]))
+    return ok({"works": works, "version": _version_of(plugin)})
+
+
 # ---------- 配置（schema 白名单 + 类型校验，星语同款） ----------
 
 _SKIP = object()
@@ -564,6 +611,7 @@ async def h_config_set(plugin) -> dict:
 def register(plugin) -> None:
     routes = [
         ("/pools", h_pools, ["GET"]),
+        ("/works", h_works, ["GET"]),
         ("/pools/save_entry", h_save_entry, ["POST"]),
         ("/pools/delete_entry", h_delete_entry, ["POST"]),
         ("/pools/set_pack", h_set_pack, ["POST"]),

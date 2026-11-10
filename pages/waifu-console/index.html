@@ -17,6 +17,12 @@
   .gal-meta { font-size: 11px; opacity: .65; padding: 4px 8px; }
   .gal-del { position: absolute; top: 6px; right: 6px; }
   .bind-tip { font-size: 12px; opacity: .65; margin-top: 8px; }
+  .work-card { cursor: pointer; }
+  .work-cover { height: 140px; border-radius: 8px; overflow: hidden; display: flex;
+    align-items: center; justify-content: center; }
+  .work-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .work-initial { font-size: 36px; color: #fff; opacity: .9; font-weight: 700;
+    letter-spacing: 2px; }
 </style>
 </head>
 <body>
@@ -62,6 +68,60 @@
             </n-space>
             <n-data-table :columns="entryCols" :data="filteredEntries" :row-key="rowKey"
                           :pagination="{ pageSize: 20 }" size="small"></n-data-table>
+          </div>
+
+          <!-- ============ 作品库 ============ -->
+          <div v-if="menu === 'works'">
+            <div v-if="!currentWork">
+              <n-grid :cols="4" :x-gap="12" :y-gap="12">
+                <n-gi v-for="w in works" :key="w.series">
+                  <n-card size="small" :bordered="true" class="work-card" @click="openWork(w)">
+                    <div class="work-cover" :style="{ background: 'linear-gradient(135deg,' + w.color + 'cc,' + w.color + '55)' }">
+                      <img v-if="w.cover" :src="w.cover" class="work-cover-img">
+                      <span v-else class="work-initial">{{ w.series.slice(0, 2) }}</span>
+                    </div>
+                    <n-space size="small" align="center" style="margin-top: 8px;">
+                      <b>{{ w.series }}</b>
+                      <n-tag size="tiny" :bordered="false">{{ catLabel(w.category) }}</n-tag>
+                    </n-space>
+                    <div class="bind-tip">{{ w.total }} 个角色 · {{ w.verified }} 已验证 · {{ w.portrait_count }} 张立绘</div>
+                  </n-card>
+                </n-gi>
+              </n-grid>
+              <n-empty v-if="!worksLoading && works.length === 0"
+                       description="还没有作品：给角色条目填上「作品名」，就会自动归入作品库"></n-empty>
+            </div>
+            <div v-if="currentWork">
+              <n-space align="center" style="margin-bottom: 12px;">
+                <n-button size="small" @click="backWorks">← 返回作品列表</n-button>
+                <b style="font-size: 16px;">{{ currentWork.series }}</b>
+                <n-tag size="small" :bordered="false">{{ catLabel(currentWork.category) }}</n-tag>
+                <span class="bind-tip">{{ currentWork.total }} 个角色 · {{ currentWork.verified }} 已验证 · {{ currentWork.portrait_count }} 张立绘</span>
+              </n-space>
+              <n-grid :cols="4" :x-gap="12" :y-gap="12">
+                <n-gi v-for="c in currentWork.characters" :key="c.id">
+                  <n-card size="small" :bordered="true" class="work-card" @click="gotoTry(c)">
+                    <div class="work-cover" :style="{ background: 'linear-gradient(135deg,' + c.color + 'cc,' + c.color + '55)' }">
+                      <img v-if="c.thumb" :src="c.thumb" class="work-cover-img">
+                      <span v-else class="work-initial">{{ c.name.slice(0, 1) }}</span>
+                    </div>
+                    <n-space size="small" align="center" style="margin-top: 8px;">
+                      <b>{{ c.name }}</b>
+                      <n-tag v-if="c.tier" size="tiny" :bordered="false">{{ c.tier }}</n-tag>
+                      <n-tag size="tiny" :bordered="false" :type="c.verified ? 'success' : 'warning'">
+                        {{ c.verified ? "已验证" : "未验证" }}
+                      </n-tag>
+                    </n-space>
+                    <n-space size="small" align="center" style="margin-top: 4px;">
+                      <span class="bind-tip">{{ c.id }} · 立绘 {{ c.portraits }}</span>
+                      <n-button size="tiny" quaternary type="primary"
+                                @click.stop="openEditById(c.id)">编辑</n-button>
+                    </n-space>
+                  </n-card>
+                </n-gi>
+              </n-grid>
+              <n-empty v-if="currentWork.characters.length === 0" description="该作品暂无角色"></n-empty>
+            </div>
           </div>
 
           <!-- ============ 试画台 ============ -->
@@ -316,6 +376,7 @@
 
       var menuOpts = [
         { label: "角色库", key: "chars" },
+        { label: "作品库", key: "works" },
         { label: "试画台", key: "try" },
         { label: "立绘库", key: "gallery" },
         { label: "分群绑定", key: "bind" },
@@ -707,6 +768,31 @@
         } catch (e) { refillRunning.value = false; }
       }
 
+      // ---- 作品库 ----
+      var works = Vue.ref([]);
+      var worksLoading = Vue.ref(false);
+      var currentWork = Vue.ref(null);
+      async function loadWorks() {
+        worksLoading.value = true;
+        try {
+          var res = await apiGet("works");
+          if (res && res.works) { works.value = res.works; }
+        } catch (e) { /* 已提示 */ } finally {
+          worksLoading.value = false;
+        }
+      }
+      function openWork(w) { currentWork.value = w; }
+      function backWorks() { currentWork.value = null; }
+      function gotoTry(c) {
+        tryCharId.value = c.id;
+        currentWork.value = null;
+        menu.value = "try";
+      }
+      function openEditById(id) {
+        var e = allEntries.value.find(function (x) { return x.id === id; });
+        if (e) { openEdit(e); }
+      }
+
       // ---- 配置（schema 驱动；group_pools 在分群绑定页签管理，此处排除） ----
       var CONFIG_SECTIONS = [
         { title: "基础", keys: ["timezone", "salt", "reroll_daily_limit", "portraits_per_char",
@@ -795,7 +881,7 @@
         }
       }
       loadAll().then(function () {
-        return Promise.all([loadGallery(), loadConfig()]);
+        return Promise.all([loadGallery(), loadConfig(), loadWorks()]);
       });
 
       return {
@@ -813,6 +899,8 @@
         tryRunning: tryRunning, tryError: tryError, tryPreview: tryPreview, tryOk: tryOk,
         tryArchived: tryArchived, tryEntryVerified: tryEntryVerified,
         doTry: doTry, doMarkVerified: doMarkVerified, doArchive: doArchive,
+        works: works, worksLoading: worksLoading, currentWork: currentWork,
+        openWork: openWork, backWorks: backWorks, gotoTry: gotoTry, openEditById: openEditById,
         galCharId: galCharId, galCharOpts: galCharOpts, galItems: galItems,
         loadingGal: loadingGal, refillRunning: refillRunning, refillError: refillError,
         doRefill: doRefill, doDeletePortrait: doDeletePortrait, loadGallery: loadGallery,
