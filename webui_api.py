@@ -467,6 +467,98 @@ async def h_group_pools_set(plugin) -> dict:
     return ok({"groups": parsed})
 
 
+# ---------- 配置（schema 白名单 + 类型校验，星语同款） ----------
+
+_SKIP = object()
+
+
+def _schema_of(plugin) -> dict:
+    try:
+        path = Path(__file__).resolve().parent / "_conf_schema.json"
+        import json
+
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _coerce(value, meta):
+    """按 schema 类型收敛；不合法返回 _SKIP（调用方记 skipped，绝不写脏配置）。"""
+    t = str((meta or {}).get("type") or "string").lower()
+    try:
+        if t == "int":
+            return int(value)
+        if t == "float":
+            return float(value)
+        if t == "bool":
+            if isinstance(value, bool):
+                return value
+            return str(value).strip().lower() in ("1", "true", "on", "yes")
+        s = str(value)
+        opts = (meta or {}).get("options")
+        if isinstance(opts, list) and opts and s not in [str(o) for o in opts]:
+            return _SKIP
+        return s
+    except Exception:
+        return _SKIP
+
+
+async def h_config_get(plugin) -> dict:
+    schema = _schema_of(plugin)
+    items = []
+    for key, meta in schema.items():
+        if not isinstance(meta, dict):
+            continue
+        default = meta.get("default")
+        items.append({
+            "key": key,
+            "description": str(meta.get("description") or key),
+            "hint": str(meta.get("hint") or ""),
+            "type": str(meta.get("type") or "string"),
+            "options": meta.get("options"),
+            "labels": meta.get("labels"),
+            "default": default,
+            "value": plugin._cfg(key, default),
+        })
+    return ok({"items": items, "version": _version_of(plugin)})
+
+
+async def h_config_set(plugin) -> dict:
+    body = await _body()
+    values = body.get("values")
+    if not isinstance(values, dict) or not values:
+        return err("缺少 values 字段（形状：{values: {配置键: 值}}）")
+    schema = _schema_of(plugin)
+    if not schema:
+        return err("读取插件配置 schema 失败，已拒绝写入（避免写坏配置）")
+    cfg = getattr(plugin, "config", None)
+    if cfg is None or not callable(getattr(cfg, "save_config", None)):
+        return err("插件配置不可写（self.config 缺失）")
+    changed: list = []
+    skipped: list = []
+    for key, value in values.items():
+        meta = schema.get(key)
+        if meta is None:  # schema 之外的键一律忽略（防越权写入）
+            skipped.append(f"{key}（未在 _conf_schema.json 中定义）")
+            continue
+        coerced = _coerce(value, meta)
+        if coerced is _SKIP:
+            skipped.append(f"{key}（类型或取值不符合 schema）")
+            continue
+        try:
+            cfg[key] = coerced
+            changed.append(key)
+        except Exception:
+            skipped.append(f"{key}（写入失败）")
+    if changed:
+        try:
+            cfg.save_config()
+        except Exception:
+            logger.error(f"[{PLUGIN_NAME}] 配置写盘失败\n{traceback.format_exc()}")
+            return err("配置写盘失败，请查看控制台日志")
+    return ok({"changed": changed, "skipped": skipped})
+
+
 # ---------- 注册 ----------
 
 def register(plugin) -> None:
@@ -484,6 +576,8 @@ def register(plugin) -> None:
         ("/jobs/archive", h_job_archive, ["POST"]),
         ("/group_pools", h_group_pools_get, ["GET"]),
         ("/group_pools", h_group_pools_set, ["POST"]),
+        ("/config", h_config_get, ["GET"]),
+        ("/config", h_config_set, ["POST"]),
     ]
     for path, fn, methods in routes:
         plugin.context.register_web_api(

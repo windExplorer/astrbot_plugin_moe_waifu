@@ -153,6 +153,36 @@
               </n-space>
             </n-card>
           </div>
+
+          <!-- ============ 配置 ============ -->
+          <div v-if="menu === 'config'">
+            <n-card size="small" :bordered="true">
+              <n-space vertical size="medium">
+                <n-space align="center">
+                  <n-button type="primary" :loading="configSaving" @click="saveConfig">保存配置</n-button>
+                  <span class="bind-tip">保存后即时生效；改「种子盐值」会洗牌所有人当天的抽卡结果</span>
+                </n-space>
+                <div v-for="sec in configSections" :key="sec.title">
+                  <div style="font-weight:600; margin: 4px 0 10px;">{{ sec.title }}</div>
+                  <div v-for="it in sec.items" :key="it.key" style="margin-bottom: 14px;">
+                    <div style="font-size:13px; margin-bottom: 4px;">{{ it.description }}</div>
+                    <n-switch v-if="it.type === 'bool'" v-model:value="configModel[it.key]"></n-switch>
+                    <n-input-number v-else-if="it.type === 'int'" v-model:value="configModel[it.key]"
+                                    style="width: 220px;"></n-input-number>
+                    <n-input-number v-else-if="it.type === 'float'" v-model:value="configModel[it.key]"
+                                    :step="0.05" style="width: 220px;"></n-input-number>
+                    <n-select v-else-if="it.options" v-model:value="configModel[it.key]"
+                              :options="optOpts(it)" style="width: 280px;"></n-select>
+                    <n-input v-else-if="isMulti(it)" v-model:value="configModel[it.key]"
+                             type="textarea" :rows="4"></n-input>
+                    <n-input v-else v-model:value="configModel[it.key]" style="width: 420px;"></n-input>
+                    <div class="bind-tip" style="margin-top:4px; max-width: 560px;">{{ it.hint }}</div>
+                  </div>
+                </div>
+                <div class="bind-tip">分群绑定（group_pools）请用「分群绑定」页签管理，此处不重复展示。</div>
+              </n-space>
+            </n-card>
+          </div>
         </n-space>
       </n-layout-content>
     </n-layout>
@@ -287,7 +317,8 @@
         { label: "角色库", key: "chars" },
         { label: "试画台", key: "try" },
         { label: "立绘库", key: "gallery" },
-        { label: "分群绑定", key: "bind" }
+        { label: "分群绑定", key: "bind" },
+        { label: "配置", key: "config" }
       ];
       function onMenu(key) { menu.value = key; }
 
@@ -675,9 +706,61 @@
         } catch (e) { refillRunning.value = false; }
       }
 
+      // ---- 配置（schema 驱动；group_pools 在分群绑定页签管理，此处排除） ----
+      var CONFIG_SECTIONS = [
+        { title: "基础", keys: ["timezone", "salt", "reroll_daily_limit", "portraits_per_char",
+                                "allow_unverified", "disabled_groups"] },
+        { title: "萌绘生图", keys: ["draw_workflow", "draw_width", "draw_height", "draw_timeout",
+                                    "img2img_denoise", "draw_negative_enabled", "draw_negative_prompt",
+                                    "announce_enabled"] }
+      ];
+      var MULTILINE_KEYS = ["disabled_groups", "draw_negative_prompt"];
+      var configItems = Vue.ref([]);
+      var configModel = Vue.ref({});
+      var configSaving = Vue.ref(false);
+      function isMulti(it) { return MULTILINE_KEYS.indexOf(it.key) >= 0; }
+      function optOpts(it) {
+        var opts = it.options || [];
+        var labels = it.labels || [];
+        return opts.map(function (o, i) { return { label: labels[i] || o, value: o }; });
+      }
+      var configSections = Vue.computed(function () {
+        return CONFIG_SECTIONS.map(function (sec) {
+          return {
+            title: sec.title,
+            items: configItems.value.filter(function (it) {
+              return sec.keys.indexOf(it.key) >= 0;
+            })
+          };
+        }).filter(function (sec) { return sec.items.length > 0; });
+      });
+      async function loadConfig() {
+        try {
+          var res = await apiGet("config");
+          if (res && res.items) {
+            configItems.value = res.items;
+            var m = {};
+            configItems.value.forEach(function (it) { m[it.key] = it.value; });
+            configModel.value = m;
+          }
+        } catch (e) { /* 已提示 */ }
+      }
+      async function saveConfig() {
+        configSaving.value = true;
+        try {
+          var values = {};
+          configItems.value.forEach(function (it) { values[it.key] = configModel.value[it.key]; });
+          var res = await apiPost("config", { values: values });
+          var ch = ((res && res.changed) || []).length;
+          var sk = ((res && res.skipped) || []).length;
+          message.success("已保存 " + ch + " 项" + (sk ? "（跳过 " + sk + " 项不符合 schema）" : ""));
+        } catch (e) { /* 已提示 */ } finally {
+          configSaving.value = false;
+        }
+      }
+
       // ---- 分群绑定 ----
-      var bindText = Vue.ref("");
-      var bindSaving = Vue.ref(false);
+      var bindText = Vue.ref("");      var bindSaving = Vue.ref(false);
       var parsedBind = Vue.computed(function () {
         var out = [];
         String(bindText.value || "").split(/\n+/).forEach(function (line) {
@@ -710,7 +793,9 @@
           loadingAll.value = false;
         }
       }
-      loadAll().then(function () { return loadGallery(); });
+      loadAll().then(function () {
+        return Promise.all([loadGallery(), loadConfig()]);
+      });
 
       return {
         theme: theme, menu: menu, menuOpts: menuOpts, onMenu: onMenu,
@@ -732,7 +817,9 @@
         loadingGal: loadingGal, refillRunning: refillRunning, refillError: refillError,
         doRefill: doRefill, doDeletePortrait: doDeletePortrait, loadGallery: loadGallery,
         bindText: bindText, parsedBind: parsedBind, bindSaving: bindSaving,
-        doSaveBind: doSaveBind
+        doSaveBind: doSaveBind,
+        configSections: configSections, configModel: configModel, configSaving: configSaving,
+        saveConfig: saveConfig, optOpts: optOpts, isMulti: isMulti
       };
     }
   });
