@@ -38,6 +38,12 @@
   .dropzone { border: 1.5px dashed rgba(160,120,150,.4); border-radius: 10px;
     padding: 12px; transition: background .15s ease, border-color .15s ease; }
   .dropzone.drag { background: rgba(214,51,132,.07); border-color: #d63384; }
+  .drag-overlay { position: fixed; inset: 0; background: rgba(214,51,132,.10);
+    border: 2.5px dashed #d63384; z-index: 9999; display: flex;
+    align-items: center; justify-content: center; pointer-events: none; }
+  .drag-overlay > span { background: #fff; color: #d63384; font-weight: 600;
+    padding: 12px 26px; border-radius: 12px; font-size: 15px;
+    box-shadow: 0 8px 26px rgba(120,60,110,.22); }
 </style>
 </head>
 <body>
@@ -388,6 +394,9 @@
       </n-space>
     </n-modal>
 
+    <!-- ============ 拖拽全页提示层（纯视觉；drop 在 document 级路由） ============ -->
+    <div class="drag-overlay" v-if="dragOverlay"><span>{{ dragOverlayText }}</span></div>
+
     <!-- ============ 编辑抽屉（新增/编辑角色） ============ -->
     <n-drawer v-model:show="showDrawer" :width="540">
       <n-drawer-content :title="drawerTitle" closable>
@@ -577,6 +586,106 @@
         }
         return o;
       })(isDark);
+
+      // ---- 拖拽上传（v0.5.2：整页级 dragover/drop 路由） ----
+      // 关键修复：旧版只有两个小虚线框能接 drop，鼠标没对准松手就落到 Dashboard
+      // 父页面（浏览器默认行为）——现在 document 级接管：全页可拖 + 全屏提示层。
+      // 区域内的小 dropzone 仍保留（其 .prevent 先行标记，document 级见
+      // defaultPrevented 会跳过，不会双传）。
+      var dragOverlay = Vue.ref(false);
+      var dragOverlayText = Vue.ref("松手上传参考图");
+      var dragDepth = 0;
+      function fileFromDragEvent(e) {
+        var dt = e && e.dataTransfer;
+        if (!dt) return null;
+        if (dt.files && dt.files.length) return dt.files[0];
+        if (dt.items) {  // 从网页里拖图：files 可能为空，items 里捞
+          for (var i = 0; i < dt.items.length; i++) {
+            if (dt.items[i].kind === "file") {
+              var f = dt.items[i].getAsFile();
+              if (f) return f;
+            }
+          }
+        }
+        return null;
+      }
+      function hasFiles(e) {
+        try {
+          var types = (e.dataTransfer && e.dataTransfer.types) || [];
+          for (var i = 0; i < types.length; i++) {
+            if (types[i] === "Files") return true;
+          }
+        } catch (err) { /* 某些拖拽源不暴露 types */ }
+        return false;
+      }
+      function dropTargetInfo() {
+        // 当前页面支持拖到哪：返回 {bindId, setRef} 或 null（不支持）
+        var d = document.querySelector(".n-drawer-container");
+        if (d && form.value.strategy_type === "img2img" && form.value.id) {
+          return { bindId: form.value.id, setRef: false, label: form.value.name + "（编辑中）" };
+        }
+        if (menu.value === "try" && tryEntry.value) {
+          var setRef = tryMode.value === "img2img";
+          return { bindId: tryEntry.value.id, setRef: setRef,
+                   label: tryEntry.value.name + (setRef ? "（本次按参考图重绘）" : "（存入参考图库）") };
+        }
+        if (menu.value === "gallery" && galCharId.value) {
+          return { bindId: galCharId.value, setRef: false, label: galCharId.value + "（立绘库）" };
+        }
+        return null;
+      }
+      function routeDroppedFile(file) {
+        var target = dropTargetInfo();
+        if (!target) {
+          message.error("当前页面不接收文件：请到试画台 / 立绘库 / 角色编辑（img2img）里拖拽上传");
+          return;
+        }
+        uploading.value = true;
+        apiUpload(file).then(function (res) {
+          var path = (res && res.path) || "";
+          var chain = apiPost("refs/bind", { id: target.bindId, path: path })
+            .then(function () { return loadAll(); });
+          if (target.setRef && tryMode.value === "img2img") {
+            chain = chain.then(function () { tryOverride.value.ref = path; });
+          }
+          return chain.then(function () {
+            message.success("参考图已上传并绑定：" + ((res && res.rel) || path) + " → " + target.label);
+            if (menu.value === "gallery") { loadGallery(); }
+          });
+        }).catch(function () { /* 已提示 */ }).finally(function () {
+          uploading.value = false;
+        });
+      }
+      document.addEventListener("dragover", function (e) {
+        // 必须 preventDefault，否则浏览器会打开被拖入的文件
+        e.preventDefault();
+      });
+      document.addEventListener("dragenter", function (e) {
+        if (!hasFiles(e)) return;
+        dragDepth += 1;
+        var target = dropTargetInfo();
+        dragOverlayText.value = target
+          ? "松手上传参考图 → " + target.label
+          : "当前页面不接收文件";
+        dragOverlay.value = true;
+      });
+      document.addEventListener("dragleave", function (e) {
+        if (!hasFiles(e)) return;
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (dragDepth === 0) { dragOverlay.value = false; }
+      });
+      document.addEventListener("drop", function (e) {
+        dragDepth = 0;
+        dragOverlay.value = false;
+        // ⚠️ 先读 defaultPrevented 再 preventDefault——顺序反了的话，
+        // 自己的 preventDefault 会让自己误判「区域已处理」而永远跳过路由
+        var zoneHandled = e.defaultPrevented;
+        e.preventDefault();  // 全页兜底：防止浏览器打开文件
+        if (zoneHandled) return;  // 小 dropzone 已处理过，避免双传
+        if (!hasFiles(e)) return;
+        var file = fileFromDragEvent(e);
+        if (file) { routeDroppedFile(file); }
+      });
 
       // ---- 全局 ----
       var menu = Vue.ref("chars");
@@ -1377,6 +1486,7 @@
 
       return {
         theme: theme, themeOverrides: themeOverrides,
+        dragOverlay: dragOverlay, dragOverlayText: dragOverlayText,
         menu: menu, menuOpts: menuOpts, onMenu: onMenu,
         meta: meta, loadingAll: loadingAll, loadAll: loadAll, rowKey: rowKey,
         charsMode: charsMode, cardPage: cardPage, cardPageSize: cardPageSize,
