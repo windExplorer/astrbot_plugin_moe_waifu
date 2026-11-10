@@ -566,20 +566,7 @@ async def h_workflows(plugin) -> dict:
         return ok({"available": False, "workflows": [], "reason": "查询工作流超时"})
     except Exception as exc:
         return ok({"available": False, "workflows": [], "reason": f"{exc.__class__.__name__}: {exc}"[:150]})
-    workflows = []
-    for line in str(raw or "").splitlines():
-        line = line.strip()
-        if not line.startswith("- "):
-            continue
-        rest = line[2:]
-        name = rest.split(" [")[0].strip()
-        if not name or name == "(未命名)":
-            continue
-        workflows.append({
-            "name": name,
-            "img2img": "支持图生图" in rest,
-            "anima": "【Anima】" in rest,
-        })
+    workflows = draw.parse_workflow_list(raw)
     reason = "" if workflows else "萌绘侧未配置任何工作流"
     return ok({"available": bool(workflows), "workflows": workflows, "reason": reason})
 

@@ -191,6 +191,34 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int, even
     return str(first), "ok", "", duration
 
 
+def parse_workflow_list(raw) -> list:
+    """解析萌绘 comfyui_workflows 的返回文本 → [{name, img2img, anima}]。
+
+    只认同时带「- 」前缀和 [支持图生图]/[仅文生图] 标记的行——返回末尾的
+    「默认工作流：」小节也是 - 开头但没有标记，必须排除（v0.3.3 曾混进下拉，
+    被用户指出筛选错乱）；「· 描述/用法说明」等缩进说明行天然跳过。
+    """
+    out = []
+    for line in str(raw or "").splitlines():
+        line = line.strip()
+        if not line.startswith("- "):
+            continue
+        rest = line[2:]
+        img2img = "支持图生图" in rest
+        txt_only = "仅文生图" in rest
+        if not img2img and not txt_only:
+            continue  # 「默认工作流」等无标记行
+        name = rest.split(" [")[0].strip()
+        if not name or name == "(未命名)":
+            continue
+        out.append({
+            "name": name,
+            "img2img": img2img,
+            "anima": "【Anima】" in rest,
+        })
+    return out
+
+
 def archive_portrait(src: str, data_dir: Path, char_id: str, date_str: str,
                      seq: int, seed_int: int) -> str:
     """把萌绘产出的图复制进本插件立绘库，返回相对 data 目录的归档路径。

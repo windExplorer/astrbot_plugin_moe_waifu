@@ -514,13 +514,13 @@
         } catch (e) { /* 已提示；下拉退化为手动输入 */ }
       }
       function wfOpts(onlyImg2img) {
+        // 语义（萌绘文档）：[支持图生图] 的工作流文生图/图生图两用，[仅文生图] 只能文生图
+        // → 图生图下拉只留支持图生图的；文生图下拉显示全部（标记不再贴进选项，
+        // v0.3.3 全贴 [图生图] 让两个下拉看起来一样，被用户指出筛选错乱）。
         return workflows.value
           .filter(function (w) { return !onlyImg2img || w.img2img; })
           .map(function (w) {
-            return {
-              label: w.name + (w.img2img ? " [图生图]" : " [仅文生图]") + (w.anima ? " 【动漫】" : ""),
-              value: w.name
-            };
+            return { label: w.name + (w.anima ? " 【动漫】" : ""), value: w.name };
           });
       }
       function isWorkflowKey(key) { return key === "draw_workflow" || key === "img2img_workflow"; }
