@@ -106,17 +106,20 @@ def _get_tool_handler(context, tool_name: str):
     return getattr(tool, "handler", None) or tool
 
 
-def _base_kwargs(cfg: dict, prompt: str, seed_int: int, with_workflow: bool = True) -> dict:
+def _base_kwargs(cfg: dict, prompt: str, seed_int: int,
+                 with_workflow: bool = True, with_size: bool = True) -> dict:
     kwargs = dict(
         prompt=prompt,
         source=PLUGIN_SOURCE,
         external=True,
         seed=int(seed_int),
-        width=int(cfg.get("draw_width", 700)),
-        height=int(cfg.get("draw_height", 1200)),
         silent=True,
         raw_prompt=True,
     )
+    if with_size:
+        # 仅文生图收宽高；img2img 传了会被萌绘当「LLM 未知参数」丢弃并刷 WARN
+        kwargs["width"] = int(cfg.get("draw_width", 700))
+        kwargs["height"] = int(cfg.get("draw_height", 1200))
     workflow = str(cfg.get("draw_workflow") or "").strip()
     if with_workflow and workflow:
         kwargs["workflow"] = workflow
@@ -160,7 +163,8 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int, even
             image = str(Path(ref).resolve())
         # img2img 不带 workflow（那是文生图槽位）；图生图工作流三级解析：
         # 条目 strategy.img2img_workflow → 全局配置 img2img_workflow → 留空（萌绘默认）
-        kwargs = _base_kwargs(cfg, build_prompt(entry), seed_int, with_workflow=False)
+        kwargs = _base_kwargs(cfg, build_prompt(entry), seed_int,
+                              with_workflow=False, with_size=False)
         img_workflow = (
             str(strategy.get("img2img_workflow") or "").strip()
             or str(cfg.get("img2img_workflow") or "").strip()

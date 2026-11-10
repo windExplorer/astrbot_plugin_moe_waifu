@@ -47,6 +47,7 @@
   .drag-overlay { position: fixed; inset: 0; background: rgba(214,51,132,.10);
     border: 2.5px dashed #d63384; z-index: 9999; display: flex;
     align-items: center; justify-content: center; pointer-events: none; }
+  .clickable-img { cursor: zoom-in; }
   .drag-overlay > span { background: #fff; color: #d63384; font-weight: 600;
     padding: 12px 26px; border-radius: 12px; font-size: 15px;
     box-shadow: 0 8px 26px rgba(120,60,110,.22); }
@@ -108,7 +109,9 @@
                 <n-gi v-for="e in pagedEntries" :key="e.id">
                   <n-card size="small" :bordered="true" class="work-card">
                     <div class="work-cover" :style="{ background: 'linear-gradient(135deg,' + e.color + 'cc,' + e.color + '55)' }">
-                      <img v-if="e.thumb" :src="e.thumb" class="work-cover-img">
+                      <img v-if="e.thumb" :src="e.thumb" class="work-cover-img clickable-img"
+                           title="点击查看大图" alt="封面"
+                           @click.stop="openViewer(e.cover_path, e.name)">
                       <span v-else class="work-initial">{{ e.name.slice(0, 1) }}</span>
                       <n-switch class="cover-switch" size="small" :value="e.verified"
                                 @update:value="doToggleVerified(e)"></n-switch>
@@ -182,7 +185,9 @@
                 <n-gi v-for="c in currentWork.characters" :key="c.id">
                   <n-card size="small" :bordered="true" class="work-card" @click="gotoTry(c)">
                     <div class="work-cover" :style="{ background: 'linear-gradient(135deg,' + c.color + 'cc,' + c.color + '55)' }">
-                      <img v-if="c.thumb" :src="c.thumb" class="work-cover-img">
+                      <img v-if="c.thumb" :src="c.thumb" class="work-cover-img clickable-img"
+                           title="点击查看大图" alt="封面"
+                           @click.stop="openViewer(c.cover_path, c.name)">
                       <span v-else class="work-initial">{{ c.name.slice(0, 1) }}</span>
                     </div>
                     <n-space size="small" align="center" style="margin-top: 8px;">
@@ -260,7 +265,9 @@
                     <n-gi v-for="r in tryRefs" :key="r.path">
                       <div class="gal-item" :class="{ 'ref-selected': tryOverride.ref === r.path }"
                            @click="selectTryRef(r.path)">
-                        <img v-if="r.thumb" :src="r.thumb" alt="参考图">
+                        <img v-if="r.thumb" :src="r.thumb" class="clickable-img"
+                         title="点击查看大图" alt="参考图"
+                         @click.stop="openViewer(r.path, '参考图')">
                         <div v-else class="gal-meta">文件丢失</div>
                         <n-tag v-if="tryOverride.ref === r.path" class="gal-del" size="tiny"
                                :bordered="false" type="success">本次</n-tag>
@@ -302,7 +309,8 @@
                     <n-button size="tiny" quaternary @click="cancelTryWait">停止等待</n-button>
                   </n-space>
                 </n-spin>
-                <img v-if="tryPreview" class="try-img" :src="tryPreview" alt="试画结果">
+                <img v-if="tryPreview" class="try-img clickable-img" :src="tryPreview"
+                     alt="试画结果" title="点击查看大图" @click="openViewer(trySrcPath, '试画结果')">
                 <div v-if="tryOk" class="bind-tip">
                   同角色同日同序号的种子恒定；改 tags / 策略 / 参考图后再试会出新图。
                 </div>
@@ -326,7 +334,9 @@
             <n-grid :cols="5" :x-gap="10" :y-gap="10" v-if="galItems.length > 0">
               <n-gi v-for="it in galItems" :key="it.file">
                   <div class="gal-item">
-                    <img v-if="it.thumb" :src="it.thumb" alt="立绘缩略">
+                    <img v-if="it.thumb" :src="it.thumb" class="clickable-img"
+                         title="点击查看大图" alt="立绘缩略"
+                         @click.stop="openViewer(it.file, '#' + it.seq)">
                     <div v-else class="gal-meta">文件丢失</div>
                     <n-tag v-if="isCover(it)" class="gal-del" style="right: 76px;" size="tiny"
                            :bordered="false" type="success">封面</n-tag>
@@ -405,6 +415,16 @@
         </n-space>
       </n-layout-content>
     </n-layout>
+
+    <!-- ============ 大图查看器 ============ -->
+    <n-modal v-model:show="viewer.show" preset="card" :title="viewer.title || '查看大图'"
+             style="width: 760px; max-width: 92vw;">
+      <n-space vertical align="center" size="small">
+        <n-spin v-if="viewerLoading" size="small">加载原图…</n-spin>
+        <img v-if="viewer.src" :src="viewer.src" style="max-width: 100%; max-height: 72vh;
+             border-radius: 10px; display: block;" alt="大图">
+      </n-space>
+    </n-modal>
 
     <!-- ============ 作品封面选择弹窗 ============ -->
     <n-modal v-model:show="workCoverModal" preset="dialog" :title="'作品封面 · ' + (workCoverSeries || '')"
@@ -619,6 +639,24 @@
         }
         return o;
       })(isDark);
+
+      // ---- 大图查看器（v0.5.5：缩略图点击加载原图 data URL） ----
+      var viewer = Vue.ref({ show: false, src: "", title: "" });
+      var viewerLoading = Vue.ref(false);
+      function openViewer(path, title) {
+        if (!path) { message.error("该图片还没有文件（先试画或补图）"); return; }
+        viewer.value = { show: true, src: "", title: title || "查看大图" };
+        viewerLoading.value = true;
+        apiGet("image/data", { path: path }).then(function (res) {
+          viewer.value.src = (res && res.data_url) || "";
+          if (!viewer.value.src) {
+            viewer.value.show = false;
+            message.error("原图加载失败");
+          }
+        }).catch(function () { viewer.value.show = false; }).finally(function () {
+          viewerLoading.value = false;
+        });
+      }
 
       // ---- 拖拽上传（v0.5.2：整页级 dragover/drop 路由） ----
       // 关键修复：旧版只有两个小虚线框能接 drop，鼠标没对准松手就落到 Dashboard
@@ -1145,6 +1183,7 @@
       var tryTickTimer = null;
       var tryStartedAt = 0;
       var tryFailStreak = 0;
+      var trySrcPath = Vue.ref("");
       var cameFrom = Vue.ref("chars");          // 试画台的返回目标
       // 本次画法（临时参数）：entry=跟随条目；其余为试画临时覆盖（不写条目）
       var tryMode = Vue.ref("entry");
@@ -1273,6 +1312,7 @@
           pollJob(tryJobId.value, function (st) {
             tryRunning.value = false;
             tryOk.value = true;
+            trySrcPath.value = st.src_path || "";
             tryPreview.value = st.preview || "";
             if (!st.preview) { tryError.value = "生成成功但预览缩略失败（原图已保留，可存入立绘库）"; }
           }, function (why) {
@@ -1607,6 +1647,8 @@
         tryRefs: tryRefs, tryRefsLoading: tryRefsLoading, selectTryRef: selectTryRef,
         deleteTryRef: deleteTryRef, discardTry: discardTry,
         tryDrag: tryDrag, onDropTry: onDropTry,
+        viewer: viewer, viewerLoading: viewerLoading, openViewer: openViewer,
+        trySrcPath: trySrcPath,
         works: works, worksLoading: worksLoading, currentWork: currentWork,
         openWork: openWork, backWorks: backWorks, gotoTry: gotoTry, openEditById: openEditById,
         workCoverModal: workCoverModal, workCoverSeries: workCoverSeries,

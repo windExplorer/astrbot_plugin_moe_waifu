@@ -141,6 +141,7 @@ class MoeWaifuPlugin(Star):
             "draw_workflow": self._cfg("draw_workflow", ""),
             "draw_negative_enabled": self._cfg("draw_negative_enabled", True),
             "draw_negative_prompt": self._cfg("draw_negative_prompt", ""),
+            "img2img_workflow": self._cfg("img2img_workflow", ""),
             "img2img_denoise": self._cfg("img2img_denoise", 0.65),
         }
 

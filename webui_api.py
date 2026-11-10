@@ -266,6 +266,7 @@ async def h_pools(plugin) -> dict:
     packs = pool.load_packs(_pools_dir(plugin), logger)
     counts: dict = {}
     thumbs: dict = {}
+    cover_paths: dict = {}
     out_packs = []
     for pack in packs:
         entries = []
@@ -280,6 +281,8 @@ async def h_pools(plugin) -> dict:
                 cover_fp = _char_cover_path(plugin, entry)
                 if cover_fp:
                     thumbs[entry["id"]] = _thumb_cached(cover_fp, 160)
+                cover_paths[entry["id"]] = cover_fp
+            entry["cover_path"] = cover_paths.get(entry["id"])
             entries.append(entry)
         out_packs.append({"pack": pack["pack"], "title": pack["title"],
                           "enabled": pack["enabled"], "entries": entries})
@@ -288,6 +291,7 @@ async def h_pools(plugin) -> dict:
         "packs": out_packs,
         "counts": counts,
         "thumbs": thumbs,
+        "cover_paths": cover_paths,
         "version": _version_of(),
         "anima_ready": anima_ready,
         "quota": int(plugin._cfg("portraits_per_char", 5)),
@@ -573,7 +577,7 @@ async def h_job_status(plugin) -> dict:
     job = plugin._jobs.get(jid)
     if job is None:
         return err("job 不存在（可能已过期）")
-    out = {k: v for k, v in job.items() if k != "src_path"}
+    out = {k: v for k, v in job.items()}
     return ok(out)
 
 
@@ -790,6 +794,25 @@ async def h_refs_unbind(plugin) -> dict:
     return ok({"id": cid, "removed": path, "file_deleted": removed_file})
 
 
+async def h_image_data(plugin) -> dict:
+    """按路径返回整图 data URL（工坊点击放大查看用，走桥的 apiGet 通道）。
+
+    路径经 _safe_data_file 校验（必须落在 data 目录内）。
+    """
+    body = await _body()
+    path = str(body.get("path") or _q("path", "") or "").strip()
+    fp = _safe_data_file(plugin, path)
+    if fp is None:
+        return err("图片不存在或不在数据目录内")
+    if fp.stat().st_size > 25 * 1024 * 1024:
+        return err("图片超过 25MB，无法预览")
+    import base64 as _b64
+    import mimetypes as _mimetypes
+    mime = _mimetypes.guess_type(str(fp))[0] or "image/png"
+    data_url = "data:" + mime + ";base64," + _b64.b64encode(fp.read_bytes()).decode("ascii")
+    return ok({"data_url": data_url, "name": fp.name})
+
+
 async def h_workflows(plugin) -> dict:
     """直接读萌绘配置的工作流条目，按用户口径计算图生图能力（v0.3.6）。
 
@@ -946,6 +969,7 @@ def register(plugin) -> None:
         ("/portraits/delete", h_portrait_delete, ["POST"]),
         ("/refs/upload", h_refs_upload, ["POST"]),
         ("/refs/list", h_refs_list, ["GET", "POST"]),
+        ("/image/data", h_image_data, ["GET", "POST"]),
         ("/refs/bind", h_refs_bind, ["POST"]),
         ("/refs/unbind", h_refs_unbind, ["POST"]),
         ("/pools/set_cover", h_set_cover, ["POST"]),
