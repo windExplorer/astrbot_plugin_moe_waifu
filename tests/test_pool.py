@@ -93,22 +93,57 @@ check("find_entry 按名", pool.find_entry(packs, "乙") is not None)
 check("find_entry id 大小写不敏感", pool.find_entry(packs, "B") is not None)
 check("find_entry 未命中", pool.find_entry(packs, "不存在") is None)
 
-# 种子卷安装：只装缺失卷，绝不覆盖
+# 种子卷安装：只装缺失卷，绝不覆盖用户已有卷
 with tempfile.TemporaryDirectory() as td:
     td = Path(td)
     bundled = td / "seed_pool.json"
     bundled.write_text(json.dumps({"packs": [
         {"pack": "p1", "title": "卷一", "entries": [{"id": "a", "name": "甲", "tags_en": "x"}]},
-        {"pack": "p2", "title": "卷二", "entries": [{"id": "b", "name": "乙", "tags_en": "y"}]},
+        {"pack": "p2", "title": "卷二", "entries": [
+            {"id": "b", "name": "乙", "tags_en": "种子版"},
+            {"id": "c", "name": "丙", "tags_en": "新增角色"},
+        ]},
     ]}, ensure_ascii=False), encoding="utf-8")
     pools = td / "pools"
     pools.mkdir()
     (pools / "p1.json").write_text('{"pack":"p1","title":"用户改过的","entries":[]}', encoding="utf-8")
-    installed = pool.install_seed_pool(pools, bundled)
-    check("只装缺失卷", installed == ["p2"])
+    (pools / "p2.json").write_text(json.dumps({"pack": "p2", "entries": [
+        {"id": "b", "name": "乙", "tags_en": "用户改过的tags"}
+    ]}, ensure_ascii=False), encoding="utf-8")
+    result = pool.install_seed_pool(pools, bundled)
+    check("两卷都已存在→无整卷安装", result["installed"] == [])
+    check("p1 合并 1 条（种子 a 对空用户卷是新条目）", result["merged"].get("p1") == 1)
+    check("p2 合并 1 条（c 新增，b 已存在）", result["merged"].get("p2") == 1)
     kept = json.loads((pools / "p1.json").read_text(encoding="utf-8"))
-    check("不覆盖已有卷", kept["title"] == "用户改过的")
+    check("不覆盖已有卷标题", kept["title"] == "用户改过的")
+    check("p1 追加了种子条目甲", kept["entries"][0]["id"] == "a")
+    p2 = json.loads((pools / "p2.json").read_text(encoding="utf-8"))
+    check("用户条目不被覆盖", p2["entries"][0]["tags_en"] == "用户改过的tags")
+    check("新条目追加在尾部", p2["entries"][1]["id"] == "c" and len(p2["entries"]) == 2)
     packs2 = pool.load_packs(pools)
     check("load_packs 读回", {p["pack"] for p in packs2} == {"p1", "p2"})
+
+    # 缺失卷整卷安装：删掉 p1 再装，应整卷落地
+    (pools / "p1.json").unlink()
+    result2 = pool.install_seed_pool(pools, bundled)
+    check("缺失卷整卷安装", result2["installed"] == ["p1"])
+    fresh = json.loads((pools / "p1.json").read_text(encoding="utf-8"))
+    check("整卷安装内容为种子版", fresh["entries"][0]["tags_en"] == "x")
+
+# 种子卷数据完整性（打包内的真实种子卷）
+bundled_real = ROOT = Path(__file__).resolve().parent.parent / "seed_pool.json"
+seed = json.loads(bundled_real.read_text(encoding="utf-8"))
+total = 0
+ids = set()
+dup = []
+for pack in seed["packs"]:
+    for e in pack["entries"]:
+        total += 1
+        if e["id"] in ids:
+            dup.append(e["id"])
+        ids.add(e["id"])
+        assert pool.normalize_entry(e, pack["pack"]) is not None, f"种子条目不合法: {e['id']}"
+check("种子卷条目 id 无重复", dup == [])
+check(f"种子卷规模 ≥ 36（当前 {total}）", total >= 36)
 
 print("test_pool: ALL OK")

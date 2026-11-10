@@ -123,37 +123,76 @@ def load_packs(pools_dir: Path, logger=None) -> list:
 
 
 def install_seed_pool(pools_dir: Path, bundled_json: Path, logger=None) -> list:
-    """首启把包内种子卷复制到 pools/（仅写缺失的卷文件，绝不覆盖用户已有卷）。
+    """把包内种子卷落到 pools/：缺失的卷整卷安装；已存在的卷按 id 合并新条目。
 
-    返回本次新装的卷名列表。
+    合并语义（v0.3.1）：种子卷里 id 在用户卷中不存在 → 追加（verified 默认 false，
+    走试画验证流程）；id 已存在 → 一律以用户卷为准，**绝不覆盖**——
+    data 目录是唯一真源，种子卷只是播种机。
+    返回 {"installed": [新装卷名], "merged": {卷名: 追加条数}}。
     """
     pools_dir = Path(pools_dir)
     pools_dir.mkdir(parents=True, exist_ok=True)
     installed: list = []
+    merged: dict = {}
     try:
         data = json.loads(Path(bundled_json).read_text(encoding="utf-8"))
     except Exception as exc:
         if logger is not None:
             logger.error(f"[moe_waifu] 包内种子卷解析失败: {exc}")
-        return installed
+        return {"installed": installed, "merged": merged}
     for pack in data.get("packs", []) if isinstance(data, dict) else []:
         name = str(pack.get("pack") or "").strip()
         if not name or not isinstance(pack.get("entries"), list):
             continue
         target = pools_dir / f"{name}.json"
-        if target.exists():
+        if not target.exists():
+            try:
+                target.write_text(
+                    json.dumps(pack, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                installed.append(name)
+            except Exception as exc:
+                if logger is not None:
+                    logger.error(f"[moe_waifu] 种子卷 {name} 写入失败: {exc}")
             continue
+        # 已有卷：按 id 合并种子卷里新增的条目（不覆盖用户已有条目）
         try:
-            target.write_text(
-                json.dumps(pack, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            installed.append(name)
+            current = json.loads(target.read_text(encoding="utf-8"))
         except Exception as exc:
             if logger is not None:
-                logger.error(f"[moe_waifu] 种子卷 {name} 写入失败: {exc}")
+                logger.warning(f"[moe_waifu] 卷 {name} 解析失败，跳过合并: {exc}")
+            continue
+        entries = current.get("entries") if isinstance(current.get("entries"), list) else []
+        have_ids = set()
+        for raw in entries:
+            e = normalize_entry(raw, name)
+            if e:
+                have_ids.add(e["id"])
+        appended = 0
+        for raw in pack["entries"]:
+            e = normalize_entry(raw, name)
+            if e and e["id"] not in have_ids:
+                entries.append(e)
+                have_ids.add(e["id"])
+                appended += 1
+        if appended:
+            current["entries"] = entries
+            try:
+                target.write_text(
+                    json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                merged[name] = appended
+            except Exception as exc:
+                if logger is not None:
+                    logger.error(f"[moe_waifu] 卷 {name} 合并写回失败: {exc}")
     if installed and logger is not None:
         logger.info(f"[moe_waifu] 已安装种子卷：{', '.join(installed)}")
-    return installed
+    if merged and logger is not None:
+        logger.info(
+            "[moe_waifu] 种子卷合并："
+            + ", ".join(f"{k}+{v}" for k, v in merged.items())
+        )
+    return {"installed": installed, "merged": merged}
 
 
 def normalize_entry(entry: dict, pack_name: str) -> dict | None:
