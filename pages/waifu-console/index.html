@@ -35,6 +35,11 @@
   .work-initial { font-size: 36px; color: #fff; opacity: .9; font-weight: 700;
     letter-spacing: 2px; }
   .cover-switch { position: absolute; top: 6px; right: 6px; }
+  .pack-pill { display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(214,51,132,.06); border: 1px solid rgba(214,51,132,.22);
+    border-radius: 999px; padding: 4px 12px; transition: opacity .15s ease; }
+  .pack-name { font-weight: 600; font-size: 13px; }
+  .pack-count { font-size: 11px; opacity: .55; }
   .dropzone { border: 1.5px dashed rgba(160,120,150,.4); border-radius: 10px;
     padding: 12px; transition: background .15s ease, border-color .15s ease; }
   .dropzone.drag { background: rgba(214,51,132,.07); border-color: #d63384; }
@@ -73,24 +78,28 @@
                 <n-radio-button value="card">卡片</n-radio-button>
                 <n-radio-button value="list">列表</n-radio-button>
               </n-radio-group>
-              <n-select v-model:value="filterPack" :options="packOpts" size="small"
-                        style="width: 140px;"></n-select>
-              <n-select v-model:value="filterCat" :options="catOpts" size="small"
-                        style="width: 120px;"></n-select>
-              <n-select v-model:value="filterVerified" :options="verifiedOpts" size="small"
-                        style="width: 120px;"></n-select>
-              <n-input v-model:value="keyword" placeholder="搜 id / 名字 / 作品" size="small"
-                       clearable style="width: 200px;"></n-input>
               <n-button type="primary" size="small" @click="openNew">新增角色</n-button>
               <n-button size="small" :loading="loadingAll" @click="loadAll">刷新</n-button>
+              <n-select v-model:value="filterPack" :options="packOpts" size="small"
+                        style="width: 130px;"></n-select>
+              <n-select v-model:value="filterCat" :options="catOpts" size="small"
+                        style="width: 110px;"></n-select>
+              <n-select v-model:value="filterSeries" :options="seriesOpts" size="small"
+                        filterable style="width: 170px;"></n-select>
+              <n-select v-model:value="filterVerified" :options="verifiedOpts" size="small"
+                        style="width: 110px;"></n-select>
+              <n-input v-model:value="keyword" placeholder="搜 id / 名字 / 作品" size="small"
+                       clearable style="width: 180px;"></n-input>
             </n-space>
-            <n-space :wrap="true">
-              <n-tag v-for="p in meta.packs" :key="p.pack" size="small"
-                     :type="p.enabled ? 'default' : 'warning'" :bordered="false">
-                {{ p.title }} · {{ p.entries.length }} 条
-                <n-button quaternary size="tiny" style="margin-left: 6px;"
-                          @click="togglePack(p)">{{ p.enabled ? "停用" : "启用" }}</n-button>
-              </n-tag>
+            <n-space :wrap="true" size="small" align="center" style="margin-top: 2px;">
+              <span style="font-size: 13px; opacity: .7;">角色卷</span>
+              <div v-for="p in meta.packs" :key="p.pack" class="pack-pill"
+                   :style="p.enabled ? '' : 'opacity: .5;'">
+                <span class="pack-name">{{ p.title }}</span>
+                <span class="pack-count">{{ p.entries.length }} 条</span>
+                <n-switch size="small" :value="p.enabled"
+                          @update:value="togglePack(p)"></n-switch>
+              </div>
             </n-space>
 
             <!-- 卡片视图（默认） -->
@@ -730,6 +739,7 @@
       // ---- 角色库 ----
       var filterPack = Vue.ref("");
       var filterCat = Vue.ref("");
+      var filterSeries = Vue.ref("");
       var filterVerified = Vue.ref("");
       var keyword = Vue.ref("");
 
@@ -760,10 +770,24 @@
         });
         return out;
       });
+      var seriesOpts = Vue.computed(function () {
+        var counter = {};
+        allEntries.value.forEach(function (e) {
+          var s = e.series || "";
+          if (!s) return;
+          counter[s] = (counter[s] || 0) + 1;
+        });
+        var opts = Object.keys(counter).sort().map(function (s) {
+          return { label: s + " (" + counter[s] + ")", value: s };
+        });
+        opts.unshift({ label: "全部作品", value: "" });
+        return opts;
+      });
       var filteredEntries = Vue.computed(function () {
         return allEntries.value.filter(function (e) {
           if (filterPack.value && e.pack !== filterPack.value) return false;
           if (filterCat.value && e.category !== filterCat.value) return false;
+          if (filterSeries.value && (e.series || "") !== filterSeries.value) return false;
           if (filterVerified.value === "yes" && !e.verified) return false;
           if (filterVerified.value === "no" && e.verified) return false;
           if (keyword.value) {
@@ -946,7 +970,7 @@
         var s = (cardPage.value - 1) * cardPageSize;
         return filteredEntries.value.slice(s, s + cardPageSize);
       });
-      Vue.watch([filterPack, filterCat, filterVerified, keyword], function () {
+      Vue.watch([filterPack, filterCat, filterSeries, filterVerified, keyword], function () {
         cardPage.value = 1;
       });
       function gotoTryFromChars(e) {
@@ -1561,7 +1585,8 @@
         charsMode: charsMode, cardPage: cardPage, cardPageSize: cardPageSize,
         pagedEntries: pagedEntries, gotoTryFromChars: gotoTryFromChars,
         gotoGallery: gotoGallery,
-        filterPack: filterPack, filterCat: filterCat, filterVerified: filterVerified,
+        filterPack: filterPack, filterCat: filterCat, filterSeries: filterSeries,
+        seriesOpts: seriesOpts, filterVerified: filterVerified,
         keyword: keyword, packOpts: packOpts, catOpts: catOpts, verifiedOpts: verifiedOpts,
         filteredEntries: filteredEntries, entryCols: entryCols,
         showDrawer: showDrawer, drawerTitle: drawerTitle, isNew: isNew,
