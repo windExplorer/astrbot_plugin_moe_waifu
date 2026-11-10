@@ -134,9 +134,15 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int, even
         handler = _get_tool_handler(context, tool_name)
         if handler is None:
             return None, _STATUS_NO_ANIMA, "未安装萌绘（comfyui_img2img 工具不存在）", 0
+        # 参考图三级解析（v0.5.0 多参考图）：主参考 strategy.ref →
+        # strategy.refs 里按种子随机选一张（同种子同图，不破坏同款确定性）→ 无图报错
         ref = str(strategy.get("ref") or "").strip()
         if not ref:
-            return None, "error", "img2img 策略缺少参考图（strategy.ref 未填）", 0
+            ref = pick_ref(strategy.get("refs"), seed_int)
+        if not ref:
+            return None, "error", (
+                "img2img 策略没有可用参考图：请在工坊给该角色上传参考图，"
+                "或填 strategy.ref")
         image = ref
         if not re.match(r"^[a-zA-Z]+://", ref):  # 非协议开头 → 视为本地路径
             if not Path(ref).exists():
@@ -189,6 +195,21 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int, even
     if not first.exists():
         return None, "error", f"萌绘返回的路径不存在: {paths[0]}", duration
     return str(first), "ok", "", duration
+
+
+def pick_ref(refs, seed_int: int) -> str:
+    """从参考图列表按种子选一张（确定性随机：同种子同图；文件已删的自动跳过）。
+
+    refs 元素允许绝对路径或 data 相对路径；只回传真实存在的文件。
+    """
+    candidates = []
+    for p in refs if isinstance(refs, list) else []:
+        p = str(p or "").strip()
+        if p and Path(p).exists():
+            candidates.append(p)
+    if not candidates:
+        return ""
+    return candidates[int(seed_int) % len(candidates)]
 
 
 def effective_entry(entry: dict, override: dict) -> dict:

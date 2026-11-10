@@ -218,6 +218,7 @@ def normalize_entry(entry: dict, pack_name: str) -> dict | None:
         "tags_en": tags,
         "quote": str(entry.get("quote") or "").strip(),
         "color": str(entry.get("color") or "#E8B4C8").strip(),
+        "cover": str(entry.get("cover") or "").strip(),   # 角色封面（v0.5.0）
         "verified": bool(entry.get("verified", False)),
     }
     if out["category"] not in CATEGORY_LABELS:

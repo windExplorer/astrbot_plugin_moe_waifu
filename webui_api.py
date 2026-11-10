@@ -136,6 +136,79 @@ def _thumb_cached(path, max_w: int = 160) -> str | None:
     return durl
 
 
+def _safe_data_file(plugin, path: str) -> Path | None:
+    """校验图片路径可用作封面/参考图：绝对路径必须落在 data 目录内，
+    相对路径按 data 目录解析；文件必须存在。返回可用的 Path 或 None。"""
+    p = str(path or "").strip()
+    if not p:
+        return None
+    try:
+        fp = Path(p)
+        if not fp.is_absolute():
+            fp = Path(plugin._data_dir) / fp
+        fp = fp.resolve()
+        data_root = Path(plugin._data_dir).resolve()
+        if data_root not in fp.parents and fp != data_root:
+            return None
+        return fp if fp.is_file() else None
+    except Exception:
+        return None
+
+
+def _works_meta_path(plugin) -> Path:
+    return Path(plugin._data_dir) / "works_meta.json"
+
+
+def _load_works_meta(plugin) -> dict:
+    try:
+        data = _json_load(_works_meta_path(plugin))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_works_meta(plugin, data: dict) -> None:
+    _json_save(_works_meta_path(plugin), data)
+
+
+def _char_cover_path(plugin, entry: dict) -> str | None:
+    """角色封面路径：entry.cover 优先，其次第一张立绘。返回绝对路径或 None。"""
+    cover = str(entry.get("cover") or "").strip()
+    if cover:
+        fp = _safe_data_file(plugin, cover)
+        if fp is not None:
+            return str(fp)
+    if plugin._store:
+        rows = plugin._store.list_portraits(entry["id"])
+        if rows:
+            fp = Path(plugin._data_dir) / rows[0]["file"]
+            if fp.is_file():
+                return str(fp)
+    return None
+
+
+def _set_entry_field(plugin, cid: str, mutate) -> str | None:
+    """找到包含该角色的卷文件，mutate(e_normalized, raw_entry) 原地改，写回。
+    返回卷名；找不到返回 None。"""
+    for pack in pool.load_packs(_pools_dir(plugin), logger):
+        loaded = _load_pack_file(plugin, pack["pack"])
+        if loaded is None:
+            continue
+        path, data = loaded
+        entries = data.get("entries") if isinstance(data.get("entries"), list) else []
+        changed = False
+        for raw in entries:
+            e = pool.normalize_entry(raw, pack["pack"])
+            if e and e["id"] == cid:
+                mutate(e, raw)
+                changed = True
+                break
+        if changed:
+            _json_save(path, data)
+            return pack["pack"]
+    return None
+
+
 def _thumb_data_url(image_path: str, max_w: int = 420) -> str | None:
     """图片 → 缩略 data URL（JPEG）；失败返回 None。"""
     try:
@@ -203,10 +276,10 @@ async def h_pools(plugin) -> dict:
             if entry["id"] not in counts:
                 rows = plugin._store.list_portraits(entry["id"]) if plugin._store else []
                 counts[entry["id"]] = len(rows)
-                if rows:  # 卡片视图封面：首张立绘缩略（带缓存）
-                    thumbs[entry["id"]] = _thumb_cached(
-                        Path(plugin._data_dir) / rows[0]["file"], 160
-                    )
+                # 卡片视图封面（v0.5.0）：角色 cover 优先 → 首张立绘
+                cover_fp = _char_cover_path(plugin, entry)
+                if cover_fp:
+                    thumbs[entry["id"]] = _thumb_cached(cover_fp, 160)
             entries.append(entry)
         out_packs.append({"pack": pack["pack"], "title": pack["title"],
                           "enabled": pack["enabled"], "entries": entries})
@@ -545,12 +618,12 @@ async def h_group_pools_set(plugin) -> dict:
 # ---------- 作品库（按 series 聚合） ----------
 
 async def h_works(plugin) -> dict:
-    """按条目 series 聚合作品：封面取该作品第一个有立绘角色的缩略图。
-
-    没有 series 的条目不进作品库（仍在角色库可见）。
+    """按条目 series 聚合作品。封面优先级（v0.5.0）：works_meta.json 手动指定 →
+    角色条目 cover → 第一张立绘。没有 series 的条目不进作品库（角色库仍可见）。
     """
     if not plugin._store:
         return err("插件未初始化完成")
+    works_meta = _load_works_meta(plugin)
     work_map: dict = {}
     for pack in pool.load_packs(_pools_dir(plugin), logger):
         for raw in pack["entries"]:
@@ -568,27 +641,153 @@ async def h_works(plugin) -> dict:
             rows = plugin._store.list_portraits(e["id"])
             n = len(rows)
             w["portrait_count"] += n
+            char_cover = _char_cover_path(plugin, e)
             w["characters"].append({
                 "id": e["id"], "name": e["name"], "tier": e["tier"],
                 "color": e["color"], "verified": e["verified"], "portraits": n,
-                "thumb": _thumb_cached(Path(plugin._data_dir) / rows[0]["file"], 160) if rows else None,
+                "thumb": _thumb_cached(char_cover, 160) if char_cover else None,
+                "cover_path": char_cover,   # 作品封面候选（v0.5.0）
             })
     works = []
     for w in work_map.values():
         w["characters"].sort(key=lambda c: (not c["verified"], c["id"]))
         cover = None
-        for c in w["characters"]:
-            rows = plugin._store.list_portraits(c["id"])
-            if rows:
-                full = Path(plugin._data_dir) / rows[0]["file"]
-                if full.is_file():
-                    cover = _thumb_cached(full, 320)
+        meta_cover = str((works_meta.get(w["series"]) or {}).get("cover") or "")
+        if meta_cover:
+            fp = _safe_data_file(plugin, meta_cover)
+            if fp is not None:
+                cover = _thumb_cached(fp, 320)
+        if cover is None:
+            for c in w["characters"]:
+                if c.get("cover_path"):
+                    cover = _thumb_cached(c["cover_path"], 320)
                     if cover:
                         break
         w["cover"] = cover
+        w["meta_cover"] = meta_cover
         works.append(w)
     works.sort(key=lambda w: (-w["total"], w["series"]))
     return ok({"works": works, "version": _version_of()})
+
+
+async def h_set_cover(plugin) -> dict:
+    """设置/清除角色封面（entry.cover）。path 传空串清除。"""
+    body = await _body()
+    cid = str(body.get("id") or "").strip()
+    cover = str(body.get("path") or "").strip()
+    if not cid:
+        return err("缺少 id")
+    if cover and _safe_data_file(plugin, cover) is None:
+        return err("封面文件不存在或不在数据目录内")
+    pack_name = _set_entry_field(
+        plugin, cid,
+        lambda e, raw: (raw.__setitem__("cover", cover) if cover
+                        else raw.pop("cover", None)),
+    )
+    if pack_name is None:
+        return err(f"角色库里找不到 {cid}")
+    _THUMB_CACHE.clear()  # 封面变了，缩略缓存整体失效（键含路径，旧的不会命中，保险起见清掉）
+    return ok({"id": cid, "cover": cover})
+
+
+async def h_works_set_cover(plugin) -> dict:
+    """设置/清除作品封面（works_meta.json）。path 传空串清除。"""
+    body = await _body()
+    series = str(body.get("series") or "").strip()
+    cover = str(body.get("path") or "").strip()
+    if not series:
+        return err("缺少 series")
+    if cover and _safe_data_file(plugin, cover) is None:
+        return err("封面文件不存在或不在数据目录内")
+    meta = _load_works_meta(plugin)
+    slot = meta.get(series) if isinstance(meta.get(series), dict) else {}
+    if cover:
+        slot["cover"] = cover
+        meta[series] = slot
+    else:
+        meta.pop(series, None)
+    _save_works_meta(plugin, meta)
+    return ok({"series": series, "cover": cover})
+
+
+async def h_refs_list(plugin) -> dict:
+    """某角色的参考图库：strategy.refs 列表 + 主参考（strategy.ref）。"""
+    body = await _body()
+    cid = str(body.get("id") or _q("id", "") or "").strip()
+    if not cid:
+        return err("缺少 id")
+    entry = pool.find_entry(pool.load_packs(_pools_dir(plugin), logger), cid)
+    if entry is None:
+        return err(f"角色库里找不到「{cid}」")
+    st = entry.get("strategy") or {}
+    refs = st.get("refs") if isinstance(st.get("refs"), list) else []
+    items = []
+    for p in refs:
+        p = str(p or "").strip()
+        if not p:
+            continue
+        fp = _safe_data_file(plugin, p)
+        items.append({
+            "path": p, "exists": fp is not None,
+            "thumb": _thumb_cached(fp, 120) if fp is not None else None,
+        })
+    return ok({"id": cid, "items": items, "designated": str(st.get("ref") or "")})
+
+
+async def h_refs_bind(plugin) -> dict:
+    """把一张已存在的图片绑进角色的参考图库（strategy.refs，去重追加）。"""
+    body = await _body()
+    cid = str(body.get("id") or "").strip()
+    path = str(body.get("path") or "").strip()
+    if not cid or not path:
+        return err("缺少 id 或 path")
+    if _safe_data_file(plugin, path) is None and not re.match(r"^[a-zA-Z]+://", path):
+        return err("文件不存在或不在数据目录内")
+
+    def mutate(e, raw):
+        st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
+        refs = [str(x) for x in (st.get("refs") if isinstance(st.get("refs"), list) else [])]
+        if path not in refs:
+            refs.append(path)
+        st["refs"] = refs
+        raw["strategy"] = st
+
+    pack_name = _set_entry_field(plugin, cid, mutate)
+    if pack_name is None:
+        return err(f"角色库里找不到 {cid}")
+    return ok({"id": cid, "bound": path})
+
+
+async def h_refs_unbind(plugin) -> dict:
+    """从参考图库移除一张（可选连带删除文件）；若是主参考一并清空。"""
+    body = await _body()
+    cid = str(body.get("id") or "").strip()
+    path = str(body.get("path") or "").strip()
+    delete_file = bool(body.get("delete_file"))
+    if not cid or not path:
+        return err("缺少 id 或 path")
+
+    def mutate(e, raw):
+        st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
+        refs = [str(x) for x in (st.get("refs") or []) if str(x) != path]
+        st["refs"] = refs
+        if str(st.get("ref") or "") == path:
+            st["ref"] = ""
+        raw["strategy"] = st
+
+    pack_name = _set_entry_field(plugin, cid, mutate)
+    if pack_name is None:
+        return err(f"角色库里找不到 {cid}")
+    removed_file = False
+    if delete_file:
+        fp = _safe_data_file(plugin, path)
+        if fp is not None:
+            try:
+                fp.unlink()
+                removed_file = True
+            except Exception:
+                pass
+    return ok({"id": cid, "removed": path, "file_deleted": removed_file})
 
 
 async def h_workflows(plugin) -> dict:
@@ -746,6 +945,11 @@ def register(plugin) -> None:
         ("/portraits/list", h_portraits_list, ["GET", "POST"]),
         ("/portraits/delete", h_portrait_delete, ["POST"]),
         ("/refs/upload", h_refs_upload, ["POST"]),
+        ("/refs/list", h_refs_list, ["GET", "POST"]),
+        ("/refs/bind", h_refs_bind, ["POST"]),
+        ("/refs/unbind", h_refs_unbind, ["POST"]),
+        ("/pools/set_cover", h_set_cover, ["POST"]),
+        ("/works/set_cover", h_works_set_cover, ["POST"]),
         ("/jobs/start", h_job_start, ["POST"]),
         ("/jobs/status", h_job_status, ["GET", "POST"]),
         ("/jobs/archive", h_job_archive, ["POST"]),

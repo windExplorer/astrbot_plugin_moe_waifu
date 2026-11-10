@@ -141,11 +141,12 @@
                        description="还没有作品：给角色条目填上「作品名」，就会自动归入作品库"></n-empty>
             </div>
             <div v-if="currentWork">
-              <n-space align="center" style="margin-bottom: 12px;">
+              <n-space align="center" style="margin-bottom: 12px;" :wrap="true">
                 <n-button size="small" @click="backWorks">← 返回作品列表</n-button>
                 <b style="font-size: 16px;">{{ currentWork.series }}</b>
                 <n-tag size="small" :bordered="false">{{ catLabel(currentWork.category) }}</n-tag>
                 <span class="bind-tip">{{ currentWork.total }} 个角色 · {{ currentWork.verified }} 已验证 · {{ currentWork.portrait_count }} 张立绘</span>
+                <n-button size="small" @click="openWorkCover">设置作品封面</n-button>
               </n-space>
               <n-grid :cols="4" :x-gap="12" :y-gap="12">
                 <n-gi v-for="c in currentWork.characters" :key="c.id">
@@ -205,20 +206,25 @@
                   </span>
                 </n-space>
                 <div v-if="tryMode === 'img2img'">
-                  <n-space :wrap="true" size="small">
-                    <n-input v-model:value="tryOverride.ref"
-                             placeholder="参考图 URL / 本地路径 / 点右侧上传"
-                             style="width: 340px;"></n-input>
-                    <n-button size="small" :loading="uploading"
-                              @click="refFileInput && refFileInput.click()">上传参考图</n-button>
-                    <n-input-number v-model:value="tryOverride.denoise" :step="0.05" :min="0.2"
-                                    :max="0.95" placeholder="重绘强度"
-                                    style="width: 150px;"></n-input-number>
-                  </n-space>
+                  <div class="dropzone" :class="{ drag: tryDrag }"
+                       @dragover.prevent="tryDrag = true"
+                       @dragleave.prevent="tryDrag = false"
+                       @drop.prevent="onDropTry($event)">
+                    <n-space :wrap="true" size="small" align="center">
+                      <n-input v-model:value="tryOverride.ref"
+                               placeholder="参考图 URL / 本地路径 / 上传或拖入（留空=随机用已绑定参考图）"
+                               style="width: 340px;"></n-input>
+                      <n-button size="small" :loading="uploading"
+                                @click="refFileInput && refFileInput.click()">上传参考图</n-button>
+                      <n-input-number v-model:value="tryOverride.denoise" :step="0.05" :min="0.2"
+                                      :max="0.95" placeholder="重绘强度"
+                                      style="width: 150px;"></n-input-number>
+                    </n-space>
+                    <div class="bind-tip">文生图画不出像的角色用这个：上传/拖入一张官方立绘（干净单人图），
+                      本次试画按参考图重绘；参考图留空且该角色已绑定参考图时，按种子随机选一张。</div>
+                  </div>
                   <input type="file" accept="image/png,image/jpeg,image/webp"
                          style="display: none;" ref="refFileInput" @change="onRefFile">
-                  <div class="bind-tip">文生图画不出像的角色用这个：上传一张官方立绘（干净单人图），
-                    本次试画按参考图重绘；满意后「按本次参数保存到角色」会把画法写回条目。</div>
                 </div>
                 <div v-if="tryMode === 'lora'">
                   <n-input v-model:value="tryOverride.loras" type="textarea" :rows="2"
@@ -266,15 +272,21 @@
                      description="该角色还没有立绘：去试画台试一张，或点「补一张」"></n-empty>
             <n-grid :cols="5" :x-gap="10" :y-gap="10" v-if="galItems.length > 0">
               <n-gi v-for="it in galItems" :key="it.file">
-                <div class="gal-item">
-                  <img v-if="it.thumb" :src="it.thumb" alt="立绘缩略">
-                  <div v-else class="gal-meta">文件丢失</div>
-                  <n-button class="gal-del" size="tiny" type="error" quaternary
-                            @click="doDeletePortrait(it)">
-                    {{ delArm === it.file ? "确认删除" : "删除" }}
-                  </n-button>
-                  <div class="gal-meta">#{{ it.seq }} · {{ it.date }} · seed {{ it.seed }}</div>
-                </div>
+                  <div class="gal-item">
+                    <img v-if="it.thumb" :src="it.thumb" alt="立绘缩略">
+                    <div v-else class="gal-meta">文件丢失</div>
+                    <n-tag v-if="isCover(it)" class="gal-del" style="right: 76px;" size="tiny"
+                           :bordered="false" type="success">封面</n-tag>
+                    <n-button class="gal-del" size="tiny" quaternary type="info"
+                              @click="setPortraitCover(it)">
+                      {{ isCover(it) ? "★封面" : "设为封面" }}
+                    </n-button>
+                    <n-button class="gal-del" size="tiny" type="error" quaternary
+                              @click="doDeletePortrait(it)">
+                      {{ delArm === it.file ? "确认删除" : "删除" }}
+                    </n-button>
+                    <div class="gal-meta">#{{ it.seq }} · {{ it.date }} · seed {{ it.seed }}</div>
+                  </div>
               </n-gi>
             </n-grid>
           </div>
@@ -341,6 +353,27 @@
       </n-layout-content>
     </n-layout>
 
+    <!-- ============ 作品封面选择弹窗 ============ -->
+    <n-modal v-model:show="workCoverModal" preset="dialog" :title="'作品封面 · ' + (workCoverSeries || '')"
+             style="width: 560px;">
+      <n-space vertical size="small">
+        <div class="bind-tip">从该作品的角色立绘/封面里选一张作为作品卡封面；清除后回退自动选择。</div>
+        <n-grid :cols="4" :x-gap="8" :y-gap="8" v-if="workCoverCandidates.length > 0">
+          <n-gi v-for="c in workCoverCandidates" :key="c.id">
+            <div class="gal-item" @click="setWorkCover(c)">
+              <img v-if="c.thumb" :src="c.thumb" alt="候选封面">
+              <span v-else class="work-initial">{{ c.name.slice(0, 1) }}</span>
+              <div class="gal-meta">{{ c.name }}{{ currentWork && currentWork.meta_cover === c.cover_path ? " · 当前" : "" }}</div>
+            </div>
+          </n-gi>
+        </n-grid>
+        <n-empty v-else description="该作品还没有可用图片：先去试画或补图"></n-empty>
+        <n-space>
+          <n-button size="small" @click="setWorkCover(null)">清除作品封面（回退自动）</n-button>
+        </n-space>
+      </n-space>
+    </n-modal>
+
     <!-- ============ 编辑抽屉（新增/编辑角色） ============ -->
     <n-drawer v-model:show="showDrawer" :width="540">
       <n-drawer-content :title="drawerTitle" closable>
@@ -390,7 +423,38 @@
                       filterable tag clearable
                       placeholder="图生图工作流（留空=全局配置→萌绘默认）"></n-select>
             <n-input v-model:value="form.strategy_ref"
-                     placeholder="参考图 URL 或本地路径（干净的官方单人立绘）"></n-input>
+                     placeholder="主参考图 URL / 本地路径（可留空=从下方参考图库随机）"></n-input>
+            <div class="dropzone" :class="{ drag: drawerDrag }"
+                 @dragover.prevent="drawerDrag = true"
+                 @dragleave.prevent="drawerDrag = false"
+                 @drop.prevent="onDropDrawer($event)">
+              <n-space :wrap="true" size="small" align="center">
+                <n-button size="small" :loading="drawerRefsLoading"
+                          @click="refDrawerInput && refDrawerInput.click()">上传添加参考图</n-button>
+                <span class="bind-tip">或把图片拖到这里 · 可上传多张，点「设为主参考」指定默认用哪张</span>
+              </n-space>
+              <n-grid :cols="6" :x-gap="8" :y-gap="8" v-if="drawerRefs.length > 0"
+                      style="margin-top: 8px;">
+                <n-gi v-for="r in drawerRefs" :key="r.path">
+                  <div class="gal-item">
+                    <img v-if="r.thumb" :src="r.thumb" alt="参考图">
+                    <div v-else class="gal-meta">文件丢失</div>
+                    <n-button class="gal-del" size="tiny" quaternary type="info"
+                              @click="designateRef(r.path)">
+                      {{ form.strategy_ref === r.path ? "★主参考" : "设为主参考" }}
+                    </n-button>
+                    <n-button class="gal-del" style="right: 64px;" size="tiny" quaternary
+                              type="error" @click="unbindDrawerRef(r.path)">移除</n-button>
+                    <div class="gal-meta">{{ form.strategy_ref === r.path ? "默认使用" : "备选" }}</div>
+                  </div>
+                </n-gi>
+              </n-grid>
+              <div class="bind-tip" v-if="drawerRefs.length === 0">
+                还没有绑定参考图：上传后会自动绑定到该角色；图生图时若无主参考则随机选一张。
+              </div>
+            </div>
+            <input type="file" accept="image/png,image/jpeg,image/webp"
+                   style="display: none;" ref="refDrawerInput" @change="onDrawerRefFile">
             <n-input-number v-model:value="form.strategy_denoise" :step="0.05" :min="0.2" :max="0.95"
                             placeholder="重绘强度" style="width: 220px;"></n-input-number>
           </div>
@@ -730,6 +794,67 @@
         menu.value = "gallery";
       }
 
+      // ---- 抽屉参考图库（多张绑定/主参考/删除，v0.5.0） ----
+      var drawerRefs = Vue.ref([]);
+      var drawerRefsLoading = Vue.ref(false);
+      var drawerDrag = Vue.ref(false);
+      var refDrawerInput = Vue.ref(null);
+      function loadDrawerRefs() {
+        if (!form.value.id) { drawerRefs.value = []; return; }
+        drawerRefsLoading.value = true;
+        apiGet("refs/list", { id: form.value.id }).then(function (res) {
+          drawerRefs.value = (res && res.items) || [];
+        }).catch(function () { drawerRefs.value = []; }).finally(function () {
+          drawerRefsLoading.value = false;
+        });
+      }
+      function bindAndReloadRefs(path) {
+        return apiPost("refs/bind", { id: form.value.id, path: path })
+          .then(function () { return loadDrawerRefs(); });
+      }
+      async function onDrawerRefFile(ev) {
+        var file = ev && ev.target && ev.target.files && ev.target.files[0];
+        if (!file || !form.value.id) return;
+        try {
+          var res = await apiUpload(file);
+          await bindAndReloadRefs((res && res.path) || "");
+          message.success("参考图已上传并绑定：" + ((res && res.rel) || ""));
+        } catch (e) { /* 已提示 */ } finally {
+          if (ev.target) ev.target.value = "";
+        }
+      }
+      function onDropDrawer(ev) {
+        drawerDrag.value = false;
+        var file = ev && ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+        if (!file || !form.value.id) return;
+        uploading.value = true;
+        apiUpload(file).then(function (res) {
+          return bindAndReloadRefs((res && res.path) || "");
+        }).then(function () {
+          message.success("参考图已上传并绑定");
+        }).catch(function () { /* 已提示 */ }).finally(function () {
+          uploading.value = false;
+        });
+      }
+      function designateRef(path) {
+        form.value.strategy_ref = path;
+        message.success("已设为主参考（保存条目后生效）");
+      }
+      async function unbindDrawerRef(path) {
+        try {
+          var res = await apiPost("refs/unbind", { id: form.value.id, path: path });
+          if (form.value.strategy_ref === path) { form.value.strategy_ref = ""; }
+          message.success("已移除参考图" + (res && res.file_deleted ? "（文件已删）" : ""));
+          await loadDrawerRefs();
+        } catch (e) { /* 已提示 */ }
+      }
+      Vue.watch(function () {
+        return [showDrawer.value, form.value.strategy_type, form.value.id];
+      }, function (v) {
+        if (v[0] && v[1] === "img2img" && v[2]) { loadDrawerRefs(); }
+        else { drawerRefs.value = []; }
+      });
+
       // ---- 角色表格 ----
       var entryCols = Vue.computed(function () {
         return [
@@ -790,6 +915,33 @@
       });
 
       // ---- 试画台 ----
+      var tryDrag = Vue.ref(false);
+      async function onRefFile(ev) {
+        var file = ev && ev.target && ev.target.files && ev.target.files[0];
+        if (!file) return;
+        uploading.value = true;
+        try {
+          var res = await apiUpload(file);
+          tryOverride.value.ref = (res && res.path) || "";
+          if (tryEntry.value) {
+            // 上传的参考图同步绑进该角色的参考图库（存起来，后续可指定/随机）
+            apiPost("refs/bind", { id: tryEntry.value.id, path: (res && res.path) || "" })
+              .then(function () { return loadAll(); })
+              .catch(function () { /* 绑定失败不影响本次试画 */ });
+          }
+          message.success("参考图已上传：" + ((res && res.rel) || ""));
+        } catch (e) { /* 已提示 */ } finally {
+          uploading.value = false;
+          if (ev.target) ev.target.value = "";
+        }
+      }
+      function onDropTry(ev) {
+        tryDrag.value = false;
+        var file = ev && ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+        if (!file) return;
+        var fakeEv = { target: { files: [file] } };
+        onRefFile(fakeEv);
+      }
       var tryCharId = Vue.ref("");
       var tryRunning = Vue.ref(false);
       var tryError = Vue.ref("");
@@ -938,19 +1090,6 @@
           tryRunning.value = false;
         }
       }
-      async function onRefFile(ev) {
-        var file = ev && ev.target && ev.target.files && ev.target.files[0];
-        if (!file) return;
-        uploading.value = true;
-        try {
-          var res = await apiUpload(file);
-          tryOverride.value.ref = (res && res.path) || "";
-          message.success("参考图已上传：" + ((res && res.rel) || ""));
-        } catch (e) { /* 已提示 */ } finally {
-          uploading.value = false;
-          if (ev.target) ev.target.value = "";
-        }
-      }
       async function adoptTryParams() {
         // 把本次试画参数写回角色条目（画法/参考图/重绘强度随试画固化）
         var e = effectiveTryEntry();
@@ -1029,6 +1168,22 @@
           await loadGallery();
         } catch (e) { /* 已提示 */ }
       }
+      // 封面（v0.5.0）：entry.cover 优先于首张立绘
+      var galCoverPath = Vue.computed(function () {
+        var e = allEntries.value.find(function (x) { return x.id === galCharId.value; });
+        return (e && e.cover) || "";
+      });
+      function isCover(it) {
+        return !!galCoverPath.value && it.file === galCoverPath.value;
+      }
+      async function setPortraitCover(it) {
+        try {
+          await apiPost("pools/set_cover", { id: galCharId.value, path: it.file });
+          message.success("已设为角色封面：" + it.file);
+          await loadAll();
+          await loadGalItems();
+        } catch (e) { /* 已提示 */ }
+      }
       async function doRefill() {
         if (!galCharId.value || refillRunning.value) return;
         refillRunning.value = true;
@@ -1062,6 +1217,29 @@
       }
       function openWork(w) { currentWork.value = w; }
       function backWorks() { currentWork.value = null; }
+      // 作品封面（v0.5.0）：works_meta.json 指定，回退角色 cover/首张立绘
+      var workCoverModal = Vue.ref(false);
+      var workCoverSeries = Vue.ref("");
+      var workCoverCandidates = Vue.computed(function () {
+        return (currentWork.value && currentWork.value.characters || [])
+          .filter(function (c) { return c.cover_path || c.thumb; });
+      });
+      function openWorkCover() {
+        workCoverSeries.value = currentWork.value ? currentWork.value.series : "";
+        workCoverModal.value = true;
+      }
+      async function setWorkCover(c) {
+        var path = c ? (c.cover_path || "") : "";
+        try {
+          await apiPost("works/set_cover", { series: workCoverSeries.value, path: path });
+          message.success(path ? "作品封面已设置" : "作品封面已清除（回退自动选择）");
+          workCoverModal.value = false;
+          await loadWorks();
+          currentWork.value = works.value.find(function (w) {
+            return w.series === workCoverSeries.value;
+          }) || null;
+        } catch (e) { /* 已提示 */ }
+      }
       function gotoTry(c) {
         cameFrom.value = menu.value;   // 试画台「← 返回」的目标
         tryCharId.value = c.id;
@@ -1176,6 +1354,9 @@
         form: form, saving: saving, tierOpts: tierOpts, drawerPackOpts: drawerPackOpts,
         openNew: openNew, openEdit: openEdit, saveForm: saveForm,
         doDeleteEntry: doDeleteEntry, doToggleVerified: doToggleVerified, togglePack: togglePack,
+        drawerRefs: drawerRefs, drawerRefsLoading: drawerRefsLoading, drawerDrag: drawerDrag,
+        refDrawerInput: refDrawerInput, onDrawerRefFile: onDrawerRefFile,
+        onDropDrawer: onDropDrawer, designateRef: designateRef, unbindDrawerRef: unbindDrawerRef,
         catLabel: catLabel, stratLabel: stratLabel, portraitCount: portraitCount, delArm: delArm,
         tryCharId: tryCharId, charOpts: charOpts, tryEntry: tryEntry,
         tryRunning: tryRunning, tryError: tryError, tryPreview: tryPreview, tryOk: tryOk,
@@ -1184,11 +1365,16 @@
         tryMode: tryMode, tryOverride: tryOverride, tryElapsed: tryElapsed,
         uploading: uploading, refFileInput: refFileInput, onRefFile: onRefFile,
         cancelTryWait: cancelTryWait, adoptTryParams: adoptTryParams, backFromTry: backFromTry,
+        tryDrag: tryDrag, onDropTry: onDropTry,
         works: works, worksLoading: worksLoading, currentWork: currentWork,
         openWork: openWork, backWorks: backWorks, gotoTry: gotoTry, openEditById: openEditById,
+        workCoverModal: workCoverModal, workCoverSeries: workCoverSeries,
+        workCoverCandidates: workCoverCandidates, openWorkCover: openWorkCover,
+        setWorkCover: setWorkCover,
         galCharId: galCharId, galCharOpts: galCharOpts, galItems: galItems,
         loadingGal: loadingGal, refillRunning: refillRunning, refillError: refillError,
         doRefill: doRefill, doDeletePortrait: doDeletePortrait, loadGallery: loadGallery,
+        isCover: isCover, setPortraitCover: setPortraitCover,
         bindText: bindText, parsedBind: parsedBind, bindSaving: bindSaving,
         doSaveBind: doSaveBind,
         configSections: configSections, configModel: configModel, configSaving: configSaving,
