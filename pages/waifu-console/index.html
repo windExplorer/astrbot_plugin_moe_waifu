@@ -282,13 +282,17 @@
                     <n-select v-else-if="it.options" v-model:value="configModel[it.key]"
                               :options="optOpts(it)" style="width: 280px;"></n-select>
                     <n-select v-else-if="isWorkflowKey(it.key)" v-model:value="configModel[it.key]"
-                              :options="wfOpts(it.key === 'img2img_workflow')" filterable tag clearable
+                              :options="wfOpts(it.key === 'img2img_workflow' ? 'img' : 'txt')" filterable tag clearable
                               placeholder="留空用萌绘默认" style="width: 340px;"></n-select>
                     <n-input v-else-if="isMulti(it)" v-model:value="configModel[it.key]"
                              type="textarea" :rows="4"></n-input>
                     <n-input v-else v-model:value="configModel[it.key]" style="width: 420px;"></n-input>
                     <div class="bind-tip" style="margin-top:4px; max-width: 560px;">{{ it.hint }}</div>
                   </div>
+                </div>
+                <div class="bind-tip" v-if="workflowsLoaded && wfOpts('img').length === 0">
+                  ⚠️ 当前没有标记 [支持图生图] 的工作流：工作流需在萌绘的工作流配置里
+                  声明图生图节点才会出现在图生图列表；下拉可直接手输名称应急。
                 </div>
                 <div class="bind-tip">分群绑定（group_pools）请用「分群绑定」页签管理，此处不重复展示。</div>
               </n-space>
@@ -343,7 +347,7 @@
                    type="textarea" :rows="2"
                    placeholder="LoRA 名:权重，每行一个，如 miku_char_v2:0.8（须已在萌绘/ComfyUI 侧安装）"></n-input>
           <div v-if="form.strategy_type === 'img2img'">
-            <n-select v-model:value="form.strategy_img2img_workflow" :options="wfOpts(true)"
+            <n-select v-model:value="form.strategy_img2img_workflow" :options="wfOpts('img')"
                       filterable tag clearable
                       placeholder="图生图工作流（留空=全局配置→萌绘默认）"></n-select>
             <n-input v-model:value="form.strategy_ref"
@@ -513,12 +517,11 @@
           }
         } catch (e) { /* 已提示；下拉退化为手动输入 */ }
       }
-      function wfOpts(onlyImg2img) {
-        // 语义（萌绘文档）：[支持图生图] 的工作流文生图/图生图两用，[仅文生图] 只能文生图
-        // → 图生图下拉只留支持图生图的；文生图下拉显示全部（标记不再贴进选项，
-        // v0.3.3 全贴 [图生图] 让两个下拉看起来一样，被用户指出筛选错乱）。
+      function wfOpts(kind) {
+        // 用户口径（v0.3.5）：严格互斥——文生图只拉 [仅文生图]，图生图只拉 [支持图生图]
+        // kind: "img" | "txt"
         return workflows.value
-          .filter(function (w) { return !onlyImg2img || w.img2img; })
+          .filter(function (w) { return kind === "img" ? w.img2img : !w.img2img; })
           .map(function (w) {
             return { label: w.name + (w.anima ? " 【动漫】" : ""), value: w.name };
           });
