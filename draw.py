@@ -191,6 +191,44 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int, even
     return str(first), "ok", "", duration
 
 
+def effective_entry(entry: dict, override: dict) -> dict:
+    """试画台临时参数 → 生效条目（深拷贝，绝不改原条目）。
+
+    override: {strategy_type?: base|lora|img2img, ref?, denoise?, img2img_workflow?, loras?: [str]}
+    仅覆盖试画本次用到的字段；img2img 时清掉条目自带的 img2img_workflow（跟随本次输入/
+    全局配置），未传 denoise 则沿用条目/全局。
+    """
+    import json as _json
+
+    e = _json.loads(_json.dumps(entry, ensure_ascii=False))
+    st = dict(e.get("strategy") or {}) if isinstance(e.get("strategy"), dict) else {}
+    t = str((override or {}).get("strategy_type") or "").strip().lower()
+    if t in ("base", "lora", "img2img"):
+        st["type"] = t
+        e["strategy_type"] = t
+    if st.get("type") == "img2img":
+        ref = str((override or {}).get("ref") or "").strip()
+        if ref:
+            st["ref"] = ref
+        dn = (override or {}).get("denoise")
+        if dn is not None:
+            try:
+                st["denoise"] = float(dn)
+            except (TypeError, ValueError):
+                pass
+        wf = str((override or {}).get("img2img_workflow") or "").strip()
+        if wf:
+            st["img2img_workflow"] = wf
+        else:
+            st.pop("img2img_workflow", None)
+    if st.get("type") == "lora":
+        loras = (override or {}).get("loras")
+        if isinstance(loras, list) and loras:
+            st["loras"] = [str(x) for x in loras if str(x).strip()]
+    e["strategy"] = st
+    return e
+
+
 def workflow_img2img_capable(entry: dict, base_roles: dict | None = None) -> bool:
     """判断工作流能否图生图（用户口径 v0.3.6，替代 comfyui_workflows 的失真标记）。
 

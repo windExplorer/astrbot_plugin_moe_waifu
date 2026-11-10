@@ -69,4 +69,21 @@ check("未绑定+手填 image_node", draw.workflow_img2img_capable(
 check("未绑定纯文生图", draw.workflow_img2img_capable(
     {"name": "动漫文生图"}) is False)
 
+# effective_entry（v0.4.0 试画台临时参数 → 生效条目）
+base_entry = {"id": "miku", "name": "初音未来", "strategy": {"type": "base"},
+              "strategy_type": "base", "tags_en": "hatsune miku"}
+eff = draw.effective_entry(base_entry, {"strategy_type": "img2img", "ref": "refs/a.png",
+                                        "denoise": 0.6})
+check("覆盖为 img2img", eff["strategy_type"] == "img2img"
+      and eff["strategy"]["type"] == "img2img")
+check("参考图/重绘强度写入", eff["strategy"]["ref"] == "refs/a.png"
+      and eff["strategy"]["denoise"] == 0.6)
+check("原条目不被修改", base_entry["strategy"]["type"] == "base")
+eff2 = draw.effective_entry(base_entry, {"strategy_type": "img2img", "ref": "x.png"})
+check("未传 denoise 不写入", "denoise" not in eff2["strategy"])
+eff3 = draw.effective_entry(base_entry, None)
+check("无覆盖=原样", eff3["strategy"]["type"] == "base")
+eff4 = draw.effective_entry(base_entry, {"strategy_type": "lora", "loras": ["m:0.8", " "]})
+check("lora 覆盖", eff4["strategy"]["loras"] == ["m:0.8"])
+
 print("test_draw: ALL OK")

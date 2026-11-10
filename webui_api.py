@@ -218,6 +218,7 @@ async def h_pools(plugin) -> dict:
         "version": _version_of(),
         "anima_ready": anima_ready,
         "quota": int(plugin._cfg("portraits_per_char", 5)),
+        "draw_timeout": int(plugin._cfg("draw_timeout", 120)),
         "allow_unverified": bool(plugin._cfg("allow_unverified", False)),
     })
 
@@ -400,6 +401,37 @@ async def h_portrait_delete(plugin) -> dict:
 
 # ---------- 试画 / 补图（后台 job + 轮询） ----------
 
+async def h_refs_upload(plugin) -> dict:
+    """工坊上传参考图（bridge.upload → Dashboard 以 multipart 字段 file 转发到这里）。
+
+    存入 data 目录 refs/（持久保留，路径可直接填进条目 strategy.ref）。
+    """
+    if request is None:
+        return err("无请求上下文")
+    try:
+        files = await request.files
+    except Exception:
+        files = getattr(request, "files", None)
+    f = files.get("file") if files else None
+    if f is None:
+        return err("缺少 file 字段（multipart）")
+    suffix = Path(f.filename or "").suffix.lower()
+    if suffix not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        return err("仅支持 png/jpg/jpeg/webp/gif")
+    raw = f.read()
+    if not raw:
+        return err("空文件")
+    if len(raw) > 15 * 1024 * 1024:
+        return err("图片超过 15MB 上限")
+    refs_dir = Path(plugin._data_dir) / "refs"
+    refs_dir.mkdir(parents=True, exist_ok=True)
+    stem = re.sub(r"[^0-9A-Za-z._-]", "_", Path(f.filename or "ref").stem)[:40] or "ref"
+    fname = f"upload_{int(time.time())}_{stem}{suffix}"
+    (refs_dir / fname).write_bytes(raw)
+    return ok({"path": str(refs_dir / fname), "rel": f"refs/{fname}",
+               "size": len(raw), "name": fname})
+
+
 async def h_job_start(plugin) -> dict:
     body = await _body()
     kind = str(body.get("kind") or "try").strip()
@@ -411,6 +443,14 @@ async def h_job_start(plugin) -> dict:
         return err(f"角色库里找不到「{cid}」")
     if not plugin._store:
         return err("插件未初始化完成")
+    # 试画台临时参数（v0.4.0）：override 存在时按其生成生效条目（不改原条目）
+    override = body.get("override") if isinstance(body.get("override"), dict) else None
+    if override:
+        entry = draw.effective_entry(entry, override)
+        if entry["strategy_type"] == "img2img" and not str(
+            (entry.get("strategy") or {}).get("ref") or ""
+        ).strip():
+            return err("图生图重绘需要参考图：先上传图片或填 URL / 本地路径")
     job_id = f"{kind}:{cid}:{int(time.time() * 1000)}"
     plugin._jobs[job_id] = {"status": "running", "kind": kind, "char_id": cid,
                             "entry_label": pool.entry_label(entry), "src_path": ""}
@@ -705,6 +745,7 @@ def register(plugin) -> None:
         ("/portraits/index", h_portraits_index, ["GET"]),
         ("/portraits/list", h_portraits_list, ["GET", "POST"]),
         ("/portraits/delete", h_portrait_delete, ["POST"]),
+        ("/refs/upload", h_refs_upload, ["POST"]),
         ("/jobs/start", h_job_start, ["POST"]),
         ("/jobs/status", h_job_status, ["GET", "POST"]),
         ("/jobs/archive", h_job_archive, ["POST"]),
