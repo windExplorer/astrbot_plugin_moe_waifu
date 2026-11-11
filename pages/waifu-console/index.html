@@ -23,19 +23,35 @@
     background: rgba(128,128,128,.12);
     transition: transform .15s ease, box-shadow .15s ease; }
   .gal-item:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(120,80,120,.14); }
-  /* 立绘是 700×1200 竖图：缩略卡统一 7:12 竖版比例（横图裁切体验差，v0.5.10） */
+  /* 立绘是 700×1200 竖图：缩略卡统一 7:12 竖版比例（横图裁切体验差，v0.5.10）。
+     v0.6.1：同样 max-height 封顶（列数少时不疯长），偏上裁切保脸 */
   .gal-item img { width: 100%; height: auto; aspect-ratio: 7 / 12;
-    object-fit: cover; display: block; }
+    max-height: 320px; object-fit: cover; object-position: 50% 12%; display: block; }
   .gal-meta { font-size: 11px; opacity: .65; padding: 4px 8px; }
   .bind-tip { font-size: 12px; opacity: .62; margin-top: 8px; }
   .work-card { cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; }
   .work-card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(150,90,130,.14); }
-  /* 角色卡/作品卡封面同为竖版比例（7:12），与立绘一致 */
-  .work-cover { height: auto; aspect-ratio: 7 / 12; border-radius: 8px;
-    overflow: hidden; display: flex; align-items: center; justify-content: center; }
-  .work-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  /* 角色卡/作品卡封面同为竖版比例（7:12），与立绘一致。
+     v0.6.1：max-height 封顶——列数少时不再按比例疯长（object-position 偏上保住脸），
+     封面高度封顶后所有卡片高度一致，消除参差不齐 */
+  .work-cover { height: auto; aspect-ratio: 7 / 12; max-height: 320px;
+    border-radius: 8px; overflow: hidden; display: flex;
+    align-items: center; justify-content: center; }
+  .work-cover-img { width: 100%; height: 100%; object-fit: cover;
+    object-position: 50% 12%; display: block; }
   .work-initial { font-size: 36px; color: #fff; opacity: .9; font-weight: 700;
     letter-spacing: 2px; }
+  /* v0.6.1 卡片文字区定高：名字行/元信息行单行省略号——
+     作品名再长也不折行，卡片总高恒定（等高网格的前提） */
+  .card-title-row { display: flex; align-items: center; gap: 6px;
+    margin-top: 8px; height: 22px; overflow: hidden;
+    white-space: nowrap; flex-wrap: nowrap; }
+  .card-title-row b { flex: 0 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; }
+  .card-title-row .n-tag { flex: none; }
+  .card-meta { font-size: 11px; opacity: .55; margin-top: 4px; height: 15px;
+    line-height: 15px; overflow: hidden; white-space: nowrap;
+    text-overflow: ellipsis; }
   .cover-switch { position: absolute; top: 6px; right: 6px; }
   .pack-pill { display: inline-flex; align-items: center; gap: 8px;
     background: rgba(214,51,132,.06); border: 1px solid rgba(214,51,132,.22);
@@ -87,7 +103,7 @@
     border-top: 1px solid rgba(128,128,128,.14); }
   /* ---- 卡片操作行（v0.6.0）：图标按钮 + tooltip 取代一排文字按钮 ---- */
   .card-ops { display: flex; justify-content: space-between; align-items: center;
-    margin-top: 8px; padding: 0 2px; }
+    margin-top: 6px; padding: 0 2px; }
   /* ---- 立绘/参考图悬停操作条（v0.6.0）：hover 才浮现，不再常驻压在图上 ---- */
   .gal-ops { position: absolute; top: 6px; right: 6px; display: flex; gap: 2px;
     background: rgba(255,255,255,.88); border-radius: 8px; padding: 2px;
@@ -138,6 +154,10 @@
               </n-radio-group>
               <n-button type="primary" size="small" @click="openNew">新增角色</n-button>
               <n-button size="small" :loading="loadingAll" @click="loadAll">刷新</n-button>
+              <!-- v0.6.1：每行卡片数快捷调整（写回 ui_grid_cols，免去去配置页） -->
+              <span style="font-size: 12px; opacity: .6;">每行</span>
+              <n-select v-model:value="uiColsSel" :options="colOpts" size="small"
+                        style="width: 88px;"></n-select>
               <n-select v-model:value="filterPack" :options="packOpts" size="small"
                         style="width: 130px;"></n-select>
               <n-select v-model:value="filterCat" :options="catOpts" size="small"
@@ -173,12 +193,12 @@
                       <n-switch class="cover-switch" size="small" :value="e.verified"
                                 @update:value="doToggleVerified(e)"></n-switch>
                     </div>
-                    <n-space size="small" align="center" style="margin-top: 8px;">
+                    <div class="card-title-row">
                       <b>{{ e.name }}</b>
                       <n-tag v-if="e.tier" size="tiny" :bordered="false">{{ e.tier }}</n-tag>
                       <n-tag size="tiny" :bordered="false">{{ catLabel(e.category) }}</n-tag>
-                    </n-space>
-                    <div class="bind-tip">{{ e.id }} · {{ e.series || "未填作品" }} · 立绘 {{ portraitCount(e.id) }}/{{ meta.quota }}</div>
+                    </div>
+                    <div class="card-meta">{{ e.id }} · {{ e.series || "未填作品" }} · 立绘 {{ portraitCount(e.id) }}/{{ meta.quota }}</div>
                     <div class="card-ops">
                       <w-icon-btn icon="wand" mode="soft" type="primary" tip="去试画台"
                                   @click="gotoTryFromChars(e)"></w-icon-btn>
@@ -214,11 +234,11 @@
                       <img v-if="w.cover" :src="w.cover" class="work-cover-img">
                       <span v-else class="work-initial">{{ w.series.slice(0, 2) }}</span>
                     </div>
-                    <n-space size="small" align="center" style="margin-top: 8px;">
+                    <div class="card-title-row">
                       <b>{{ w.series }}</b>
                       <n-tag size="tiny" :bordered="false">{{ catLabel(w.category) }}</n-tag>
-                    </n-space>
-                    <div class="bind-tip">{{ w.total }} 个角色 · {{ w.verified }} 已验证 · {{ w.portrait_count }} 张立绘</div>
+                    </div>
+                    <div class="card-meta">{{ w.total }} 个角色 · {{ w.verified }} 已验证 · {{ w.portrait_count }} 张立绘</div>
                   </n-card>
                 </n-gi>
               </n-grid>
@@ -242,15 +262,15 @@
                            @click.stop="openViewer(c.cover_path, c.name)">
                       <span v-else class="work-initial">{{ c.name.slice(0, 1) }}</span>
                     </div>
-                    <n-space size="small" align="center" style="margin-top: 8px;">
+                    <div class="card-title-row">
                       <b>{{ c.name }}</b>
                       <n-tag v-if="c.tier" size="tiny" :bordered="false">{{ c.tier }}</n-tag>
                       <n-tag size="tiny" :bordered="false" :type="c.verified ? 'success' : 'warning'">
                         {{ c.verified ? "已验证" : "未验证" }}
                       </n-tag>
-                    </n-space>
+                    </div>
                     <div class="card-ops">
-                      <span class="bind-tip" style="margin-top: 0;">{{ c.id }} · 立绘 {{ c.portraits }}</span>
+                      <span class="card-meta" style="margin-top: 0;">{{ c.id }} · 立绘 {{ c.portraits }}</span>
                       <div style="display: flex; gap: 4px; align-items: center;">
                         <w-icon-btn icon="wand" mode="soft" type="primary" tip="去试画台"
                                     @click.stop="gotoTry(c)"></w-icon-btn>
@@ -2192,6 +2212,19 @@
         if (!n || n < 2) n = 4;
         return Math.min(10, Math.max(2, Math.round(n)));
       });
+      // 每行卡片数快捷下拉（v0.6.1）：改完即时写盘，不必去配置页；失败自动回显示
+      var colOpts = Array.apply(null, Array(9)).map(function (_, i) {
+        return { label: (i + 2) + " 张", value: i + 2 };
+      });
+      var uiColsSel = Vue.computed({
+        get: function () { return uiCols.value; },
+        set: function (v) {
+          var n = Math.min(10, Math.max(2, Math.round(Number(v) || 4)));
+          apiPost("config", { values: { ui_grid_cols: n } }).then(function () {
+            configModel.value["ui_grid_cols"] = n;  // 配置页模型同步
+          }).catch(function () { /* 已提示；computed 未写 → 下拉弹回原值 */ });
+        }
+      });
       function isMulti(it) { return MULTILINE_KEYS.indexOf(it.key) >= 0; }
       function optOpts(it) {
         var opts = it.options || [];
@@ -2330,7 +2363,7 @@
         bindText: bindText, parsedBind: parsedBind, bindSaving: bindSaving,
         doSaveBind: doSaveBind,
         configSections: configSections, configModel: configModel, configSaving: configSaving,
-        uiCols: uiCols,
+        uiCols: uiCols, colOpts: colOpts, uiColsSel: uiColsSel,
         saveConfig: saveConfig, optOpts: optOpts, isMulti: isMulti,
         isWorkflowKey: isWorkflowKey, wfOpts: wfOpts,
         isLlmKey: isLlmKey, llmOpts: llmOpts
