@@ -21,6 +21,13 @@ def check(name, cond):
     print(f"ok: {name}")
 
 
+class _BrokenContext:
+    """无 astrbot 环境桩：任何探测都抛错。"""
+
+    def get_provider_by_id(self, pid):
+        raise RuntimeError("no astrbot")
+
+
 ENTRY = {"id": "miku", "name": "初音未来", "series": "Vocaloid",
          "tags_en": "hatsune miku, twintails", "strategy_type": "img2img"}
 
@@ -59,7 +66,7 @@ empty_picks = {k: {"zh": "", "en": ""} for k in prompt_gen.DIMS}
 inst0 = prompt_gen.build_local_instruction(ENTRY, empty_picks)
 check("无变化时是通用重绘指令", "根据参考图" in inst0 and "面部特征" in inst0)
 
-# ---------- t2i tag 追加 ----------
+# ---------- t2i tag 追加（danbooru 系） ----------
 tag_prompt = prompt_gen.build_t2i_prompt(ENTRY, prompt_gen.pick_variations(42))
 check("t2i 保留角色 tags", "hatsune miku" in tag_prompt)
 check("t2i 含构图基础词", tag_prompt.startswith("1girl, solo"))
@@ -67,6 +74,24 @@ en_extra = [en for k in prompt_gen.DIMS
             if (en := prompt_gen.pick_variations(42)[k].get("en"))]
 if en_extra:
     check("t2i 追加变化 tag", all(e in tag_prompt for e in en_extra))
+
+# ---------- t2i 自然语言系（MOSS 口径）与 Qwen 长描述兜底 ----------
+nat = prompt_gen.build_t2i_natural_local(ENTRY, prompt_gen.pick_variations(42))
+check("natural 兜底按 MOSS Tag 顺序（Quality 开头）", nat.startswith("best quality, highres, solo"))
+check("natural 兜底保留角色 tags", "hatsune miku" in nat)
+check("natural 兜底禁质量词堆砌", "8k" not in nat and "highly detailed" not in nat)
+qwl = prompt_gen.build_t2i_qwen_local(ENTRY, prompt_gen.pick_variations(42))
+check("qwen 兜底是中文长描述", "竖版" in qwl and "。" in qwl)
+
+# 风格探测：无 astrbot 环境 → 回落 danbooru（安全默认）
+check("探测失败回落 danbooru",
+      prompt_gen.detect_t2i_style(_BrokenContext(), "moss") == "danbooru")
+
+# 分风格元提示词
+mp_nat = prompt_gen.build_t2i_meta_prompt(ENTRY, prompt_gen.pick_variations(777), "natural")
+check("natural 元提示词含身份锚定要求", "Character:" in mp_nat and "Identity tags" in mp_nat)
+mp_q = prompt_gen.build_t2i_meta_prompt(ENTRY, prompt_gen.pick_variations(777), "qwen")
+check("qwen 元提示词要求中文长描述", "连贯中文长描述" in mp_q and "初音未来" in mp_q)
 
 # ---------- LLM 输出清洗 ----------
 check("剥 markdown 代码块", prompt_gen.sanitize_llm_output(
@@ -84,10 +109,6 @@ check("元提示词含角色信息", "初音未来" in meta and "Vocaloid" in me
 check("元提示词含变化维度", "服装：" in meta)
 
 # ---------- 生成主入口：无 astrbot 环境兜底 ----------
-class _BrokenContext:
-    def get_provider_by_id(self, pid):
-        raise RuntimeError("no astrbot")
-
 async def _run():
     return await prompt_gen.build_generation_prompt(
         _BrokenContext(),

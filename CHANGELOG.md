@@ -2,6 +2,38 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.5.8 (2026-11-11)
+
+文生图提示词按工作流底模风格自适应（MOSS-Image / Qwen / danbooru）（版本 v0.5.7 -> v0.5.8）。
+
+- **需求（用户指出「你是不是不懂 moss 模型」）**：v0.5.6 起文生图一律按
+  danbooru tag 拼装（`1girl, solo, best quality, …` + 变化 tag），但用户
+  文生图工作流底模不只有 anima——还有 **Moss-Image**（复旦 OpenMOSS，
+  自然语言/Tag 串/JSON Layout 三式混合，英文优先）等。萌绘底模库早就按
+  `prompt_style`（danbooru / natural / qwen）区分了每族底模的提示词口径，
+  本插件此前没有跟随。
+- **MOSS-Image 口径（依据萌绘 `skills/moss-image/moss-image.md` 规范）**：
+  单主体走 A 档自然语言 caption——英文优先、一段连贯描述（15~50 词）、
+  身份锚定逐项写明（发色/发型/瞳色/服装/标志性饰品）、禁 8k/highly
+  detailed 之类质量词堆砌；Tag 串模式顺序 Quality→Score→Meta→Year→
+  Character→Series→Artist→General。
+- **实现（`prompt_gen.py`）**：
+  - 新增 `detect_t2i_style(context, workflow_name)`：萌绘 star_cls 的
+    config["workflows"] 找到配置的文生图工作流 → base_id → workflow_store
+    解析注记的 `model_file` → basemodel_store.match_model → `prompt_style`；
+    任一环节失败（萌绘未装 / 未绑基础工作流库 / 查询异常）回落
+    `"danbooru"`（历史上一直 tag 拼，最安全）。
+  - 分风格派送：`danbooru` → 原 tag 拼装（anima/illustrious/NoobAI/Pony…）；
+    `natural` → LLM 生成英文 caption（系统提示词按 MOSS A 档规范，本地兜底
+    `best quality, highres, solo, full body portrait, …` 按 MOSS Tag 顺序）；
+    `qwen` → LLM 生成中文连贯长描述（Qwen-Image-2.1 官方格式长段的精简版，
+    本地兜底为结构完整的中文短版）。
+  - LLM 输出限长按风格放宽（qwen 400 / natural 300 / 编辑指令 150）。
+- **图生图不受影响**：仍是 LLM 生成 Qwen-Image-2.1 编辑指令（用户口径：
+  图生图主力就是 qwen image 2.1）。
+- **测试**：`tests/test_prompt_gen.py` 新增 natural 兜底顺序/禁堆砌、qwen
+  中文兜底、风格探测失败回落 danbooru、分风格元提示词共 6 项；全量自检过。
+
 ## v0.5.7 (2026-11-11)
 
 修正提示词体系里的目标模型名：Qwen-Image-Edit → Qwen-Image-2.1（版本 v0.5.6 -> v0.5.7）。

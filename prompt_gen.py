@@ -180,7 +180,7 @@ def build_local_instruction(entry: dict, picks: dict) -> str:
 
 
 def build_t2i_prompt(entry: dict, picks: dict) -> str:
-    """base/lora（文生图）用：原有 tags 拼装 + 变化维度的英文 tag 追加。"""
+    """danbooru 系底模（anima/illustrious/noobai/pony 等）用：tags 拼装 + 变化 tag。"""
     base = "1girl, solo, best quality, looking at viewer"
     tags = str(entry.get("tags_en") or "").strip().rstrip(",")
     extra = []
@@ -196,6 +196,38 @@ def build_t2i_prompt(entry: dict, picks: dict) -> str:
     return ", ".join(segs)
 
 
+def build_t2i_natural_local(entry: dict, picks: dict) -> str:
+    """自然语言系底模（Moss-Image/FLUX/krea 等）用：英文 caption 本地兜底。
+
+    按 MOSS-Image 规范的 Tag 串顺序拼（Quality → Character/Series → General）：
+    MOSS 三式混用皆可，本地不写长句是保底——真 caption 交给 LLM 通道。
+    """
+    segs = ["best quality, highres, solo, full body portrait"]
+    tags = str(entry.get("tags_en") or "").strip().rstrip(",")
+    if tags:
+        segs.append(tags)
+    for tag in ("outfit", "background", "pose", "expression", "body"):
+        en = str((picks.get(tag) or {}).get("en") or "").strip().strip(",")
+        if en:
+            segs.append(en)
+    return ", ".join(segs)
+
+
+def build_t2i_qwen_local(entry: dict, picks: dict) -> str:
+    """Qwen-Image-2.1 文生图用：中文长描述本地兜底（官方格式是约 20 句长段，
+    本地只能给个结构完整的短版，真长段交给 LLM 通道）。"""
+    zh = [str((picks.get(k) or {}).get("zh") or "").strip().strip("。")
+          for k in ("background", "outfit", "pose", "expression", "body")]
+    zh = [s for s in zh if s]
+    tags = str(entry.get("tags_en") or "").strip().rstrip(",")
+    lines = ["一幅单人完整竖版角色立绘插画，构图干净、光影柔和、细节精致"]
+    if zh:
+        lines.append("；".join(zh))
+    if tags:
+        lines.append(f"角色外观特征（英文 tags）：{tags}")
+    return "。".join(lines) + "。"
+
+
 # ---------- LLM 通道 ----------
 
 _SYSTEM_PROMPT = (
@@ -205,6 +237,29 @@ _SYSTEM_PROMPT = (
     "发型发色与角色辨识度不变；避免一次塞太多改动。"
     "输出纪律：只输出一条简体中文编辑指令本身——不要解释、不要引号、"
     "不要 markdown、不要分点，总长不超过 110 字。"
+)
+
+# 文生图（natural 系底模，如 Moss-Image）：MOSS-Image 规范 A 档——英文 caption、
+# 单主体一段描述、约 15~40 词、禁质量词堆砌、身份锚定逐项写明。
+_SYSTEM_T2I_NATURAL = (
+    "你为 Moss-Image（自然语言系文生图模型，英文效果最好）撰写单人角色立绘的"
+    "英文提示词。写法：一段连贯的英文描述（caption），覆盖主体外观、服装、"
+    "动作姿势、表情、场景与光照、构图（full body portrait）；角色身份锚定——"
+    "把已给 tags 里的发色/发型/瞳色/标志性特征自然融入描述，点名用"
+    "「规范英文名（作品名）」句式。禁止：8k/highly detailed 之类质量词堆砌"
+    "（最多以 best quality, highres 开头）、markdown、解释性文字。"
+    "输出纪律：只输出提示词本体，一段话，15~50 词，不超过 80 词。"
+)
+
+# 文生图（Qwen-Image-2.1）：官方格式——一段连贯长描述（本插件精简到 5~10 句），
+# 中文优先（Qwen 原生中文最好），不写比例与画质套话。
+_SYSTEM_T2I_QWEN = (
+    "你为 Qwen-Image-2.1（通义千问图像模型，文生图吃官方格式的连贯长描述）"
+    "撰写单人角色立绘提示词。写法：一段连贯的中文描述（5~10 句），覆盖角色"
+    "外观（把已给 tags 的发色/发型/瞳色/服装特征写成自然语句）、服装、姿势、"
+    "表情、背景环境与光影、构图（单人完整竖版立绘）；不写比例数字、"
+    "不写 best quality 之类画质套话、不用 markdown、不写标签串。"
+    "输出纪律：只输出提示词本体一段话，不要解释、不要引号、不要分点。"
 )
 
 
@@ -275,17 +330,113 @@ async def _resolve_provider(context, provider_id: str):
     return None
 
 
+def detect_t2i_style(context, workflow_name: str) -> str:
+    """探测文生图工作流底模的提示词风格（danbooru / natural / qwen）。
+
+    链路：萌绘 star_cls.config["workflows"] 找 workflow_name 条目 → base_id →
+    workflow_store.get(base_id)["roles"]["model_file"] → basemodel_store.
+    match_model(model_file)["prompt_style"]。任一环节失败（萌绘未装 / 工作流
+    未绑基础库 / 查询异常）→ 回落 "danbooru"（本插件历史上一直按 tag 拼，
+    对 tag 兼容底模最安全）。
+    """
+    try:
+        meta = context.get_registered_star("astrbot_plugin_comfyui_anima")
+        anima = getattr(meta, "star_cls", None)
+        if anima is None:
+            return "danbooru"
+        cfg = getattr(anima, "config", None)
+        raw = cfg.get("workflows") if isinstance(cfg, dict) else None
+        wf = next((e for e in (raw or [])
+                   if isinstance(e, dict)
+                   and str(e.get("name") or "") == str(workflow_name or "").strip()
+                   and str(e.get("base_id") or "").strip()), None)
+        if wf is None:
+            return "danbooru"
+        store = getattr(anima, "workflow_store", None)
+        roles = ((store.get(int(wf["base_id"])) or {}).get("roles") or {}) \
+            if store is not None else {}
+        model_file = str(roles.get("model_file") or "")
+        bs = getattr(anima, "basemodel_store", None)
+        rec = bs.match_model(model_file) if bs is not None and model_file else None
+        style = str((rec or {}).get("prompt_style") or "").strip().lower()
+        return style if style in ("danbooru", "natural", "qwen") else "danbooru"
+    except Exception:
+        return "danbooru"
+
+
+def build_t2i_meta_prompt(entry: dict, picks: dict, style: str) -> str:
+    name = str(entry.get("name") or "").strip() or "该角色"
+    series = str(entry.get("series") or "").strip()
+    tags = str(entry.get("tags_en") or "").strip() or "无"
+    if style == "qwen":
+        head = f"角色：{name}" + (f"（出自 {series}）" if series else "")
+        segs = [f"{head}。外观特征 tags（供参考，需转写成自然语句）：{tags}。"]
+        segs += [f"{label}：{zh}" for label, zh in variation_zh_list(picks)]
+        segs.append("目标是单人完整竖版立绘，请写成一段连贯中文长描述。")
+        return "\n".join(segs)
+    # natural（MOSS 口径）
+    head = f"Character: {name}" + (f" ({series})" if series else "")
+    segs = [f"{head}. Identity tags (anchor these features verbatim): {tags}."]
+    segs += [f"{label}: {zh}" for label, zh in variation_zh_list(picks)]
+    segs.append("Target: a single-character full-body portrait illustration. "
+                "Write ONE connected English caption.")
+    return "\n".join(segs)
+
+
+def _t2i_local_of(style: str, entry: dict, picks: dict) -> tuple:
+    """分风格的文生图本地兜底 + 静态回退。"""
+    if style == "natural":
+        return build_t2i_natural_local(entry, picks), "local"
+    if style == "qwen":
+        return build_t2i_qwen_local(entry, picks), "local"
+    return build_t2i_prompt(entry, picks), "local"
+
+
 async def build_generation_prompt(context, cfg: dict, entry: dict,
                                   seed_int: int) -> tuple:
     """产出生图提示词。返回 (prompt, source)；source ∈ llm / local / static。
 
     绝不抛异常——LLM 链路任何失败都回落本地模板（提示词不是阻塞出卡的理由）。
-    strategy_type=base/lora（文生图）走 tag 拼装；img2img 走编辑指令。
+    img2img（qwen image 2.1 编辑）走自然语言编辑指令；base/lora（文生图）按
+    工作流底模风格分派：danbooru=tag 拼装、natural=英文 caption、qwen=中文
+    长描述（风格探测失败一律回落 danbooru tag 拼装）。
     """
     try:
         stype = str(entry.get("strategy_type") or "base")
         if stype != "img2img":
-            return build_t2i_prompt(entry, pick_variations(seed_int)), "local"
+            if not bool(cfg.get("variations_enabled", True)):
+                return build_prompt_tags(entry), "static"
+            picks = pick_variations(seed_int)
+            style = detect_t2i_style(context, cfg.get("draw_workflow", ""))
+            if not bool(cfg.get("prompt_llm_enabled", True)) or style == "danbooru":
+                return _t2i_local_of(style, entry, picks)
+            provider = await _resolve_provider(
+                context, cfg.get("prompt_llm_provider", ""))
+            if provider is None:
+                logger.warning("[moe_waifu] 未找到可用的对话模型，提示词回落本地模板")
+                return _t2i_local_of(style, entry, picks)
+            timeout = int(cfg.get("prompt_llm_timeout", 30) or 30)
+            if timeout <= 0:
+                timeout = 30
+            system = _SYSTEM_T2I_QWEN if style == "qwen" else _SYSTEM_T2I_NATURAL
+            try:
+                resp = await asyncio.wait_for(
+                    provider.text_chat(
+                        prompt=build_t2i_meta_prompt(entry, picks, style),
+                        session_id=None,
+                        system_prompt=system,
+                    ),
+                    timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"[moe_waifu] 提示词 LLM 超时（>{timeout}s），回落本地模板")
+                return _t2i_local_of(style, entry, picks)
+            text = sanitize_llm_output(getattr(resp, "completion_text", "") or "",
+                                       limit=400 if style == "qwen" else 300)
+            if text:
+                return text, "llm"
+            logger.warning("[moe_waifu] 提示词 LLM 返回为空，回落本地模板")
+            return _t2i_local_of(style, entry, picks)
         if not bool(cfg.get("variations_enabled", True)):
             return build_prompt_tags(entry), "static"
         picks = pick_variations(seed_int)
