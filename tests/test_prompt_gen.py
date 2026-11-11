@@ -103,6 +103,35 @@ check("取首个非空行", prompt_gen.sanitize_llm_output(
 check("限长", len(prompt_gen.sanitize_llm_output("x" * 500)) <= 150)
 check("空输入", prompt_gen.sanitize_llm_output("") == "")
 
+# ---------- 主题预设（v0.5.9 试画台预览） ----------
+check("random/空主题 = None", prompt_gen.get_theme("") is None
+      and prompt_gen.get_theme("random") is None)
+sw = prompt_gen.get_theme("swimsuit")
+check("主题表齐全", sw is not None and len(prompt_gen.THEMES) >= 9)
+# 主题关键词必须能在池里筛出子集（写错关键词 = 主题悄悄失效）
+for t in prompt_gen.THEMES:
+    for kw_key, dim in (("outfit_kw", "outfit"), ("bg_kw", "background")):
+        for kw in t.get(kw_key) or []:
+            if not any(kw in str(it.get("zh") or "") for it in prompt_gen.DIMS[dim]):
+                check(f"主题 {t['id']} 关键词命中池", False, f"{kw_key}:{kw}")
+check("主题关键词全部命中池", True)
+
+p_rand = prompt_gen.pick_variations(12345)
+p_th = prompt_gen.pick_variations(12345, sw)
+check("主题后服装在泳装子集", "泳装" in p_th["outfit"]["zh"])
+check("主题不影响其它维度", p_th["pose"] == p_rand["pose"])
+check("主题决定论", prompt_gen.pick_variations(12345, sw) == p_th)
+check("随机模式与主题版不同（子集过滤生效）", p_th["outfit"] != p_rand["outfit"])
+
+# custom 附加
+picks_c = prompt_gen.pick_variations(777)
+inst_c = prompt_gen.build_local_instruction(ENTRY, picks_c, "戴上红色蝴蝶结")
+check("自定义附加进指令", "戴上红色蝴蝶结" in inst_c)
+meta_c = prompt_gen.build_meta_prompt(ENTRY, picks_c, "手持小猫")
+check("自定义附加进元提示词", "手持小猫" in meta_c)
+nat_c = prompt_gen.build_t2i_natural_local(ENTRY, picks_c, "red ribbon")
+check("natural 兜底含自定义附加", "red ribbon" in nat_c)
+
 # ---------- 元提示词 ----------
 meta = prompt_gen.build_meta_prompt(ENTRY, prompt_gen.pick_variations(777))
 check("元提示词含角色信息", "初音未来" in meta and "Vocaloid" in meta)

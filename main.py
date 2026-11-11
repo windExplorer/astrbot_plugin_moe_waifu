@@ -28,6 +28,8 @@ PLUGIN_NAME = "astrbot_plugin_moe_waifu"
 
 # 卡图保留天数（只清渲染产物，不动 draws 行与立绘库）
 _CARD_KEEP_DAYS = 90
+# 试画缓存保留天数（工坊试画成品拷贝，供大图查看；过期回收）
+_TRY_CACHE_KEEP_DAYS = 7
 
 
 def _plugin_version() -> str:
@@ -87,6 +89,12 @@ class MoeWaifuPlugin(Star):
                     logger.info(f"[{PLUGIN_NAME}] 已清理 {removed} 张过期卡图")
             except Exception:
                 logger.warning(f"[{PLUGIN_NAME}] 卡图清理失败（不影响出卡）\n{traceback.format_exc()}")
+            try:  # 清理过期试画缓存（7 天）
+                removed = await asyncio.to_thread(self._prune_try_cache, self._data_dir)
+                if removed:
+                    logger.info(f"[{PLUGIN_NAME}] 已清理 {removed} 张过期试画缓存")
+            except Exception:
+                logger.warning(f"[{PLUGIN_NAME}] 试画缓存清理失败（忽略）\n{traceback.format_exc()}")
             logger.info(f"[{PLUGIN_NAME}] 初始化完成，数据目录：{self._data_dir}")
         except Exception:
             logger.error(f"[{PLUGIN_NAME}] 初始化失败\n{traceback.format_exc()}")
@@ -105,6 +113,22 @@ class MoeWaifuPlugin(Star):
         deadline = time.time() - _CARD_KEEP_DAYS * 86400
         removed = 0
         for f in cards_dir.glob("*.png"):
+            try:
+                if f.stat().st_mtime < deadline:
+                    f.unlink()
+                    removed += 1
+            except Exception:
+                pass
+        return removed
+
+    @staticmethod
+    def _prune_try_cache(data_dir: Path) -> int:
+        cache_dir = Path(data_dir) / "try_cache"
+        if not cache_dir.is_dir():
+            return 0
+        deadline = time.time() - _TRY_CACHE_KEEP_DAYS * 86400
+        removed = 0
+        for f in cache_dir.glob("*.png"):
             try:
                 if f.stat().st_mtime < deadline:
                     f.unlink()

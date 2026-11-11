@@ -51,6 +51,28 @@
   .drag-overlay > span { background: #fff; color: #d63384; font-weight: 600;
     padding: 12px 26px; border-radius: 12px; font-size: 15px;
     box-shadow: 0 8px 26px rgba(120,60,110,.22); }
+  /* ---- 公共大图查看器（lightbox，PMS image-viewer 同款交互） ---- */
+  .wlb { position: fixed; inset: 0; z-index: 99999; background: rgba(10,8,12,.88);
+    display: none; flex-direction: column; outline: none; }
+  .wlb.show { display: flex; }
+  .wlb-bar { display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px; color: #fff; }
+  .wlb-title { font-size: 14px; opacity: .9; }
+  .wlb-tools { display: flex; align-items: center; gap: 8px; position: relative; }
+  .wlb-btn { background: transparent; border: none; color: #fff; font-size: 16px;
+    cursor: pointer; padding: 4px 10px; border-radius: 6px; text-decoration: none;
+    line-height: 1.2; font-family: inherit; }
+  .wlb-btn:hover { background: rgba(255,255,255,.16); }
+  .wlb-scale { font-size: 12px; opacity: .8; min-width: 44px; text-align: center; }
+  .wlb-stage { flex: 1; display: flex; align-items: center; justify-content: center;
+    overflow: hidden; touch-action: none; cursor: grab; }
+  .wlb-stage:active { cursor: grabbing; }
+  .wlb-img { max-width: 92%; max-height: 84vh; user-select: none;
+    border-radius: 8px; box-shadow: 0 12px 48px rgba(0,0,0,.5); }
+  .wlb-loading { position: absolute; top: 52%; left: 50%;
+    transform: translate(-50%, -50%); color: #fff; font-size: 13px; opacity: .7; }
+  .wlb.loading .wlb-loading { display: block; }
+  .wlb:not(.loading) .wlb-loading { display: none; }
 </style>
 </head>
 <body>
@@ -211,108 +233,160 @@
             </div>
           </div>
 
-          <!-- ============ 试画台 ============ -->
+          <!-- ============ 试画台（v0.5.9 三步流：选角色 → 确认提示词 → 生成） ============ -->
           <div v-if="menu === 'try'">
             <n-card size="small" :bordered="true">
               <n-space vertical size="medium">
                 <n-space align="center" :wrap="true">
                   <n-button size="small" @click="backFromTry">← 返回</n-button>
-                  <n-select v-model:value="tryCharId" :options="charOpts" filterable
-                            placeholder="选择要试画的角色" style="width: 300px;"></n-select>
-                  <n-button type="primary" :loading="tryRunning" :disabled="!tryCharId"
-                            @click="doTry">开始试画</n-button>
-                  <n-button v-if="tryOk && !tryEntryVerified" size="small" type="success"
-                            @click="doMarkVerified">画对了，标记 verified</n-button>
-                  <n-button v-if="tryOk && !tryArchived" size="small" type="success"
-                            @click="doArchive">✓ 确认，存入立绘库</n-button>
-                  <n-button v-if="tryOk" size="small" type="warning" secondary
-                            @click="discardTry">✗ 舍弃本次结果</n-button>
-                  <n-button v-if="tryOk" size="small" type="info" secondary
-                            @click="adoptTryParams">按本次参数保存到角色</n-button>
+                  <n-steps size="small" :current="tryStep" style="flex: 1; min-width: 300px;">
+                    <n-step title="选角色与画法"></n-step>
+                    <n-step title="确认提示词"></n-step>
+                    <n-step title="生成与结果"></n-step>
+                  </n-steps>
                 </n-space>
-                <n-space align="center" :wrap="true" size="small">
-                  <span style="font-size: 13px;">本次画法：</span>
-                  <n-radio-group v-model:value="tryMode" size="small">
-                    <n-radio-button value="entry">跟随条目</n-radio-button>
-                    <n-radio-button value="base">base 直出</n-radio-button>
-                    <n-radio-button value="lora">lora</n-radio-button>
-                    <n-radio-button value="img2img">图生图重绘</n-radio-button>
-                  </n-radio-group>
-                  <span class="bind-tip" v-if="tryMode === 'entry' && tryEntry">
-                    {{ stratLabel(tryEntry) }}
-                  </span>
-                </n-space>
-                <div v-if="tryMode === 'img2img'">
-                  <div class="dropzone" :class="{ drag: tryDrag }"
-                       @dragover.prevent="tryDrag = true"
-                       @dragleave.prevent="tryDrag = false"
-                       @drop.prevent="onDropTry($event)">
-                    <n-space :wrap="true" size="small" align="center">
-                      <n-input v-model:value="tryOverride.ref"
-                               placeholder="留空=按种子从下方参考图随机选一张；也可填 URL / 路径"
-                               style="width: 340px;"></n-input>
-                      <n-button size="small" :loading="uploading"
-                              @click="refFileInput && refFileInput.click()">上传参考图</n-button>
-                      <n-input-number v-model:value="tryOverride.denoise" :step="0.05" :min="0.2"
-                                      :max="0.95" placeholder="重绘强度"
-                                      style="width: 150px;"></n-input-number>
+
+                <!-- 第 1 步：角色 + 画法 + 参考图 -->
+                <div v-if="tryStep === 1">
+                  <n-space align="center" :wrap="true">
+                    <n-select v-model:value="tryCharId" :options="charOpts" filterable
+                              placeholder="选择要试画的角色" style="width: 320px;"></n-select>
+                    <span style="font-size: 13px;">画法：</span>
+                    <n-radio-group v-model:value="tryMode" size="small">
+                      <n-radio-button value="entry">跟随条目</n-radio-button>
+                      <n-radio-button value="base">base 直出</n-radio-button>
+                      <n-radio-button value="lora">lora</n-radio-button>
+                      <n-radio-button value="img2img">图生图重绘</n-radio-button>
+                    </n-radio-group>
+                    <span class="bind-tip" v-if="tryMode === 'entry' && tryEntry">
+                      {{ stratLabel(tryEntry) }}
+                    </span>
+                    <n-button type="primary" :disabled="!tryCharId"
+                              @click="gotoStep2">下一步：确认提示词 →</n-button>
+                  </n-space>
+                  <div v-if="tryMode === 'img2img'" style="margin-top: 10px;">
+                    <div class="dropzone" :class="{ drag: tryDrag }"
+                         @dragover.prevent="tryDrag = true"
+                         @dragleave.prevent="tryDrag = false"
+                         @drop.prevent="onDropTry($event)">
+                      <n-space :wrap="true" size="small" align="center">
+                        <n-input v-model:value="tryOverride.ref"
+                                 placeholder="留空=按种子从下方参考图随机选一张；也可填 URL / 路径"
+                                 style="width: 340px;"></n-input>
+                        <n-button size="small" :loading="uploading"
+                                @click="refFileInput && refFileInput.click()">上传参考图</n-button>
+                        <n-input-number v-model:value="tryOverride.denoise" :step="0.05" :min="0.2"
+                                        :max="0.95" placeholder="重绘强度"
+                                        style="width: 150px;"></n-input-number>
+                      </n-space>
+                      <div class="bind-tip">上传/拖入官方立绘（干净单人图），点缩略图选中为本次参考图；
+                        参考图留空时按种子从已绑定参考图里随机选一张（同种子同图）。</div>
+                    </div>
+                    <n-grid :cols="6" :x-gap="8" :y-gap="8" v-if="tryRefs.length > 0"
+                            style="margin-top: 10px;">
+                      <n-gi v-for="r in tryRefs" :key="r.path">
+                        <div class="gal-item" :class="{ 'ref-selected': tryOverride.ref === r.path }"
+                             @click="selectTryRef(r.path)">
+                          <img v-if="r.thumb" :src="r.thumb" class="clickable-img"
+                           title="点击查看大图" alt="参考图"
+                           @click.stop="openViewer(r.path, '参考图')">
+                          <div v-else class="gal-meta">文件丢失</div>
+                          <n-tag v-if="tryOverride.ref === r.path" class="gal-del" size="tiny"
+                                 :bordered="false" type="success">本次</n-tag>
+                          <n-button class="gal-del" style="right: 58px;" size="tiny" quaternary
+                                    type="error" @click.stop="deleteTryRef(r)">
+                            {{ delArm === r.path ? "确认删" : "删" }}
+                          </n-button>
+                          <div class="gal-meta">{{ tryOverride.ref === r.path ? "本次参考" : "点击选用" }}</div>
+                        </div>
+                      </n-gi>
+                    </n-grid>
+                    <div class="bind-tip" v-if="tryRefsLoading">参考图加载中…</div>
+                    <div class="bind-tip" v-if="tryRefs.length === 0 && !tryRefsLoading">
+                      该角色还没有绑定参考图：上传/拖入后会自动绑定并存起来，之后随时选用。
+                    </div>
+                    <input type="file" accept="image/png,image/jpeg,image/webp"
+                           style="display: none;" ref="refFileInput" @change="onRefFile">
+                  </div>
+                  <div v-if="tryMode === 'lora'" style="margin-top: 10px;">
+                    <n-input v-model:value="tryOverride.loras" type="textarea" :rows="2"
+                             placeholder="LoRA 名:权重，每行一个，如 miku_char_v2:0.8"></n-input>
+                  </div>
+                  <div v-if="tryEntry" style="margin-top: 10px;">
+                    <n-space size="small" :wrap="true">
+                      <n-tag size="small" :bordered="false">{{ catLabel(tryEntry.category) }}</n-tag>
+                      <n-tag v-if="tryEntry.tier" size="small" :bordered="false">{{ tryEntry.tier }}</n-tag>
+                      <n-tag size="small" :bordered="false" :type="tryEntry.verified ? 'success' : 'warning'">
+                        {{ tryEntry.verified ? "已验证" : "未验证" }}
+                      </n-tag>
+                      <n-tag size="small" :bordered="false">条目画法 {{ stratLabel(tryEntry) }}</n-tag>
+                      <n-tag size="small" :bordered="false">立绘 {{ portraitCount(tryEntry.id) }}/{{ meta.quota }}</n-tag>
                     </n-space>
-                    <div class="bind-tip">上传/拖入官方立绘（干净单人图），点缩略图选中为本次参考图；
-                      参考图留空时按种子从已绑定参考图里随机选一张（同种子同图）。</div>
+                    <div class="bind-tip" style="margin-top: 4px;">tags：{{ tryEntry.tags_en }}</div>
                   </div>
-                  <n-grid :cols="6" :x-gap="8" :y-gap="8" v-if="tryRefs.length > 0"
-                          style="margin-top: 10px;">
-                    <n-gi v-for="r in tryRefs" :key="r.path">
-                      <div class="gal-item" :class="{ 'ref-selected': tryOverride.ref === r.path }"
-                           @click="selectTryRef(r.path)">
-                        <img v-if="r.thumb" :src="r.thumb" class="clickable-img"
-                         title="点击查看大图" alt="参考图"
-                         @click.stop="openViewer(r.path, '参考图')">
-                        <div v-else class="gal-meta">文件丢失</div>
-                        <n-tag v-if="tryOverride.ref === r.path" class="gal-del" size="tiny"
-                               :bordered="false" type="success">本次</n-tag>
-                        <n-button class="gal-del" style="right: 58px;" size="tiny" quaternary
-                                  type="error" @click.stop="deleteTryRef(r)">
-                          {{ delArm === r.path ? "确认删" : "删" }}
-                        </n-button>
-                        <div class="gal-meta">{{ tryOverride.ref === r.path ? "本次参考" : "点击选用" }}</div>
-                      </div>
-                    </n-gi>
-                  </n-grid>
-                  <div class="bind-tip" v-if="tryRefsLoading">参考图加载中…</div>
-                  <div class="bind-tip" v-if="tryRefs.length === 0 && !tryRefsLoading">
-                    该角色还没有绑定参考图：上传/拖入后会自动绑定并存起来，之后随时选用。
+                </div>
+
+                <!-- 第 2 步：主题 + 提示词预览/编辑 -->
+                <div v-if="tryStep === 2">
+                  <n-space align="center" :wrap="true" size="small">
+                    <n-button size="small" @click="tryStep = 1">← 上一步</n-button>
+                    <span style="font-size: 13px;">主题：</span>
+                    <n-select v-model:value="tryTheme" :options="themeOpts" size="small"
+                              style="width: 190px;" @update:value="onThemeChange"></n-select>
+                    <n-input v-model:value="tryCustom" size="small" clearable
+                             placeholder="自定义附加要求（可选，如：红色蝴蝶结，手持小猫）"
+                             style="width: 320px;"></n-input>
+                    <n-button size="small" type="primary" :loading="tryPromptLoading"
+                              @click="generatePromptPreview">重新生成</n-button>
+                    <n-button size="small" :disabled="tryPromptLoading"
+                              @click="tryAttempt++; generatePromptPreview()">换一版</n-button>
+                  </n-space>
+                  <div v-if="tryDims.length > 0" style="margin-top: 10px;">
+                    <n-tag v-for="d in tryDims" :key="d.label" size="small" :bordered="false"
+                           style="margin: 0 6px 6px 0;">{{ d.label }}：{{ d.zh }}</n-tag>
+                    <n-tag size="small" :bordered="false" type="info">体型：{{ tryBodyZh || "保持不变" }}</n-tag>
                   </div>
-                  <input type="file" accept="image/png,image/jpeg,image/webp"
-                         style="display: none;" ref="refFileInput" @change="onRefFile">
-                </div>
-                <div v-if="tryMode === 'lora'">
-                  <n-input v-model:value="tryOverride.loras" type="textarea" :rows="2"
-                           placeholder="LoRA 名:权重，每行一个，如 miku_char_v2:0.8"></n-input>
-                </div>
-                <div v-if="tryEntry">
-                  <n-space size="small" :wrap="true" style="margin-bottom: 8px;">
-                    <n-tag size="small" :bordered="false">{{ catLabel(tryEntry.category) }}</n-tag>
-                    <n-tag v-if="tryEntry.tier" size="small" :bordered="false">{{ tryEntry.tier }}</n-tag>
-                    <n-tag size="small" :bordered="false" :type="tryEntry.verified ? 'success' : 'warning'">
-                      {{ tryEntry.verified ? "已验证" : "未验证" }}
-                    </n-tag>
-                    <n-tag size="small" :bordered="false">条目画法 {{ stratLabel(tryEntry) }}</n-tag>
-                    <n-tag size="small" :bordered="false">立绘 {{ portraitCount(tryEntry.id) }}/{{ meta.quota }}</n-tag>
+                  <n-input v-if="tryPrompt" v-model:value="tryPrompt" type="textarea" :rows="4"
+                           style="margin-top: 8px;"
+                           placeholder="提示词预览（可直接修改）"></n-input>
+                  <div class="bind-tip" v-if="tryPrompt" style="margin-top: 4px; max-width: 720px;">
+                    来源：{{ tryPromptSource }}{{ tryStyle ? " · 底模风格：" + tryStyle : "" }}
+                    。确认前可直接编辑；点「开始试画」按这份文本出图。
+                  </div>
+                  <n-space align="center" style="margin-top: 10px;">
+                    <n-button type="primary" :loading="tryRunning" :disabled="!tryPrompt"
+                              @click="doTry">开始试画（按上面确认的提示词）</n-button>
                   </n-space>
-                  <div class="bind-tip">tags：{{ tryEntry.tags_en }}</div>
                 </div>
-                <n-alert v-if="tryError" type="error" :bordered="false">{{ tryError }}</n-alert>
-                <n-spin v-if="tryRunning" size="small">
-                  <n-space align="center" size="small">
-                    <span>萌绘生成中（已等待 {{ tryElapsed }} 秒）…</span>
-                    <n-button size="tiny" quaternary @click="cancelTryWait">停止等待</n-button>
+
+                <!-- 第 3 步：生成与结果 -->
+                <div v-if="tryStep === 3">
+                  <n-space align="center" :wrap="true">
+                    <n-button size="small" @click="tryStep = 2">← 回到提示词</n-button>
+                    <n-button v-if="tryOk && !tryEntryVerified" size="small" type="success"
+                              @click="doMarkVerified">画对了，标记 verified</n-button>
+                    <n-button v-if="tryOk && !tryArchived" size="small" type="success"
+                              @click="doArchive">✓ 确认，存入立绘库</n-button>
+                    <n-button v-if="tryOk" size="small" type="warning" secondary
+                              @click="discardTry">✗ 舍弃本次结果</n-button>
+                    <n-button v-if="tryOk" size="small" type="info" secondary
+                              @click="adoptTryParams">按本次参数保存到角色</n-button>
                   </n-space>
-                </n-spin>
-                <img v-if="tryPreview" class="try-img clickable-img" :src="tryPreview"
-                     alt="试画结果" title="点击查看大图" @click="openViewer(trySrcPath, '试画结果')">
-                <div v-if="tryOk" class="bind-tip">
-                  同角色同日同序号的种子恒定；改 tags / 策略 / 参考图后再试会出新图。
+                  <n-alert v-if="tryError" type="error" :bordered="false">{{ tryError }}</n-alert>
+                  <n-spin v-if="tryRunning" size="small">
+                    <n-space align="center" size="small">
+                      <span>萌绘生成中（已等待 {{ tryElapsed }} 秒）…</span>
+                      <n-button size="tiny" quaternary @click="cancelTryWait">停止等待</n-button>
+                    </n-space>
+                  </n-spin>
+                  <img v-if="tryPreview" class="try-img clickable-img" :src="tryPreview"
+                       alt="试画结果" title="点击查看大图" @click="openViewer(trySrcPath, '试画结果')">
+                  <div v-if="tryOk" class="bind-tip">
+                    已按确认的提示词出图<span v-if="tryPrompt">：{{ tryPrompt.slice(0, 80) }}{{ tryPrompt.length > 80 ? "…" : "" }}</span>
+                  </div>
+                  <div v-if="tryOk" class="bind-tip">
+                    同角色同日同序号的种子恒定；改提示词 / 策略 / 参考图后再试会出新图。
+                  </div>
                 </div>
               </n-space>
             </n-card>
@@ -420,15 +494,7 @@
       </n-layout-content>
     </n-layout>
 
-    <!-- ============ 大图查看器 ============ -->
-    <n-modal v-model:show="viewer.show" preset="card" :title="viewer.title || '查看大图'"
-             style="width: 760px; max-width: 92vw;">
-      <n-space vertical align="center" size="small">
-        <n-spin v-if="viewerLoading" size="small">加载原图…</n-spin>
-        <img v-if="viewer.src" :src="viewer.src" style="max-width: 100%; max-height: 72vh;
-             border-radius: 10px; display: block;" alt="大图">
-      </n-space>
-    </n-modal>
+    <!-- ============ 大图查看器：改为公共 lightbox 组件（JS 创建，见脚本区） ============ -->
 
     <!-- ============ 作品封面选择弹窗 ============ -->
     <n-modal v-model:show="workCoverModal" preset="dialog" :title="'作品封面 · ' + (workCoverSeries || '')"
@@ -566,6 +632,145 @@
   var message = NS.createDiscreteApi(["message"]).message;
   var h = Vue.h;
 
+  // ---- 公共大图查看器（lightbox）----
+  // 交互对齐 PMS packages/ui image-viewer：滚轮缩放（原生非 passive 监听，否则
+  // preventDefault 失效、图放大了背后的页面也滚走）、指针捕获拖拽（不捕获则指针
+  // 一离开图 pointermove 就断）、Esc 在捕获阶段处理并 stopPropagation（避免一次
+  // Esc 连关多层）、点空白关闭、双击复位、+/-/0 键盘缩放、下载原图。
+  function createLightbox() {
+    var MIN = 0.4, MAX = 4, WHEEL = 0.1, BTN = 0.2;
+    var el = document.createElement("div");
+    el.className = "wlb loading";
+    el.setAttribute("role", "dialog");
+    el.setAttribute("aria-modal", "true");
+    el.tabIndex = -1;
+    el.innerHTML =
+      '<div class="wlb-bar">' +
+        '<span class="wlb-title"></span>' +
+        '<div class="wlb-tools">' +
+          '<button type="button" class="wlb-btn" data-act="out" aria-label="缩小">−</button>' +
+          '<span class="wlb-scale">100%</span>' +
+          '<button type="button" class="wlb-btn" data-act="in" aria-label="放大">＋</button>' +
+          '<button type="button" class="wlb-btn" data-act="reset" aria-label="复位">⟲</button>' +
+          '<a class="wlb-btn" data-act="dl" aria-label="下载原图">⬇</a>' +
+          '<button type="button" class="wlb-btn" data-act="close" aria-label="关闭">✕</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="wlb-stage"><img class="wlb-img" alt="" draggable="false"></div>' +
+      '<div class="wlb-loading">加载原图…</div>';
+    document.body.appendChild(el);
+    var img = el.querySelector(".wlb-img");
+    var stage = el.querySelector(".wlb-stage");
+    var scale = 1, ox = 0, oy = 0;
+    var pointers = new Map(), dragInfo = null, pinch = null, moved = false;
+    var prevFocus = null;
+    function apply() {
+      img.style.transform = "translate(" + ox + "px," + oy + "px) scale(" + scale + ")";
+      el.querySelector(".wlb-scale").textContent = Math.round(scale * 100) + "%";
+    }
+    function clamp(v) {
+      return Math.min(MAX, Math.max(MIN, Math.round(v * 100) / 100));
+    }
+    function zoom(d) { scale = clamp(scale + d); apply(); }
+    function reset() { scale = 1; ox = 0; oy = 0; apply(); }
+    function isTyping(t) {
+      return t instanceof HTMLElement && t.closest &&
+        t.closest('input, textarea, select, [contenteditable="true"]') !== null;
+    }
+    function close() {
+      el.classList.remove("show");
+      document.body.style.overflow = "";
+      document.removeEventListener("keydown", onKey, true);
+      if (prevFocus && prevFocus.isConnected) prevFocus.focus();
+    }
+    function onKey(e) {
+      if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); close(); return; }
+      if (isTyping(e.target)) return;
+      if (e.key === "+" || e.key === "=") zoom(BTN);
+      else if (e.key === "-" || e.key === "_") zoom(-BTN);
+      else if (e.key === "0") reset();
+    }
+    function pdist() {
+      var v = Array.from(pointers.values());
+      return v.length >= 2 ? Math.hypot(v[0].x - v[1].x, v[0].y - v[1].y) : 0;
+    }
+    el.addEventListener("click", function (ev) {
+      var t = ev.target;
+      var btn = t.closest && t.closest(".wlb-btn");
+      if (btn) {
+        var act = btn.getAttribute("data-act");
+        if (act === "in") zoom(BTN);
+        else if (act === "out") zoom(-BTN);
+        else if (act === "reset") reset();
+        else if (act === "close") close();
+        return;
+      }
+      if (moved) return;
+      if (t === el || t === stage) close();
+    });
+    stage.addEventListener("dblclick", function (e) { e.preventDefault(); reset(); });
+    stage.addEventListener("wheel", function (e) {
+      e.preventDefault();
+      zoom(e.deltaY > 0 ? -WHEEL : WHEEL);
+    }, { passive: false });
+    stage.addEventListener("pointerdown", function (e) {
+      if (typeof stage.setPointerCapture === "function") stage.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 1) {
+        dragInfo = { sx: e.clientX, sy: e.clientY, ox: ox, oy: oy };
+        moved = false;
+      } else {
+        dragInfo = null;
+        pinch = { d: pdist(), s: scale };
+      }
+    });
+    stage.addEventListener("pointermove", function (e) {
+      if (!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch && pointers.size >= 2) {
+        var d = pdist();
+        if (pinch.d > 0 && d > 0) { scale = clamp(pinch.s * d / pinch.d); apply(); }
+        return;
+      }
+      if (!dragInfo) return;
+      var dx = e.clientX - dragInfo.sx, dy = e.clientY - dragInfo.sy;
+      if (dx * dx + dy * dy > 25) moved = true;
+      ox = dragInfo.ox + dx; oy = dragInfo.oy + dy; apply();
+    });
+    function endPointer(e) {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
+      if (pointers.size === 0) dragInfo = null;
+      if (typeof stage.hasPointerCapture === "function" &&
+          stage.hasPointerCapture(e.pointerId)) stage.releasePointerCapture(e.pointerId);
+    }
+    stage.addEventListener("pointerup", endPointer);
+    stage.addEventListener("pointercancel", endPointer);
+    function setSrc(src, downloadName) {
+      img.src = src;
+      var dl = el.querySelector('[data-act="dl"]');
+      dl.href = src;
+      dl.download = downloadName || "image";
+      el.classList.remove("loading");
+    }
+    return {
+      open: function (title) {
+        prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        el.querySelector(".wlb-title").textContent = title || "查看大图";
+        el.querySelector('[data-act="dl"]').download =
+          String(title || "image").replace(/[\\/:*?"<>|]+/g, "_");
+        moved = false; reset();
+        el.classList.add("show", "loading");
+        document.body.style.overflow = "hidden";
+        document.addEventListener("keydown", onKey, true);
+        el.focus();
+      },
+      setSrc: setSrc,
+      close: close
+    };
+  }
+  var lightbox = createLightbox();
+
   // ---- 桥：Dashboard 会在文档末尾自动注入 bridge-sdk.js（晚于本脚本执行），
   // 必须轮询等它出现、找到才挂载（box member_panel 同款）。v0.2.2 及以前是
   // 「3 秒等不到就降级内置桩」——真机上注入稍慢就整页空数据 + 假横幅，已废弃。
@@ -644,22 +849,17 @@
         return o;
       })(isDark);
 
-      // ---- 大图查看器（v0.5.5：缩略图点击加载原图 data URL） ----
-      var viewer = Vue.ref({ show: false, src: "", title: "" });
-      var viewerLoading = Vue.ref(false);
+      // ---- 大图查看器（公共 lightbox 组件，见脚本区 createLightbox） ----
+      // 点击缩略图 → 弹 lightbox → 经 /image/data 拉原图 data URL 填入。
       function openViewer(path, title) {
         if (!path) { message.error("该图片还没有文件（先试画或补图）"); return; }
-        viewer.value = { show: true, src: "", title: title || "查看大图" };
-        viewerLoading.value = true;
+        var name = String(title || "查看大图");
+        lightbox.open(name);
         apiGet("image/data", { path: path }).then(function (res) {
-          viewer.value.src = (res && res.data_url) || "";
-          if (!viewer.value.src) {
-            viewer.value.show = false;
-            message.error("原图加载失败");
-          }
-        }).catch(function () { viewer.value.show = false; }).finally(function () {
-          viewerLoading.value = false;
-        });
+          var url = (res && res.data_url) || "";
+          if (!url) { lightbox.close(); message.error("原图加载失败"); return; }
+          lightbox.setSrc(url, name);
+        }).catch(function () { lightbox.close(); });
       }
 
       // ---- 拖拽上传（v0.5.2：整页级 dragover/drop 路由） ----
@@ -1209,6 +1409,61 @@
       // 本次画法（临时参数）：entry=跟随条目；其余为试画临时覆盖（不写条目）
       var tryMode = Vue.ref("entry");
       var tryOverride = Vue.ref({ ref: "", denoise: null, loras: "" });
+      // ---- 三步流 + 提示词预览（v0.5.9） ----
+      var tryStep = Vue.ref(1);
+      var tryTheme = Vue.ref("random");
+      var tryCustom = Vue.ref("");
+      var tryAttempt = Vue.ref(0);
+      var tryDims = Vue.ref([]);
+      var tryBodyZh = Vue.ref("");
+      var tryPrompt = Vue.ref("");
+      var tryPromptSource = Vue.ref("");
+      var tryStyle = Vue.ref("");
+      var tryPromptLoading = Vue.ref(false);
+      var themes = Vue.ref([]);
+      var themeOpts = Vue.computed(function () {
+        return (themes.value || []).map(function (t) {
+          return { label: t.label, value: t.id };
+        });
+      });
+      async function loadThemes() {
+        try {
+          var res = await apiGet("themes");
+          themes.value = (res && res.themes) || [];
+        } catch (e) { /* 主题列表失败不阻塞，下拉置空 */ }
+      }
+      function onThemeChange() { tryAttempt.value = 0; generatePromptPreview(); }
+      async function generatePromptPreview() {
+        if (!tryCharId.value) return;
+        tryPromptLoading.value = true;
+        try {
+          var res = await apiPost("prompt/preview", {
+            id: tryCharId.value,
+            theme: tryTheme.value,
+            custom: tryCustom.value,
+            attempt: tryAttempt.value,
+            override: overrideOf()
+          });
+          tryDims.value = (res && res.dims) || [];
+          tryBodyZh.value = (res && res.body) || "";
+          tryPrompt.value = (res && res.prompt) || "";
+          tryPromptSource.value = (res && res.source) || "";
+          tryStyle.value = (res && res.style) || "";
+        } catch (e) { /* 已提示；提示词留空禁止开始 */ } finally {
+          tryPromptLoading.value = false;
+        }
+      }
+      function gotoStep2() {
+        if (!tryCharId.value) return;
+        if (tryMode.value === "img2img" && !String(tryOverride.value.ref || "").trim()
+            && tryRefs.value.length === 0) {
+          message.error("图生图重绘需要参考图：先上传/拖入一张，或给条目绑定参考图");
+          return;
+        }
+        tryStep.value = 2;
+        tryAttempt.value = 0;
+        generatePromptPreview();
+      }
       var tryElapsed = Vue.ref(0);
       var uploading = Vue.ref(false);
       var refFileInput = Vue.ref(null);
@@ -1267,7 +1522,7 @@
       function cancelTryWait() {
         stopTryTimers();
         tryRunning.value = false;
-        tryError.value = "已停止等待。后台任务可能仍在生成：稍后可重试试画（同种子同图），或去立绘库/抽卡流程里看结果。";
+        message.info("已停止等待。后台任务可能仍在生成：稍后可重试试画，或去立绘库/抽卡流程里看结果。");
       }
       function overrideOf() {
         // tryMode → jobs/start 的 override（entry 模式不带 override）
@@ -1315,12 +1570,19 @@
           message.error("lora 模式需要填 LoRA 名:权重");
           return;
         }
+        if (!String(tryPrompt.value || "").trim()) {
+          message.error("还没有确认提示词：回第 2 步生成预览");
+          tryStep.value = 2;
+          return;
+        }
         tryRunning.value = true;
         tryElapsed.value = 0;
         tryError.value = ""; tryPreview.value = ""; tryOk.value = false;
         tryArchived.value = false;
+        tryStep.value = 3;
         try {
-          var payload = { kind: "try", id: tryCharId.value };
+          var payload = { kind: "try", id: tryCharId.value,
+                          prompt: String(tryPrompt.value || "").trim() };
           var ov = overrideOf();
           if (ov) payload.override = ov;
           var res = await apiPost("jobs/start", payload);
@@ -1361,12 +1623,18 @@
       }
       function backFromTry() { menu.value = cameFrom.value; }
       function discardTry() {
-        // 舍弃本次结果：清预览，不存立绘库（萌绘侧原图保留在其图库，不影响我们）
+        // 舍弃本次结果：清预览，不存立绘库（萌绘侧原图保留在其图库，不影响我们）。
+        // 修复（v0.5.9）：旧版往 tryError（错误 alert）里写「已舍弃」这种非错误
+        // 文案，和结果 toast 叠出两个提示框——现在只用一条 info toast。
+        stopTryTimers();
+        tryRunning.value = false;
         tryPreview.value = "";
         tryOk.value = false;
         tryJobId.value = "";
         tryArchived.value = false;
-        tryError.value = "已舍弃本次结果（未存入立绘库）";
+        tryError.value = "";
+        trySrcPath.value = "";
+        message.info("已舍弃本次结果（未存入立绘库）");
       }
       // 参考图缩略墙（v0.5.3）：试画台直接展示/选用/增删该角色绑定的参考图
       var tryRefs = Vue.ref([]);
@@ -1398,6 +1666,10 @@
       Vue.watch(function () {
         return [tryCharId.value, tryMode.value];
       }, function (v) {
+        // 换角色/换画法：回第 1 步并清掉上一位的提示词预览（避免串味）
+        tryStep.value = 1;
+        tryPrompt.value = ""; tryDims.value = []; tryBodyZh.value = "";
+        tryPromptSource.value = ""; tryStyle.value = ""; tryAttempt.value = 0;
         if (v[0] && v[1] === "img2img") {
           tryOverride.value.ref = "";   // 换角色/换模式回随机，避免残留别的角色的参考图
           loadTryRefs();
@@ -1638,7 +1910,7 @@
       }
       loadAll().then(function () {
         return Promise.all([loadGallery(), loadConfig(), loadWorks(), loadWorkflows(),
-                            loadLlmProviders()]);
+                            loadLlmProviders(), loadThemes()]);
       });
 
       return {
@@ -1666,12 +1938,18 @@
         tryArchived: tryArchived, tryEntryVerified: tryEntryVerified,
         doTry: doTry, doMarkVerified: doMarkVerified, doArchive: doArchive,
         tryMode: tryMode, tryOverride: tryOverride, tryElapsed: tryElapsed,
+        tryStep: tryStep, tryTheme: tryTheme, themeOpts: themeOpts,
+        tryCustom: tryCustom, tryDims: tryDims, tryBodyZh: tryBodyZh,
+        tryPrompt: tryPrompt, tryPromptSource: tryPromptSource,
+        tryPromptLoading: tryPromptLoading, tryStyle: tryStyle,
+        gotoStep2: gotoStep2, generatePromptPreview: generatePromptPreview,
+        onThemeChange: onThemeChange,
         uploading: uploading, refFileInput: refFileInput, onRefFile: onRefFile,
         cancelTryWait: cancelTryWait, adoptTryParams: adoptTryParams, backFromTry: backFromTry,
         tryRefs: tryRefs, tryRefsLoading: tryRefsLoading, selectTryRef: selectTryRef,
         deleteTryRef: deleteTryRef, discardTry: discardTry,
         tryDrag: tryDrag, onDropTry: onDropTry,
-        viewer: viewer, viewerLoading: viewerLoading, openViewer: openViewer,
+        openViewer: openViewer,
         trySrcPath: trySrcPath,
         works: works, worksLoading: worksLoading, currentWork: currentWork,
         openWork: openWork, backWorks: backWorks, gotoTry: gotoTry, openEditById: openEditById,

@@ -17,6 +17,7 @@ import asyncio
 import base64
 import io
 import re
+import shutil
 import time
 import traceback
 from pathlib import Path
@@ -529,12 +530,14 @@ async def h_job_start(plugin) -> dict:
             (entry.get("strategy") or {}).get("ref") or ""
         ).strip():
             return err("图生图重绘需要参考图：先上传图片或填 URL / 本地路径")
+    # 预览确认过的提示词直通（v0.5.9）：非空时不再走 prompt_gen，按原文出图
+    prompt_override = str(body.get("prompt") or "").strip()[:2000]
     job_id = f"{kind}:{cid}:{int(time.time() * 1000)}"
     plugin._jobs[job_id] = {"status": "running", "kind": kind, "char_id": cid,
                             "entry_label": pool.entry_label(entry), "src_path": ""}
     _prune_jobs(plugin)
     loop = asyncio.get_running_loop()
-    loop.create_task(_run_job(plugin, job_id, entry, kind))
+    loop.create_task(_run_job(plugin, job_id, entry, kind, prompt_override))
     return ok({"job_id": job_id, "label": pool.entry_label(entry)})
 
 
@@ -547,18 +550,22 @@ def _prune_jobs(plugin) -> None:
             jobs.pop(jid, None)
 
 
-async def _run_job(plugin, job_id: str, entry: dict, kind: str) -> None:
+async def _run_job(plugin, job_id: str, entry: dict, kind: str,
+                   prompt_override: str = "") -> None:
     job = plugin._jobs.get(job_id, {})
     char_id = entry["id"]
     date = plugin._today()
     salt = str(plugin._cfg("salt", "moe-waifu"))
     seq = plugin._store.count_portraits(char_id)
     seed_int = pool.portrait_seed_int(char_id, date, seq, salt)
-    # 提示词与抽卡主链路同源（v0.5.6）：LLM 编辑指令 / tags+变化维度，失败自动回落
     draw_cfg = plugin._draw_cfg()
-    prompt_text, prompt_src = await prompt_gen.build_generation_prompt(
-        plugin.context, draw_cfg, entry, seed_int
-    )
+    if prompt_override:
+        # 试画台「确认提示词」直通（v0.5.9）：预览面板确认的文本按原文出图
+        prompt_text, prompt_src = prompt_override, "manual"
+    else:
+        prompt_text, prompt_src = await prompt_gen.build_generation_prompt(
+            plugin.context, draw_cfg, entry, seed_int
+        )
     logger.info(f"[{PLUGIN_NAME}] 立绘提示词（{prompt_src}）：{prompt_text[:80]}")
     t0 = time.monotonic()
     src, status, error, _dur = await draw.generate_portrait(
@@ -569,13 +576,27 @@ async def _run_job(plugin, job_id: str, entry: dict, kind: str) -> None:
     plugin._store.log_job(char_id, date, "try" if kind == "try" else "refill", status,
                           "workshop", entry["strategy_type"], seed_int, error, duration, src or "")
     job.update({"status": status, "error": error, "duration_ms": duration,
-                "seed": seed_int, "src_path": src or "", "char_id": char_id})
+                "seed": seed_int, "src_path": src or "", "char_id": char_id,
+                "prompt": prompt_text[:500], "prompt_src": prompt_src})
     if src and kind == "refill":
         rel = draw.archive_portrait(src, plugin._data_dir, char_id, date, seq, seed_int)
         plugin._store.add_portrait(char_id, rel, seed_int, date, seq, entry["strategy_type"])
         job["archived"] = rel
     if src:
-        job["preview"] = _thumb_data_url(src, 420)
+        # 试画缓存（v0.5.9）：萌绘产物在其自己的数据目录里，/image/data 只认本插件
+        # 数据目录——大图查看前先把成品拷进 try_cache/，src_path 指向这份拷贝
+        # （归档/add_portrait 都是再拷贝语义，不受影响）。7 天后由启动清理回收。
+        try:
+            cache_dir = Path(plugin._data_dir) / "try_cache"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cached = cache_dir / f"{job_id.replace(':', '_')}.png"
+            shutil.copy2(src, cached)
+            job["src_path"] = str(cached)
+        except Exception:
+            logger.warning(f"[{PLUGIN_NAME}] 试画缓存拷贝失败（大图查看将不可用）\n"
+                           f"{traceback.format_exc()}")
+    if job.get("src_path"):
+        job["preview"] = _thumb_data_url(job["src_path"], 420)
     plugin._jobs[job_id] = job
 
 
@@ -855,6 +876,56 @@ async def h_llm_providers(plugin) -> dict:
     return ok({"providers": items})
 
 
+# ---------- 主题与提示词预览（试画台第 2 步，v0.6.0） ----------
+
+async def h_themes(plugin) -> dict:
+    return ok({"themes": [{"id": t["id"], "label": t["label"]}
+                          for t in prompt_gen.THEMES]})
+
+
+async def h_prompt_preview(plugin) -> dict:
+    """生成提示词预览（不绘图）：返回维度标签 + 最终提示词文本。
+
+    attempt 用于「换一版」：混进种子做预览层扰动（不影响抽卡主链路的决定论）。
+    用户确认后的提示词文本经 jobs/start 的 prompt 字段直通出图。
+    """
+    body = await _body()
+    cid = str(body.get("id") or "").strip()
+    if not cid:
+        return err("缺少 id")
+    entry = pool.find_entry(pool.load_packs(_pools_dir(plugin), logger), cid)
+    if entry is None:
+        return err(f"角色库里找不到「{cid}」")
+    override = body.get("override") if isinstance(body.get("override"), dict) else None
+    if override:
+        entry = draw.effective_entry(entry, override)
+    theme_id = str(body.get("theme") or "random").strip()
+    custom = str(body.get("custom") or "").strip()[:300]
+    try:
+        attempt = max(0, int(body.get("attempt") or 0))
+    except (TypeError, ValueError):
+        attempt = 0
+    date = plugin._today()
+    salt = str(plugin._cfg("salt", "moe-waifu"))
+    seq = plugin._store.count_portraits(cid) if plugin._store else 0
+    seed_int = pool.portrait_seed_int(cid, date, seq, salt)
+    if attempt:
+        seed_int = (seed_int + attempt * 7919) % (2 ** 31)
+    cfg = plugin._draw_cfg()
+    prompt_text, source = await prompt_gen.build_generation_prompt(
+        plugin.context, cfg, entry, seed_int, theme_id, custom
+    )
+    picks = prompt_gen.pick_variations(seed_int, prompt_gen.get_theme(theme_id))
+    dims = [{"label": label, "zh": zh}
+            for label, zh in prompt_gen.variation_zh_list(picks)]
+    body_zh = str((picks.get("body") or {}).get("zh") or "").strip()
+    style = ""
+    if str(entry.get("strategy_type") or "base") != "img2img":
+        style = prompt_gen.detect_t2i_style(plugin.context, cfg.get("draw_workflow", ""))
+    return ok({"prompt": prompt_text, "source": source, "style": style,
+               "dims": dims, "body": body_zh, "seed": seed_int, "attempt": attempt})
+
+
 async def h_workflows(plugin) -> dict:
     """直接读萌绘配置的工作流条目，按用户口径计算图生图能力（v0.3.6）。
 
@@ -1003,6 +1074,8 @@ def register(plugin) -> None:
         ("/works", h_works, ["GET"]),
         ("/workflows", h_workflows, ["GET"]),
         ("/llm_providers", h_llm_providers, ["GET"]),
+        ("/themes", h_themes, ["GET"]),
+        ("/prompt/preview", h_prompt_preview, ["POST"]),
         ("/pools/save_entry", h_save_entry, ["POST"]),
         ("/pools/delete_entry", h_delete_entry, ["POST"]),
         ("/pools/set_pack", h_set_pack, ["POST"]),

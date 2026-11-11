@@ -113,6 +113,48 @@ DIMS = {
     "body": BODY,
 }
 
+# ---------- 主题预设（试画台「第 2 步：提示词」用） ----------
+# outfit_kw / bg_kw：从对应维度池里按中文子串筛子集，再在该子集内按种子加权；
+# 筛不出子集（池里没这个词）就退回全池随机。custom 由用户在预览面板自填。
+THEMES = (
+    {"id": "random", "label": "随机（按种子变化）", "outfit_kw": [], "bg_kw": []},
+    {"id": "swimsuit", "label": "泳装 · 夏日", "outfit_kw": ["泳装"], "bg_kw": ["海边"]},
+    {"id": "campus", "label": "校园 · JK", "outfit_kw": ["水手服", "运动外套"], "bg_kw": ["教室", "樱花"]},
+    {"id": "wedding", "label": "婚纱 · 典礼", "outfit_kw": ["婚纱"], "bg_kw": ["纯白", "浅粉"]},
+    {"id": "office", "label": "职场 · 通勤", "outfit_kw": ["西装", "毛衣"], "bg_kw": ["咖啡馆", "霓虹"]},
+    {"id": "kimono", "label": "和风 · 浴衣", "outfit_kw": ["浴衣"], "bg_kw": ["和室", "樱花"]},
+    {"id": "gothic", "label": "暗黑 · 哥特", "outfit_kw": ["哥特", "女巫"], "bg_kw": ["霓虹", "雨"]},
+    {"id": "home", "label": "居家 · 慵懒", "outfit_kw": ["睡衣", "毛衣"], "bg_kw": ["雨", "和室", "咖啡馆"]},
+    {"id": "idol", "label": "偶像 · 舞台", "outfit_kw": ["打歌服"], "bg_kw": ["圣诞", "霓虹", "星空"]},
+    {"id": "party", "label": "旗袍 · 东方", "outfit_kw": ["旗袍"], "bg_kw": ["和室", "樱花", "花园"]},
+)
+
+
+def get_theme(theme_id: str) -> dict | None:
+    tid = str(theme_id or "").strip()
+    if not tid or tid == "random":
+        return None
+    return next((t for t in THEMES if t["id"] == tid), None)
+
+
+def apply_theme(picks: dict, seed_int: int, theme: dict | None) -> dict:
+    """主题约束：outfit / background 在主题子集内重摇（其余维度保持种子随机）。
+
+    纯函数：同 (seed, theme) 恒定；子集为空时不动（回全池结果）。
+    """
+    if not theme:
+        return picks
+    for dim, kw_key in (("outfit", "outfit_kw"), ("background", "bg_kw")):
+        kws = [str(k).strip() for k in (theme.get(kw_key) or []) if str(k).strip()]
+        if not kws:
+            continue
+        subset = [it for it in DIMS[dim]
+                  if any(kw in str(it.get("zh") or "") for kw in kws)]
+        if subset:
+            picks[dim] = _weighted_pick(
+                subset, _sub(seed_int, f"{dim}@{theme.get('id')}", 2 ** 30))
+    return picks
+
 
 # ---------- 种子派生（决定论：同种子同维度同选择） ----------
 
@@ -134,10 +176,14 @@ def _weighted_pick(items: list, r: int) -> dict:
     return items[-1]
 
 
-def pick_variations(seed_int: int) -> dict:
-    """按种子从各维度池确定性挑选（纯函数，可测）。返回 {维度: 条目}。"""
-    return {tag: _weighted_pick(items, _sub(seed_int, tag, 2 ** 30))
-            for tag, items in DIMS.items()}
+def pick_variations(seed_int: int, theme: dict | None = None) -> dict:
+    """按种子从各维度池确定性挑选（纯函数，可测）。返回 {维度: 条目}。
+
+    theme 传入主题预设时，outfit / background 在主题子集内重摇。
+    """
+    picks = {tag: _weighted_pick(items, _sub(seed_int, tag, 2 ** 30))
+             for tag, items in DIMS.items()}
+    return apply_theme(picks, seed_int, theme)
 
 
 def variation_zh_list(picks: dict) -> list:
@@ -154,10 +200,11 @@ def variation_zh_list(picks: dict) -> list:
 
 # ---------- 本地模板（无 LLM 兜底） ----------
 
-def build_local_instruction(entry: dict, picks: dict) -> str:
+def build_local_instruction(entry: dict, picks: dict, custom: str = "") -> str:
     """img2img 用：本地拼一条 Qwen-Image-2.1 风格的自然语言编辑指令。
 
     结构遵循官方指南「动作 + 目标 + 约束」：先列改动，句尾统一强调保持不变。
+    custom 为用户在预览面板自填的附加要求，作为一条改动子句并入。
     """
     parts = []
     for label, zh in variation_zh_list(picks):
@@ -171,6 +218,9 @@ def build_local_instruction(entry: dict, picks: dict) -> str:
             parts.append(f"表情改为{zh}")
         elif label == "体型":
             parts.append(f"把体型调整为{zh}（面部特征保持可辨认）")
+    extra = str(custom or "").strip().strip("。，,")
+    if extra:
+        parts.append(extra)
     tail = ("。保持人物的面部特征、发型发色与角色辨识度不变，只做上述改动；"
             "输出单人完整竖版立绘")
     if not parts:
@@ -196,7 +246,7 @@ def build_t2i_prompt(entry: dict, picks: dict) -> str:
     return ", ".join(segs)
 
 
-def build_t2i_natural_local(entry: dict, picks: dict) -> str:
+def build_t2i_natural_local(entry: dict, picks: dict, custom: str = "") -> str:
     """自然语言系底模（Moss-Image/FLUX/krea 等）用：英文 caption 本地兜底。
 
     按 MOSS-Image 规范的 Tag 串顺序拼（Quality → Character/Series → General）：
@@ -210,14 +260,20 @@ def build_t2i_natural_local(entry: dict, picks: dict) -> str:
         en = str((picks.get(tag) or {}).get("en") or "").strip().strip(",")
         if en:
             segs.append(en)
+    extra = str(custom or "").strip().strip(",")
+    if extra:
+        segs.append(extra)
     return ", ".join(segs)
 
 
-def build_t2i_qwen_local(entry: dict, picks: dict) -> str:
+def build_t2i_qwen_local(entry: dict, picks: dict, custom: str = "") -> str:
     """Qwen-Image-2.1 文生图用：中文长描述本地兜底（官方格式是约 20 句长段，
     本地只能给个结构完整的短版，真长段交给 LLM 通道）。"""
     zh = [str((picks.get(k) or {}).get("zh") or "").strip().strip("。")
           for k in ("background", "outfit", "pose", "expression", "body")]
+    extra = str(custom or "").strip().strip("。")
+    if extra:
+        zh.append(extra)
     zh = [s for s in zh if s]
     tags = str(entry.get("tags_en") or "").strip().rstrip(",")
     lines = ["一幅单人完整竖版角色立绘插画，构图干净、光影柔和、细节精致"]
@@ -263,7 +319,7 @@ _SYSTEM_T2I_QWEN = (
 )
 
 
-def build_meta_prompt(entry: dict, picks: dict) -> str:
+def build_meta_prompt(entry: dict, picks: dict, custom: str = "") -> str:
     name = str(entry.get("name") or "").strip() or "该角色"
     series = str(entry.get("series") or "").strip() or "未知作品"
     tags = str(entry.get("tags_en") or "").strip() or "无"
@@ -276,6 +332,9 @@ def build_meta_prompt(entry: dict, picks: dict) -> str:
         lines += [f"- {label}：{zh}" for label, zh in zh_list]
     else:
         lines.append("- （全部维度保持不变）")
+    extra = str(custom or "").strip()
+    if extra:
+        lines.append(f"- 用户附加要求：{extra}")
     lines += [
         "请把以上改动自然融合成一条编辑指令；未列出的维度一律不要改动。",
         "角色是二次元角色，目标是单人完整竖版立绘。",
@@ -364,57 +423,67 @@ def detect_t2i_style(context, workflow_name: str) -> str:
         return "danbooru"
 
 
-def build_t2i_meta_prompt(entry: dict, picks: dict, style: str) -> str:
+def build_t2i_meta_prompt(entry: dict, picks: dict, style: str,
+                          custom: str = "") -> str:
     name = str(entry.get("name") or "").strip() or "该角色"
     series = str(entry.get("series") or "").strip()
     tags = str(entry.get("tags_en") or "").strip() or "无"
+    extra = str(custom or "").strip()
     if style == "qwen":
         head = f"角色：{name}" + (f"（出自 {series}）" if series else "")
         segs = [f"{head}。外观特征 tags（供参考，需转写成自然语句）：{tags}。"]
         segs += [f"{label}：{zh}" for label, zh in variation_zh_list(picks)]
+        if extra:
+            segs.append(f"用户附加要求：{extra}")
         segs.append("目标是单人完整竖版立绘，请写成一段连贯中文长描述。")
         return "\n".join(segs)
     # natural（MOSS 口径）
     head = f"Character: {name}" + (f" ({series})" if series else "")
     segs = [f"{head}. Identity tags (anchor these features verbatim): {tags}."]
     segs += [f"{label}: {zh}" for label, zh in variation_zh_list(picks)]
+    if extra:
+        segs.append(f"User extra requirement: {extra}")
     segs.append("Target: a single-character full-body portrait illustration. "
                 "Write ONE connected English caption.")
     return "\n".join(segs)
 
 
-def _t2i_local_of(style: str, entry: dict, picks: dict) -> tuple:
+def _t2i_local_of(style: str, entry: dict, picks: dict, custom: str = "") -> tuple:
     """分风格的文生图本地兜底 + 静态回退。"""
     if style == "natural":
-        return build_t2i_natural_local(entry, picks), "local"
+        return build_t2i_natural_local(entry, picks, custom), "local"
     if style == "qwen":
-        return build_t2i_qwen_local(entry, picks), "local"
+        return build_t2i_qwen_local(entry, picks, custom), "local"
     return build_t2i_prompt(entry, picks), "local"
 
 
 async def build_generation_prompt(context, cfg: dict, entry: dict,
-                                  seed_int: int) -> tuple:
+                                  seed_int: int, theme_id: str = "",
+                                  custom: str = "") -> tuple:
     """产出生图提示词。返回 (prompt, source)；source ∈ llm / local / static。
 
     绝不抛异常——LLM 链路任何失败都回落本地模板（提示词不是阻塞出卡的理由）。
     img2img（qwen image 2.1 编辑）走自然语言编辑指令；base/lora（文生图）按
     工作流底模风格分派：danbooru=tag 拼装、natural=英文 caption、qwen=中文
     长描述（风格探测失败一律回落 danbooru tag 拼装）。
+    theme_id：主题预设（试画台预览用；random/空 = 纯种子随机）。
+    custom：用户自填的附加要求（融入指令/描述）。
     """
+    theme = get_theme(theme_id)
     try:
         stype = str(entry.get("strategy_type") or "base")
         if stype != "img2img":
             if not bool(cfg.get("variations_enabled", True)):
                 return build_prompt_tags(entry), "static"
-            picks = pick_variations(seed_int)
+            picks = pick_variations(seed_int, theme)
             style = detect_t2i_style(context, cfg.get("draw_workflow", ""))
             if not bool(cfg.get("prompt_llm_enabled", True)) or style == "danbooru":
-                return _t2i_local_of(style, entry, picks)
+                return _t2i_local_of(style, entry, picks, custom)
             provider = await _resolve_provider(
                 context, cfg.get("prompt_llm_provider", ""))
             if provider is None:
                 logger.warning("[moe_waifu] 未找到可用的对话模型，提示词回落本地模板")
-                return _t2i_local_of(style, entry, picks)
+                return _t2i_local_of(style, entry, picks, custom)
             timeout = int(cfg.get("prompt_llm_timeout", 30) or 30)
             if timeout <= 0:
                 timeout = 30
@@ -422,7 +491,7 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
             try:
                 resp = await asyncio.wait_for(
                     provider.text_chat(
-                        prompt=build_t2i_meta_prompt(entry, picks, style),
+                        prompt=build_t2i_meta_prompt(entry, picks, style, custom),
                         session_id=None,
                         system_prompt=system,
                     ),
@@ -430,29 +499,29 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
                 )
             except asyncio.TimeoutError:
                 logger.warning(f"[moe_waifu] 提示词 LLM 超时（>{timeout}s），回落本地模板")
-                return _t2i_local_of(style, entry, picks)
+                return _t2i_local_of(style, entry, picks, custom)
             text = sanitize_llm_output(getattr(resp, "completion_text", "") or "",
                                        limit=400 if style == "qwen" else 300)
             if text:
                 return text, "llm"
             logger.warning("[moe_waifu] 提示词 LLM 返回为空，回落本地模板")
-            return _t2i_local_of(style, entry, picks)
+            return _t2i_local_of(style, entry, picks, custom)
         if not bool(cfg.get("variations_enabled", True)):
             return build_prompt_tags(entry), "static"
-        picks = pick_variations(seed_int)
+        picks = pick_variations(seed_int, theme)
         if not bool(cfg.get("prompt_llm_enabled", True)):
-            return build_local_instruction(entry, picks), "local"
+            return build_local_instruction(entry, picks, custom), "local"
         provider = await _resolve_provider(context, cfg.get("prompt_llm_provider", ""))
         if provider is None:
             logger.warning("[moe_waifu] 未找到可用的对话模型，提示词回落本地模板")
-            return build_local_instruction(entry, picks), "local"
+            return build_local_instruction(entry, picks, custom), "local"
         timeout = int(cfg.get("prompt_llm_timeout", 30) or 30)
         if timeout <= 0:
             timeout = 30
         try:
             resp = await asyncio.wait_for(
                 provider.text_chat(
-                    prompt=build_meta_prompt(entry, picks),
+                    prompt=build_meta_prompt(entry, picks, custom),
                     session_id=None,
                     system_prompt=_SYSTEM_PROMPT,
                 ),
@@ -460,18 +529,18 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
             )
         except asyncio.TimeoutError:
             logger.warning(f"[moe_waifu] 提示词 LLM 超时（>{timeout}s），回落本地模板")
-            return build_local_instruction(entry, picks), "local"
+            return build_local_instruction(entry, picks, custom), "local"
         text = sanitize_llm_output(getattr(resp, "completion_text", "") or "")
         if text:
             return text, "llm"
         logger.warning("[moe_waifu] 提示词 LLM 返回为空，回落本地模板")
-        return build_local_instruction(entry, picks), "local"
+        return build_local_instruction(entry, picks, custom), "local"
     except Exception:
         logger.error("[moe_waifu] 提示词生成异常，回落本地模板", exc_info=True)
         try:
             if str(entry.get("strategy_type") or "base") == "img2img":
                 return (build_local_instruction(
-                    entry, pick_variations(seed_int)), "local")
+                    entry, pick_variations(seed_int, theme), custom), "local")
             return build_prompt_tags(entry), "static"
         except Exception:
             return "1girl, solo, best quality, looking at viewer", "static"
