@@ -129,13 +129,17 @@ def _base_kwargs(cfg: dict, prompt: str, seed_int: int,
     return kwargs
 
 
-async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int, event=None):
+async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
+                            event=None, prompt: str | None = None):
     """按角色策略生成立绘。返回 (本地路径|None, status, error, duration_ms)。
 
     event 传真实指令事件（萌绘内部会用到会话上下文；WebUI 试画等无事件场景留 None，
     由调用方自行兜底）。status：ok / skipped_no_anima / timeout / error。失败时路径
     为 None——调用方必须报错不出卡，绝不做无图降级（PRD 铁律 1）。
+    prompt：v0.5.6 起由调用方经 prompt_gen 预生成（LLM 编辑指令 / 含变化维度的
+    tags）；留 None 时回落本地 tags 拼装（build_prompt，兼容旧路径）。
     """
+    prompt = str(prompt or "").strip() or build_prompt(entry)
     stype = str(entry.get("strategy_type") or "base")
     strategy = entry.get("strategy") or {}
     timeout = int(cfg.get("draw_timeout", 120))
@@ -163,7 +167,7 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int, even
             image = str(Path(ref).resolve())
         # img2img 不带 workflow（那是文生图槽位）；图生图工作流三级解析：
         # 条目 strategy.img2img_workflow → 全局配置 img2img_workflow → 留空（萌绘默认）
-        kwargs = _base_kwargs(cfg, build_prompt(entry), seed_int,
+        kwargs = _base_kwargs(cfg, prompt, seed_int,
                               with_workflow=False, with_size=False)
         img_workflow = (
             str(strategy.get("img2img_workflow") or "").strip()
@@ -185,7 +189,7 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int, even
         handler = _get_tool_handler(context, tool_name)
         if handler is None:
             return None, _STATUS_NO_ANIMA, "未安装萌绘（comfyui_draw 工具不存在）", 0
-        kwargs = _base_kwargs(cfg, build_prompt(entry), seed_int)
+        kwargs = _base_kwargs(cfg, prompt, seed_int)
         if stype == "lora":
             loras = strategy.get("loras")
             if isinstance(loras, list) and loras:

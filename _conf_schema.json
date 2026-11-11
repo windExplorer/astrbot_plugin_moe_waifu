@@ -89,6 +89,30 @@
     "type": "float",
     "default": 0.65
   },
+  "prompt_llm_enabled": {
+    "description": "LLM 生成提示词",
+    "hint": "图生图立绘用所配对话模型生成 Qwen-Image-Edit 编辑指令（自然语言，动作+目标+约束）；失败自动回落本地模板，不影响出卡",
+    "type": "bool",
+    "default": true
+  },
+  "prompt_llm_provider": {
+    "description": "提示词用对话模型",
+    "hint": "生成提示词的 LLM 提供商 ID；留空 = AstrBot 当前默认对话模型。工坊配置页有下拉可选中",
+    "type": "string",
+    "default": ""
+  },
+  "prompt_llm_timeout": {
+    "description": "提示词 LLM 超时（秒）",
+    "hint": "生成提示词的等待上限，超时直接用本地模板拼提示词",
+    "type": "int",
+    "default": 30
+  },
+  "variations_enabled": {
+    "description": "立绘随机变化",
+    "hint": "按种子在服装/背景/姿势/表情/体型（小概率）维度上做确定性随机，让立绘不千篇一律；关闭则按角色 tags 原样出图",
+    "type": "bool",
+    "default": true
+  },
   "announce_enabled": {
     "description": "召唤提示",
     "hint": "真去生成新立绘时先发一句「正在召唤…」的过程提示（萌绘单张 20~120 秒）",

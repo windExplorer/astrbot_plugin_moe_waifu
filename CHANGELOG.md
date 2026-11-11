@@ -2,6 +2,53 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.5.6 (2026-11-11)
+
+立绘提示词体系重做：LLM 生成 Qwen-Image-Edit 编辑指令 + 种子变化维度（版本 v0.5.5 -> v0.5.6）。
+
+- **需求（用户）**：①图生图主用 Qwen-Image-Edit（单图编辑），旧提示词是
+  danbooru tag 拼装（`1girl, solo, …, <tags_en>`），不是该模型吃的「自然语言
+  编辑指令」，效果差；②参考图生成立绘必须由 LLM 生成提示词，所以要加「选哪个
+  LLM」的配置；③立绘不能千篇一律——背景（纯色/浅色/丰富场景）、服装（泳装/
+  旗袍/职业装等）、身体部位（胸部大小、身高，如矮小萝莉→高挑版本）都要由
+  提示词控制，且不止这些维度。
+- **Qwen-Image-Edit 提示词写法（调研结论）**：该模型单图编辑吃自然语言指令，
+  官方指南要点是一句话内「动作 + 目标 + 约束」——明确说清改什么，句尾强调
+  什么必须保持不变（面部特征/发色/辨识度），避免一次塞太多改动。
+- **新模块 `prompt_gen.py`**（纯函数部分可独立测试）：
+  - **变化维度池**：服装 16 项（水手服/婚纱/旗袍/泳装/西装/浴衣/女仆装…）、
+    背景与光照 14 项（纯白摄影棚/浅粉纯色/樱花树下/黄昏街道/霓虹夜景…）、
+    姿势 10 项、表情 10 项、**体型 6 项**（约 2/3 权重保持原样，小概率触发
+    身高/体型/胸部变化——「萝莉变高挑」「胸部更丰满」一类）。每项带中文短语
+    （编辑指令用）与英文 tag（文生图用）。
+  - **种子决定论**：维度选择由 `SHA-256(seed|维度标签)` 加权派生，同角色同天
+    第 seq 张恒定（重试不换装），与 pool.py 的种子体系同构。
+  - **LLM 通道**：把角色信息 + 本轮维度选择交给所配对话模型，按系统提示词
+    （动作+目标+约束、单条指令、≤110 字、无 markdown）产出 Qwen-Image-Edit
+    编辑指令；超时/失败/返回空 → **本地模板兜底**，绝不阻塞出卡。
+    本地模板同样按「改动列举 + 句尾保持约束」拼装。
+  - **LLM 输出清洗** `sanitize_llm_output`：剥 markdown/引号/「编辑指令：」
+    前缀（前缀剥离后可能再露引号，strip 两次），取首个非空行，限 150 字。
+  - base/lora（文生图）不走 LLM：tags + 变化维度英文 tag 追加
+    （`build_t2i_prompt`）；`variations_enabled` 关闭时完全按旧拼装出图。
+- **LLM 选择配置**（`_conf_schema.json` 新增 4 键，均带 type，schema 装载期
+  守卫 `tests/test_schema.py` 复刻 AstrBot 解析规则）：`prompt_llm_enabled`
+  （默认开）、`prompt_llm_provider`（提供商 ID，留空 = AstrBot 当前默认对话
+  模型；解析序：显式 ID → `get_using_provider_async` → 任一 chat provider）、
+  `prompt_llm_timeout`（默认 30s）、`variations_enabled`（默认开）。
+- **调用链**：抽卡主链路（`main._produce`）与工坊试画/补图（`webui_api._run_job`）
+  统一先经 `prompt_gen.build_generation_prompt` 产提示词，再传给
+  `draw.generate_portrait`（新增可选 `prompt` 参数，留 None 保持旧行为）；
+  两条链路的提示词与来源（llm/local/static）都记入插件日志。
+- **工坊前端**：配置页新增「提示词与变化」分区；「提示词用对话模型」为下拉
+  （新端点 `GET /llm_providers` 列出全部 chat provider 的 id 与模型名，可
+  filterable/手填，留空=默认）。`build_zip.ps1` includeList 与 `main.py`
+  热重载列表已同步加入 `prompt_gen`。
+- **测试**：新增 `tests/test_prompt_gen.py`（决定论/分布非退化/体型大权重保持/
+  本地指令结构/清洗/元提示词/无 astrbot 环境兜底）、`tests/test_schema.py`
+  （每节点 type 白名单 + object 递归 + 新键齐全）；`test_draw` / `test_pool` /
+  `test_card` / `test_html_integrity` 全过。
+
 ## v0.5.5 (2026-11-11)
 
 修图生图工作流传参缺失 + 大图查看（版本 v0.5.4 -> v0.5.5）。

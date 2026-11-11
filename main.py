@@ -22,7 +22,7 @@ from astrbot.api.message_components import Image, Plain
 from astrbot.core.config.astrbot_config import AstrBotConfig
 from astrbot.core.message.message_event_result import MessageChain
 
-from . import card, draw, pool, store
+from . import card, draw, pool, prompt_gen, store
 
 PLUGIN_NAME = "astrbot_plugin_moe_waifu"
 
@@ -61,7 +61,7 @@ class MoeWaifuPlugin(Star):
         """热重载自研子模块（依赖序）。main 里全部走模块属性访问（pool.xxx），
         reload 后自动生效，无需重新绑定函数对象。"""
         pkg = __package__
-        for name in ("store", "card", "pool", "draw", "webui_api"):
+        for name in ("store", "card", "pool", "draw", "prompt_gen", "webui_api"):
             mod = sys.modules.get(f"{pkg}.{name}")
             if mod is not None:
                 try:
@@ -143,6 +143,10 @@ class MoeWaifuPlugin(Star):
             "draw_negative_prompt": self._cfg("draw_negative_prompt", ""),
             "img2img_workflow": self._cfg("img2img_workflow", ""),
             "img2img_denoise": self._cfg("img2img_denoise", 0.65),
+            "prompt_llm_enabled": self._cfg("prompt_llm_enabled", True),
+            "prompt_llm_provider": self._cfg("prompt_llm_provider", ""),
+            "prompt_llm_timeout": self._cfg("prompt_llm_timeout", 30),
+            "variations_enabled": self._cfg("variations_enabled", True),
         }
 
     def _load_packs(self) -> list:
@@ -340,8 +344,15 @@ class MoeWaifuPlugin(Star):
             seed_int = pool.portrait_seed_int(char_id, date, seq, salt)
             if bool(self._cfg("announce_enabled", True)):
                 await self._send_plain(event, "♥ 正在召唤你的今日老婆，请稍候……")
+            # 提示词先产（v0.5.6）：img2img 由 LLM 生成 Qwen-Image-Edit 编辑指令
+            # （失败自动回落本地模板），base/lora 为 tags + 变化维度
+            draw_cfg = self._draw_cfg()
+            prompt_text, prompt_src = await prompt_gen.build_generation_prompt(
+                self.context, draw_cfg, entry, seed_int
+            )
+            logger.info(f"[{PLUGIN_NAME}] 立绘提示词（{prompt_src}）：{prompt_text[:80]}")
             raw_src, status, err, dur = await draw.generate_portrait(
-                self.context, self._draw_cfg(), entry, seed_int, event
+                self.context, draw_cfg, entry, seed_int, event, prompt=prompt_text
             )
             self._store.log_job(char_id, date, "generated", status, uid,
                                 entry["strategy_type"], seed_int, err, dur, raw_src or "")

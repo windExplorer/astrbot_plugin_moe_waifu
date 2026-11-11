@@ -398,6 +398,10 @@
                     <n-select v-else-if="isWorkflowKey(it.key)" v-model:value="configModel[it.key]"
                               :options="wfOpts(it.key === 'img2img_workflow' ? 'img' : 'txt')" filterable tag clearable
                               placeholder="留空用萌绘默认" style="width: 340px;"></n-select>
+                    <n-select v-else-if="isLlmKey(it.key)" v-model:value="configModel[it.key]"
+                              :options="llmOpts" filterable tag clearable
+                              placeholder="留空 = AstrBot 当前默认对话模型"
+                              style="width: 340px;"></n-select>
                     <n-input v-else-if="isMulti(it)" v-model:value="configModel[it.key]"
                              type="textarea" :rows="4"></n-input>
                     <n-input v-else v-model:value="configModel[it.key]" style="width: 420px;"></n-input>
@@ -871,6 +875,23 @@
           });
       }
       function isWorkflowKey(key) { return key === "draw_workflow" || key === "img2img_workflow"; }
+
+      // ---- LLM 提供商列表（提示词用对话模型下拉，v0.5.6） ----
+      var llmProviders = Vue.ref([]);
+      async function loadLlmProviders() {
+        try {
+          var res = await apiGet("llm_providers");
+          llmProviders.value = (res && res.providers) || [];
+        } catch (e) { /* 已提示；下拉退化为手填 ID */ }
+      }
+      var llmOpts = Vue.computed(function () {
+        var opts = [{ label: "默认（AstrBot 当前对话模型）", value: "" }];
+        llmProviders.value.forEach(function (p) {
+          opts.push({ label: p.id + (p.model ? " · " + p.model : ""), value: p.id });
+        });
+        return opts;
+      });
+      function isLlmKey(key) { return key === "prompt_llm_provider"; }
 
       // 两段确认（sandbox 无 confirm/alert）
       var delArm = Vue.ref("");
@@ -1532,7 +1553,9 @@
                                 "allow_unverified", "disabled_groups"] },
         { title: "萌绘生图", keys: ["draw_workflow", "img2img_workflow", "draw_width", "draw_height",
                                     "draw_timeout", "img2img_denoise", "draw_negative_enabled",
-                                    "draw_negative_prompt", "announce_enabled"] }
+                                    "draw_negative_prompt", "announce_enabled"] },
+        { title: "提示词与变化", keys: ["prompt_llm_enabled", "prompt_llm_provider",
+                                        "prompt_llm_timeout", "variations_enabled"] }
       ];
       var MULTILINE_KEYS = ["disabled_groups", "draw_negative_prompt"];
       var configItems = Vue.ref([]);
@@ -1614,7 +1637,8 @@
         }
       }
       loadAll().then(function () {
-        return Promise.all([loadGallery(), loadConfig(), loadWorks(), loadWorkflows()]);
+        return Promise.all([loadGallery(), loadConfig(), loadWorks(), loadWorkflows(),
+                            loadLlmProviders()]);
       });
 
       return {
@@ -1662,7 +1686,8 @@
         doSaveBind: doSaveBind,
         configSections: configSections, configModel: configModel, configSaving: configSaving,
         saveConfig: saveConfig, optOpts: optOpts, isMulti: isMulti,
-        isWorkflowKey: isWorkflowKey, wfOpts: wfOpts
+        isWorkflowKey: isWorkflowKey, wfOpts: wfOpts,
+        isLlmKey: isLlmKey, llmOpts: llmOpts
       };
     }
   });

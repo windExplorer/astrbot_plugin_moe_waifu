@@ -34,10 +34,11 @@ except Exception:  # pragma: no cover
     request = None  # type: ignore
 
 try:  # 双形态导入（包内正常加载 / 平铺调试）
-    from . import pool, draw
+    from . import pool, draw, prompt_gen
 except ImportError:  # pragma: no cover
     import pool  # type: ignore
     import draw  # type: ignore
+    import prompt_gen  # type: ignore
 
 ROUTE_PREFIX = "/astrbot_plugin_moe_waifu"
 PLUGIN_NAME = "astrbot_plugin_moe_waifu"
@@ -553,9 +554,16 @@ async def _run_job(plugin, job_id: str, entry: dict, kind: str) -> None:
     salt = str(plugin._cfg("salt", "moe-waifu"))
     seq = plugin._store.count_portraits(char_id)
     seed_int = pool.portrait_seed_int(char_id, date, seq, salt)
+    # 提示词与抽卡主链路同源（v0.5.6）：LLM 编辑指令 / tags+变化维度，失败自动回落
+    draw_cfg = plugin._draw_cfg()
+    prompt_text, prompt_src = await prompt_gen.build_generation_prompt(
+        plugin.context, draw_cfg, entry, seed_int
+    )
+    logger.info(f"[{PLUGIN_NAME}] 立绘提示词（{prompt_src}）：{prompt_text[:80]}")
     t0 = time.monotonic()
     src, status, error, _dur = await draw.generate_portrait(
-        plugin.context, plugin._draw_cfg(), entry, seed_int, _synthetic_event()
+        plugin.context, draw_cfg, entry, seed_int, _synthetic_event(),
+        prompt=prompt_text,
     )
     duration = int((time.monotonic() - t0) * 1000)
     plugin._store.log_job(char_id, date, "try" if kind == "try" else "refill", status,
@@ -813,6 +821,40 @@ async def h_image_data(plugin) -> dict:
     return ok({"data_url": data_url, "name": fp.name})
 
 
+async def h_llm_providers(plugin) -> dict:
+    """列出可用的对话模型（LLM 提供商），供配置页「提示词用对话模型」下拉。
+
+    provider 元数据读 provider_config（id / model_config.model）；单个实例
+    读取失败只跳过该实例，不影响整体。
+    """
+    items = []
+    seen: set = set()
+    try:
+        provs = plugin.context.get_all_providers() or []
+    except Exception:
+        provs = []
+    for p in provs:
+        try:
+            conf = getattr(p, "provider_config", None) or {}
+            pid = str(conf.get("id") or getattr(p, "id", "") or "").strip()
+            if not pid or pid in seen:
+                continue
+            seen.add(pid)
+            model = ""
+            try:
+                model = str(p.get_model() or "")
+            except Exception:
+                model = ""
+            if not model:
+                mc = conf.get("model_config") or {}
+                model = str(mc.get("model") or "") if isinstance(mc, dict) else ""
+            items.append({"id": pid, "model": model})
+        except Exception:
+            continue
+    items.sort(key=lambda it: it["id"])
+    return ok({"providers": items})
+
+
 async def h_workflows(plugin) -> dict:
     """直接读萌绘配置的工作流条目，按用户口径计算图生图能力（v0.3.6）。
 
@@ -960,6 +1002,7 @@ def register(plugin) -> None:
         ("/pools", h_pools, ["GET"]),
         ("/works", h_works, ["GET"]),
         ("/workflows", h_workflows, ["GET"]),
+        ("/llm_providers", h_llm_providers, ["GET"]),
         ("/pools/save_entry", h_save_entry, ["POST"]),
         ("/pools/delete_entry", h_delete_entry, ["POST"]),
         ("/pools/set_pack", h_set_pack, ["POST"]),
