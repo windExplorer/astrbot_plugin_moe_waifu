@@ -91,7 +91,7 @@
   },
   "prompt_llm_enabled": {
     "description": "LLM 生成提示词",
-    "hint": "图生图立绘用所配对话模型生成 Qwen-Image-Edit 编辑指令（自然语言，动作+目标+约束）；失败自动回落本地模板，不影响出卡",
+    "hint": "图生图立绘用所配对话模型生成 Qwen-Image-2.1 风格的自然语言编辑指令（动作+目标+约束）；失败自动回落本地模板，不影响出卡",
     "type": "bool",
     "default": true
   },
