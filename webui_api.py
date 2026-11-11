@@ -1066,6 +1066,45 @@ async def h_config_set(plugin) -> dict:
     return ok({"changed": changed, "skipped": skipped})
 
 
+# ---------- 工坊页签路由记忆（v0.5.12） ----------
+# 页面跑在无 allow-same-origin 的 sandbox iframe 里（localStorage 一碰就抛
+# SecurityError），Dashboard 刷新时又按服务端 content_path 重建 iframe src，
+# 页内 hash 留不住——所以「刷新停在上次页签」只能落在服务端。
+
+# 页签白名单：与前端 menuOpts 的 key 一致，防越权写入
+_UI_MENUS = ("chars", "works", "try", "gallery", "bind", "config")
+
+
+def _ui_state_path(plugin) -> Path:
+    return Path(plugin._data_dir) / "ui_state.json"
+
+
+async def h_ui_state_get(plugin) -> dict:
+    menu = "chars"
+    try:
+        data = _json_load(_ui_state_path(plugin))
+        if isinstance(data, dict) and data.get("menu") in _UI_MENUS:
+            menu = data["menu"]
+    except FileNotFoundError:
+        pass
+    except Exception:
+        logger.warning(f"[{PLUGIN_NAME}] ui_state 读取失败，回落默认页签\n{traceback.format_exc()}")
+    return ok({"menu": menu})
+
+
+async def h_ui_state_set(plugin) -> dict:
+    body = await _body()
+    menu = body.get("menu")
+    if menu not in _UI_MENUS:
+        return err(f"menu 必须是 {' / '.join(_UI_MENUS)} 之一")
+    try:
+        _json_save(_ui_state_path(plugin), {"menu": menu})
+    except Exception:
+        logger.warning(f"[{PLUGIN_NAME}] ui_state 写盘失败\n{traceback.format_exc()}")
+        return err("页签记忆写盘失败")
+    return ok({"menu": menu})
+
+
 # ---------- 注册 ----------
 
 def register(plugin) -> None:
@@ -1097,6 +1136,8 @@ def register(plugin) -> None:
         ("/group_pools", h_group_pools_set, ["POST"]),
         ("/config", h_config_get, ["GET"]),
         ("/config", h_config_set, ["POST"]),
+        ("/ui_state", h_ui_state_get, ["GET"]),
+        ("/ui_state", h_ui_state_set, ["POST"]),
     ]
     for path, fn, methods in routes:
         plugin.context.register_web_api(

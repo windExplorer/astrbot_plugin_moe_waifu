@@ -2,6 +2,31 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.5.12 (2026-11-11)
+
+工坊页签路由记忆：刷新页面不再跳回「角色库」（版本 v0.5.11 -> v0.5.12）。
+
+- **需求（用户）**：工坊切到任意页签后一刷新就回到「角色库」（首页），希望停在上次离开的地方。
+- **根因**：页签状态 `menu` 是纯内存 Vue ref，而本页没有任何可用的持久化通道——
+  页面跑在 Dashboard 的 sandbox iframe 里（`sandbox="allow-scripts allow-forms allow-downloads"`，
+  无 `allow-same-origin`），`localStorage` / `sessionStorage` 一访问就抛 `SecurityError`；
+  试着往 `location.hash` 写路由也没用：Dashboard 的 `PluginViewPage.vue` 刷新时按服务端返回的
+  `content_path` 重建 iframe `src`（只追加 `theme` 参数），页内 hash 必然丢失。
+- **实现**：
+  - 后端 `webui_api.py` 新增 `/ui_state`（GET 恢复 / POST 留痕）：`menu` 按六个页签键白名单
+    校验（`chars/works/try/gallery/bind/config`），落盘
+    `data/plugin_data/astrbot_plugin_moe_waifu/ui_state.json`（与 `works_meta.json` 同目录）；
+    文件缺失/损坏/值非法一律回落默认页签 `chars`，不抛错。
+  - 前端把全部五处页签切换（侧边菜单 `onMenu`、列表行「试画」、`gotoTry` / `gotoTryFromChars` /
+    `gotoGallery`，含试画台「← 返回」`backFromTry`）统一收口到 `setMenu()`：内存切换 +
+    fire-and-forget POST 留痕；挂载时 GET 恢复上次页签（恢复返回前用户已手点则不覆盖，
+    避免竞态回跳）。
+  - 恢复/留痕失败一律静默：「停在哪」只是体验项，不值得弹错误提示打断切页。
+  - 多端共享同一份记忆（控制台是管理员页面，可接受）；所有视图数据本来就是挂载时全量加载，
+    恢复页签不引入额外请求时序问题。
+- HTML 守卫 / 内联脚本 node --check / `webui_api` compileall / ui_state handler 临时自检全过
+  （自检脚本用完已删）。
+
 ## v0.5.11 (2026-11-11)
 
 工坊卡片网格列数可配置（版本 v0.5.10 -> v0.5.11）。

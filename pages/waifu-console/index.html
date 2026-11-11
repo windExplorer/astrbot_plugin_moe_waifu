@@ -981,7 +981,38 @@
         { label: "分群绑定", key: "bind" },
         { label: "配置", key: "config" }
       ];
-      function onMenu(key) { menu.value = key; }
+      // ---- 页签路由记忆（v0.5.12）：刷新停在上次的页签 ----
+      // 本页跑在无 allow-same-origin 的 sandbox iframe 里（localStorage 一碰就抛
+      // SecurityError），Dashboard 刷新时又按服务端 content_path 重建 iframe src、
+      // 页内 hash 留不住——所以记忆落在服务端（/ui_state）：挂载时 GET 恢复、
+      // 每次切页 fire-and-forget POST 留痕。恢复/留痕失败一律静默（只是个
+      // 「停在哪」的体验项，不值得弹错误提示打断切页）。
+      var uiMenuKeys = menuOpts.map(function (o) { return o.key; });
+      var menuTouched = false;
+      function saveUiMenu(key) {
+        try {
+          var p = bridge.apiPost("ui_state", { menu: key });
+          if (p && typeof p.catch === "function") p.catch(function () { /* 静默 */ });
+        } catch (e) { /* 静默 */ }
+      }
+      function setMenu(key) {
+        menu.value = key;
+        menuTouched = true;
+        saveUiMenu(key);
+      }
+      (function restoreUiMenu() {
+        try {
+          var p = bridge.apiGet("ui_state");
+          if (p && typeof p.then === "function") {
+            p.then(function (res) {
+              if (menuTouched) return;  // 恢复返回前用户已手点，别覆盖
+              var m = res && res.data && res.data.menu;
+              if (uiMenuKeys.indexOf(m) >= 0) { menu.value = m; menuTouched = true; }
+            }).catch(function () { /* 静默 */ });
+          }
+        } catch (e) { /* 静默 */ }
+      })();
+      function onMenu(key) { setMenu(key); }
 
       // ---- 角色库 ----
       var filterPack = Vue.ref("");
@@ -1240,13 +1271,13 @@
       function gotoTryFromChars(e) {
         cameFrom.value = "chars";
         tryCharId.value = e.id;
-        menu.value = "try";
+        setMenu("try");
       }
       function gotoGallery(charId) {
         // galCharId 的 watch（gallery 段）会自动装载该角色立绘列表
         galCharId.value = charId;
         currentWork.value = null;
-        menu.value = "gallery";
+        setMenu("gallery");
       }
 
       // ---- 抽屉参考图库（多张绑定/主参考/删除，v0.5.0） ----
@@ -1348,7 +1379,7 @@
                   { default: function () { return "编辑"; } }),
                 h(NS.NButton, {
                   size: "tiny", type: "primary", secondary: true,
-                  onClick: function () { tryCharId.value = row.id; menu.value = "try"; }
+                  onClick: function () { tryCharId.value = row.id; setMenu("try"); }
                 }, { default: function () { return "试画"; } }),
                 h(NS.NButton, {
                   size: "tiny", secondary: true,
@@ -1626,7 +1657,7 @@
           await loadAll();
         } catch (err2) { /* 已提示 */ }
       }
-      function backFromTry() { menu.value = cameFrom.value; }
+      function backFromTry() { setMenu(cameFrom.value || "chars"); }
       function discardTry() {
         // 舍弃本次结果：清预览，不存立绘库（萌绘侧原图保留在其图库，不影响我们）。
         // 修复（v0.5.9）：旧版往 tryError（错误 alert）里写「已舍弃」这种非错误
@@ -1817,7 +1848,7 @@
       function gotoTry(c) {
         cameFrom.value = menu.value;   // 试画台「← 返回」的目标
         tryCharId.value = c.id;
-        menu.value = "try";
+        setMenu("try");
       }
       function openEditById(id) {
         var e = allEntries.value.find(function (x) { return x.id === id; });
