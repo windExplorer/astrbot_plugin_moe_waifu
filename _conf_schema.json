@@ -41,6 +41,12 @@
     "type": "bool",
     "default": false
   },
+  "ui_grid_cols": {
+    "description": "卡片网格列数",
+    "hint": "工坊各页卡片每行显示几张（角色库/作品库/立绘库全局生效，2~10）；觉得一屏内容少就调大",
+    "type": "int",
+    "default": 4
+  },
   "draw_workflow": {
     "description": "文生图工作流",
     "hint": "base/lora 策略交给萌绘的工作流名；留空使用萌绘自己的默认动漫工作流",

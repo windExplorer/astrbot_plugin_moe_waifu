@@ -132,7 +132,7 @@
 
             <!-- 卡片视图（默认） -->
             <div v-if="charsMode === 'card'" style="margin-top: 14px;">
-              <n-grid :cols="4" :x-gap="12" :y-gap="12">
+              <n-grid :cols="uiCols" :x-gap="12" :y-gap="12">
                 <n-gi v-for="e in pagedEntries" :key="e.id">
                   <n-card size="small" :bordered="true" class="work-card">
                     <div class="work-cover" :style="{ background: 'linear-gradient(135deg,' + e.color + 'cc,' + e.color + '55)' }">
@@ -182,7 +182,7 @@
           <!-- ============ 作品库 ============ -->
           <div v-if="menu === 'works'">
             <div v-if="!currentWork" class="stack">
-              <n-grid :cols="4" :x-gap="12" :y-gap="12">
+              <n-grid :cols="uiCols" :x-gap="12" :y-gap="12">
                 <n-gi v-for="w in works" :key="w.series">
                   <n-card size="small" :bordered="true" class="work-card" @click="openWork(w)">
                     <div class="work-cover" :style="{ background: 'linear-gradient(135deg,' + w.color + 'cc,' + w.color + '55)' }">
@@ -208,7 +208,7 @@
                 <span class="bind-tip">{{ currentWork.total }} 个角色 · {{ currentWork.verified }} 已验证 · {{ currentWork.portrait_count }} 张立绘</span>
                 <n-button size="small" @click="openWorkCover">设置作品封面</n-button>
               </n-space>
-              <n-grid :cols="4" :x-gap="12" :y-gap="12">
+              <n-grid :cols="uiCols" :x-gap="12" :y-gap="12">
                 <n-gi v-for="c in currentWork.characters" :key="c.id">
                   <n-card size="small" :bordered="true" class="work-card" @click="gotoTry(c)">
                     <div class="work-cover" :style="{ background: 'linear-gradient(135deg,' + c.color + 'cc,' + c.color + '55)' }">
@@ -410,7 +410,7 @@
             <n-spin v-if="refillRunning" size="small">萌绘生成中（20~120 秒）…</n-spin>
             <n-empty v-if="!galLoading && galItems.length === 0"
                      description="该角色还没有立绘：去试画台试一张，或点「补一张」"></n-empty>
-            <n-grid :cols="5" :x-gap="10" :y-gap="10" v-if="galItems.length > 0">
+            <n-grid :cols="uiCols" :x-gap="10" :y-gap="10" v-if="galItems.length > 0">
               <n-gi v-for="it in galItems" :key="it.file">
                   <div class="gal-item">
                     <img v-if="it.thumb" :src="it.thumb" class="clickable-img"
@@ -1827,7 +1827,7 @@
       // ---- 配置（schema 驱动；group_pools 在分群绑定页签管理，此处排除） ----
       var CONFIG_SECTIONS = [
         { title: "基础", keys: ["timezone", "salt", "reroll_daily_limit", "portraits_per_char",
-                                "allow_unverified", "disabled_groups"] },
+                                "allow_unverified", "ui_grid_cols", "disabled_groups"] },
         { title: "萌绘生图", keys: ["draw_workflow", "img2img_workflow", "draw_width", "draw_height",
                                     "draw_timeout", "img2img_denoise", "draw_negative_enabled",
                                     "draw_negative_prompt", "announce_enabled"] },
@@ -1838,6 +1838,13 @@
       var configItems = Vue.ref([]);
       var configModel = Vue.ref({});
       var configSaving = Vue.ref(false);
+      // 卡片网格列数（v0.5.11）：全局配置 ui_grid_cols，角色库/作品库/立绘库跟随；
+      // 配置未装载或非法值时回落 4，钳制在 2~10
+      var uiCols = Vue.computed(function () {
+        var n = Number(configModel.value["ui_grid_cols"]);
+        if (!n || n < 2) n = 4;
+        return Math.min(10, Math.max(2, Math.round(n)));
+      });
       function isMulti(it) { return MULTILINE_KEYS.indexOf(it.key) >= 0; }
       function optOpts(it) {
         var opts = it.options || [];
@@ -1968,6 +1975,7 @@
         bindText: bindText, parsedBind: parsedBind, bindSaving: bindSaving,
         doSaveBind: doSaveBind,
         configSections: configSections, configModel: configModel, configSaving: configSaving,
+        uiCols: uiCols,
         saveConfig: saveConfig, optOpts: optOpts, isMulti: isMulti,
         isWorkflowKey: isWorkflowKey, wfOpts: wfOpts,
         isLlmKey: isLlmKey, llmOpts: llmOpts
