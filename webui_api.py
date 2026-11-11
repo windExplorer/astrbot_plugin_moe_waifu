@@ -452,6 +452,9 @@ async def h_portraits_list(plugin) -> dict:
         items.append({
             "file": row["file"], "seq": row["seq"], "date": row["date"],
             "seed": row["seed"], "exists": full.is_file(),
+            # abs：绝对路径（v0.6.0）——立绘可被选为图生图源；draw 侧
+            # Path(ref).exists() 按 CWD 解析相对路径，必须传绝对路径
+            "abs": str(full),
             "thumb": _thumb_data_url(str(full), 220) if full.is_file() else None,
         })
     return ok({"char_id": cid, "items": items})

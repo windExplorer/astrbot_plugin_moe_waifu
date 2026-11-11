@@ -27,7 +27,6 @@
   .gal-item img { width: 100%; height: auto; aspect-ratio: 7 / 12;
     object-fit: cover; display: block; }
   .gal-meta { font-size: 11px; opacity: .65; padding: 4px 8px; }
-  .gal-del { position: absolute; top: 6px; right: 6px; }
   .bind-tip { font-size: 12px; opacity: .62; margin-top: 8px; }
   .work-card { cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; }
   .work-card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(150,90,130,.14); }
@@ -78,6 +77,31 @@
   .wlb:not(.loading) .wlb-loading { display: none; }
   /* ---- 间距修缮（v0.5.10）：区块级子元素统一留白，别挤在一起 ---- */
   .stack > * + * { margin-top: 12px; }
+  /* ---- 固定布局（v0.6.0）：顶栏/底栏钉死，只有中间内容区滚动 ----
+     n-layout-content 自身 overflow hidden，内部三行 flex：
+     page-top（状态栏）固定、page-scroll 独立滚动、page-foot（分页）固定。 */
+  .page-top { flex: none; padding: 12px 22px 10px;
+    border-bottom: 1px solid rgba(128,128,128,.14); }
+  .page-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 16px 22px 22px; }
+  .page-foot { flex: none; padding: 10px 22px; display: flex; justify-content: center;
+    border-top: 1px solid rgba(128,128,128,.14); }
+  /* ---- 卡片操作行（v0.6.0）：图标按钮 + tooltip 取代一排文字按钮 ---- */
+  .card-ops { display: flex; justify-content: space-between; align-items: center;
+    margin-top: 8px; padding: 0 2px; }
+  /* ---- 立绘/参考图悬停操作条（v0.6.0）：hover 才浮现，不再常驻压在图上 ---- */
+  .gal-ops { position: absolute; top: 6px; right: 6px; display: flex; gap: 2px;
+    background: rgba(255,255,255,.88); border-radius: 8px; padding: 2px;
+    opacity: 0; transition: opacity .15s ease;
+    box-shadow: 0 2px 8px rgba(80,50,80,.18); }
+  .gal-item:hover .gal-ops { opacity: 1; }
+  .sec-title { font-weight: 600; font-size: 14px; margin: 2px 0 10px;
+    display: flex; align-items: center; gap: 8px; }
+  .sec-title .cnt { font-weight: 400; font-size: 12px; opacity: .55; }
+  /* 角色详情头（v0.6.0） */
+  .detail-name { font-size: 17px; font-weight: 700; }
+  .gen-strip { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 8px; }
+  .gen-strip .gal-item { flex: 0 0 84px; }
+  .gen-strip .gal-item img { aspect-ratio: 7 / 12; }
 </style>
 </head>
 <body>
@@ -89,8 +113,11 @@
         <div class="waifu-sub">角色库工坊</div>
         <n-menu :value="menu" :options="menuOpts" @update:value="onMenu"></n-menu>
       </n-layout-sider>
-      <n-layout-content content-style="padding: 18px 22px;">
-        <n-space vertical size="large">
+      <!-- v0.6.0：固定布局——顶栏（状态）与底栏（分页）钉死，只有 page-scroll 滚动。
+           content-style 落在 n-layout-scroll-container 上，必须同时给它 flex 列方向，
+           否则 page-scroll 的 flex:1 不生效、内容被 overflow:hidden 裁掉（冒烟实测踩中） -->
+      <n-layout-content content-style="height: 100vh; padding: 0; overflow: hidden; display: flex; flex-direction: column;">
+        <div class="page-top">
           <n-space align="center">
             <n-tag :bordered="false" type="info" size="small">{{ meta.version || "v?" }}</n-tag>
             <n-tag :bordered="false" size="small" :type="meta.anima_ready ? 'success' : 'error'">
@@ -98,6 +125,9 @@
             </n-tag>
             <n-tag :bordered="false" size="small">立绘配额 {{ meta.quota }}/角色</n-tag>
           </n-space>
+        </div>
+        <div class="page-scroll">
+          <n-space vertical size="large">
 
           <!-- ============ 角色库 ============ -->
           <div v-if="menu === 'chars'">
@@ -149,28 +179,23 @@
                       <n-tag size="tiny" :bordered="false">{{ catLabel(e.category) }}</n-tag>
                     </n-space>
                     <div class="bind-tip">{{ e.id }} · {{ e.series || "未填作品" }} · 立绘 {{ portraitCount(e.id) }}/{{ meta.quota }}</div>
-                    <n-space size="small" style="margin-top: 6px;">
-                      <n-button size="tiny" type="primary" secondary
-                                @click="gotoTryFromChars(e)">试画</n-button>
-                      <n-button size="tiny" @click="gotoGallery(e.id)">立绘</n-button>
-                      <n-button size="tiny" @click="openEdit(e)">编辑</n-button>
-                      <n-button size="tiny" type="error"
-                                :secondary="delArm !== 'entry:' + e.id"
-                                @click="doDeleteEntry(e)">
-                        {{ delArm === 'entry:' + e.id ? "确认删除" : "删除" }}
-                      </n-button>
-                    </n-space>
+                    <div class="card-ops">
+                      <w-icon-btn icon="wand" mode="soft" type="primary" tip="去试画台"
+                                  @click="gotoTryFromChars(e)"></w-icon-btn>
+                      <w-icon-btn icon="image" tip="立绘 / 角色详情"
+                                  @click="gotoGallery(e.id)"></w-icon-btn>
+                      <w-icon-btn icon="edit" tip="编辑条目"
+                                  @click="openEdit(e)"></w-icon-btn>
+                      <w-icon-btn icon="trash" type="error"
+                                  :armed="delArm === 'entry:' + e.id"
+                                  :tip="delArm === 'entry:' + e.id ? '再点一次确认删除' : '删除条目'"
+                                  @click="doDeleteEntry(e)"></w-icon-btn>
+                    </div>
                   </n-card>
                 </n-gi>
               </n-grid>
               <n-empty v-if="!loadingAll && filteredEntries.length === 0"
                        description="没有匹配的角色"></n-empty>
-              <n-space justify="center" style="margin-top: 14px;"
-                       v-if="filteredEntries.length > cardPageSize">
-                <n-pagination :item-count="filteredEntries.length"
-                              :page-size="cardPageSize"
-                              v-model:page="cardPage"></n-pagination>
-              </n-space>
             </div>
 
             <!-- 列表视图 -->
@@ -210,7 +235,7 @@
               </n-space>
               <n-grid :cols="uiCols" :x-gap="12" :y-gap="12">
                 <n-gi v-for="c in currentWork.characters" :key="c.id">
-                  <n-card size="small" :bordered="true" class="work-card" @click="gotoTry(c)">
+                  <n-card size="small" :bordered="true" class="work-card" @click="gotoGallery(c.id)">
                     <div class="work-cover" :style="{ background: 'linear-gradient(135deg,' + c.color + 'cc,' + c.color + '55)' }">
                       <img v-if="c.thumb" :src="c.thumb" class="work-cover-img clickable-img"
                            title="点击查看大图" alt="封面"
@@ -224,13 +249,15 @@
                         {{ c.verified ? "已验证" : "未验证" }}
                       </n-tag>
                     </n-space>
-                    <n-space size="small" align="center" style="margin-top: 4px;">
-                      <span class="bind-tip">{{ c.id }} · 立绘 {{ c.portraits }}</span>
-                      <n-button size="tiny" quaternary type="primary"
-                                @click.stop="gotoGallery(c.id)">立绘</n-button>
-                      <n-button size="tiny" quaternary type="primary"
-                                @click.stop="openEditById(c.id)">编辑</n-button>
-                    </n-space>
+                    <div class="card-ops">
+                      <span class="bind-tip" style="margin-top: 0;">{{ c.id }} · 立绘 {{ c.portraits }}</span>
+                      <div style="display: flex; gap: 4px; align-items: center;">
+                        <w-icon-btn icon="wand" mode="soft" type="primary" tip="去试画台"
+                                    @click.stop="gotoTry(c)"></w-icon-btn>
+                        <w-icon-btn icon="edit" tip="编辑条目"
+                                    @click.stop="openEditById(c.id)"></w-icon-btn>
+                      </div>
+                    </div>
                   </n-card>
                 </n-gi>
               </n-grid>
@@ -296,12 +323,12 @@
                            title="点击查看大图" alt="参考图"
                            @click.stop="openViewer(r.path, '参考图')">
                           <div v-else class="gal-meta">文件丢失</div>
-                          <n-tag v-if="tryOverride.ref === r.path" class="gal-del" size="tiny"
-                                 :bordered="false" type="success">本次</n-tag>
-                          <n-button class="gal-del" style="right: 58px;" size="tiny" quaternary
-                                    type="error" @click.stop="deleteTryRef(r)">
-                            {{ delArm === r.path ? "确认删" : "删" }}
-                          </n-button>
+                          <div class="gal-ops">
+                            <w-icon-btn icon="trash" size="tiny" type="error"
+                                        :armed="delArm === r.path"
+                                        :tip="delArm === r.path ? '再点一次确认删除' : '删除参考图'"
+                                        @click.stop="deleteTryRef(r)"></w-icon-btn>
+                          </div>
                           <div class="gal-meta">{{ tryOverride.ref === r.path ? "本次参考" : "点击选用" }}</div>
                         </div>
                       </n-gi>
@@ -397,40 +424,146 @@
             </n-card>
           </div>
 
-          <!-- ============ 立绘库 ============ -->
+          <!-- ============ 角色详情（v0.6.0：原「立绘库」升级——立绘 + 参考图 + 生成立绘） ============ -->
           <div v-if="menu === 'gallery'" class="stack">
-            <n-space align="center" :wrap="true">
+            <!-- 头部：返回 + 角色切换/信息 + 直达操作
+                 （用普通 flex div 而非 n-space：n-space 的默认插槽里放 template v-if 会双渲染） -->
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+              <w-icon-btn icon="back" :tip="galFrom === 'works' ? '返回作品库' : '返回角色库'"
+                          @click="backFromGallery"></w-icon-btn>
               <n-select v-model:value="galCharId" :options="galCharOpts" filterable
-                        placeholder="选择角色（按立绘数）" style="width: 300px;"></n-select>
-              <n-button size="small" type="primary" :loading="refillRunning" :disabled="!galCharId"
-                        @click="doRefill">补一张</n-button>
-              <n-button size="small" :loading="loadingGal" @click="loadGallery">刷新</n-button>
-            </n-space>
-            <n-alert v-if="refillError" type="error" :bordered="false">{{ refillError }}</n-alert>
-            <n-spin v-if="refillRunning" size="small">萌绘生成中（20~120 秒）…</n-spin>
-            <n-empty v-if="!galLoading && galItems.length === 0"
-                     description="该角色还没有立绘：去试画台试一张，或点「补一张」"></n-empty>
-            <n-grid :cols="uiCols" :x-gap="10" :y-gap="10" v-if="galItems.length > 0">
-              <n-gi v-for="it in galItems" :key="it.file">
+                        placeholder="选择角色（按立绘数）" style="width: 250px;"></n-select>
+              <template v-if="detailEntry">
+                <span class="detail-name">{{ detailEntry.name }}</span>
+                <n-tag v-if="detailEntry.series" size="small" :bordered="false">{{ detailEntry.series }}</n-tag>
+                <n-tag v-if="detailEntry.tier" size="small" :bordered="false">{{ detailEntry.tier }}</n-tag>
+                <n-tag size="small" :bordered="false">{{ catLabel(detailEntry.category) }}</n-tag>
+                <n-switch size="small" :value="detailEntry.verified"
+                          @update:value="doToggleVerified(detailEntry)"></n-switch>
+                <w-icon-btn icon="wand" mode="soft" type="primary" tip="去试画台"
+                            @click="gotoTryFromDetail"></w-icon-btn>
+                <w-icon-btn icon="edit" tip="编辑条目"
+                            @click="openEditById(galCharId)"></w-icon-btn>
+              </template>
+              <n-tag v-else size="small" :bordered="false" type="warning">孤立立绘（原条目已删除）</n-tag>
+              <span class="bind-tip" style="margin-top: 0;">立绘 {{ galItems.length }}/{{ meta.quota }} · 参考图 {{ galRefs.length }}</span>
+              <w-icon-btn icon="refresh" tip="刷新" :loading="loadingGal"
+                          @click="loadGallery"></w-icon-btn>
+            </div>
+
+            <!-- 生成立绘面板：补一张 / 选图图生图 -->
+            <n-card size="small" :bordered="true" title="生成立绘">
+              <n-space vertical size="medium">
+                <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+                  <n-radio-group v-model:value="galMode" size="small">
+                    <n-radio-button value="refill">补一张（跟随条目画法）</n-radio-button>
+                    <n-radio-button value="img2img">图生图重绘</n-radio-button>
+                  </n-radio-group>
+                  <n-select v-if="galMode === 'img2img'" v-model:value="galWf"
+                            :options="wfOpts('img')" filterable tag clearable
+                            placeholder="工作流（留空=全局配置）" style="width: 220px;"></n-select>
+                  <n-input-number v-if="galMode === 'img2img'" v-model:value="galDenoise"
+                                  :step="0.05" :min="0.2" :max="0.95"
+                                  placeholder="重绘强度" style="width: 130px;"></n-input-number>
+                  <n-button type="primary" size="small" :loading="refillRunning"
+                            :disabled="!galCharId" @click="doDetailGenerate">
+                    {{ galMode === "img2img" ? "按所选图生成" : "开始补图" }}
+                  </n-button>
+                  <span class="bind-tip" style="margin-top: 0;" v-if="refillRunning">
+                    萌绘生成中，已等待 {{ tryElapsed }} 秒…
+                  </span>
+                </div>
+                <div v-if="galMode === 'img2img'">
+                  <div class="bind-tip" style="margin-top: 0;">
+                    在下方墙上点 ⊕ 选定生成源（再点一次取消）；用参考图适合稳脸型画风，用立绘适合做变体。
+                  </div>
+                  <div class="gen-strip" v-if="genSources.length > 0">
+                    <div v-for="g in genSources" :key="g.kind + ':' + g.path"
+                         class="gal-item" :class="{ 'ref-selected': galRef === g.path }"
+                         :title="g.kind === 'ref' ? '参考图' : '立绘 #' + g.seq"
+                         @click="selectGenSource(g)">
+                      <img v-if="g.thumb" :src="g.thumb" alt="生成源">
+                      <div v-else class="gal-meta">文件丢失</div>
+                      <div class="gal-meta">{{ g.kind === "ref" ? "参考图" : "立绘 #" + g.seq }}</div>
+                    </div>
+                  </div>
+                  <div class="bind-tip" v-else>该角色还没有参考图 / 立绘：先上传参考图或补一张。</div>
+                </div>
+                <div class="bind-tip" style="margin-top: 0;" v-else>
+                  按条目画法自动生成一张新立绘并入库{{ detailEntry ? "（" + stratLabel(detailEntry) + "）" : "" }}。
+                </div>
+                <n-alert v-if="refillError" type="error" :bordered="false">{{ refillError }}</n-alert>
+              </n-space>
+            </n-card>
+
+            <!-- 立绘区 -->
+            <div>
+              <div class="sec-title">立绘
+                <span class="cnt">{{ galItems.length }}/{{ meta.quota }} · 不足配额会按种子自动补生</span>
+              </div>
+              <n-grid :cols="uiCols" :x-gap="10" :y-gap="10" v-if="galItems.length > 0">
+                <n-gi v-for="it in galItems" :key="it.file">
                   <div class="gal-item">
                     <img v-if="it.thumb" :src="it.thumb" class="clickable-img"
                          title="点击查看大图" alt="立绘缩略"
                          @click.stop="openViewer(it.file, '#' + it.seq)">
                     <div v-else class="gal-meta">文件丢失</div>
-                    <n-tag v-if="isCover(it)" class="gal-del" style="right: 76px;" size="tiny"
-                           :bordered="false" type="success">封面</n-tag>
-                    <n-button class="gal-del" size="tiny" quaternary type="info"
-                              @click="setPortraitCover(it)">
-                      {{ isCover(it) ? "★封面" : "设为封面" }}
-                    </n-button>
-                    <n-button class="gal-del" size="tiny" type="error" quaternary
-                              @click="doDeletePortrait(it)">
-                      {{ delArm === it.file ? "确认删除" : "删除" }}
-                    </n-button>
-                    <div class="gal-meta">#{{ it.seq }} · {{ it.date }} · seed {{ it.seed }}</div>
+                    <div class="gal-ops">
+                      <w-icon-btn icon="star" size="tiny"
+                                  :type="isCover(it) ? 'warning' : 'default'"
+                                  :tip="isCover(it) ? '当前封面' : '设为角色封面'"
+                                  @click.stop="setPortraitCover(it)"></w-icon-btn>
+                      <w-icon-btn icon="target" size="tiny" type="info" tip="作为图生图源"
+                                  @click.stop="useAsSource(it.abs, '立绘 #' + it.seq)"></w-icon-btn>
+                      <w-icon-btn icon="trash" size="tiny" type="error"
+                                  :armed="delArm === it.file"
+                                  :tip="delArm === it.file ? '再点一次确认删除' : '删除立绘'"
+                                  @click.stop="doDeletePortrait(it)"></w-icon-btn>
+                    </div>
+                    <div class="gal-meta">#{{ it.seq }} · {{ it.date }} · seed {{ it.seed }}{{ isCover(it) ? " · 封面" : "" }}</div>
                   </div>
-              </n-gi>
-            </n-grid>
+                </n-gi>
+              </n-grid>
+              <n-empty v-else-if="!galLoading"
+                       description="还没有立绘：上方「开始补图」，或去试画台试一张"></n-empty>
+            </div>
+
+            <!-- 参考图区 -->
+            <div>
+              <div class="sec-title">参考图
+                <span class="cnt">{{ galRefs.length }} 张{{ galMainRef ? " · 主参考已指定" : " · 未指定主参考（图生图随机选）" }}</span>
+                <n-button size="tiny" :loading="uploading"
+                          @click="refGalInput && refGalInput.click()">上传</n-button>
+                <input type="file" accept="image/png,image/jpeg,image/webp" style="display: none;"
+                       ref="refGalInput" @change="onGalRefFile">
+              </div>
+              <n-grid :cols="6" :x-gap="8" :y-gap="8" v-if="galRefs.length > 0">
+                <n-gi v-for="r in galRefs" :key="r.path">
+                  <div class="gal-item" :class="{ 'ref-selected': galMainRef === r.path }">
+                    <img v-if="r.thumb" :src="r.thumb" class="clickable-img"
+                         title="点击查看大图" alt="参考图"
+                         @click.stop="openViewer(r.path, '参考图')">
+                    <div v-else class="gal-meta">文件丢失</div>
+                    <div class="gal-ops">
+                      <w-icon-btn icon="star" size="tiny"
+                                  :type="galMainRef === r.path ? 'warning' : 'default'"
+                                  :tip="galMainRef === r.path ? '当前主参考' : '设为主参考'"
+                                  @click.stop="setMainRef(r.path)"></w-icon-btn>
+                      <w-icon-btn icon="target" size="tiny" type="info" tip="作为图生图源"
+                                  @click.stop="useAsSource(r.path, '参考图')"></w-icon-btn>
+                      <w-icon-btn icon="trash" size="tiny" type="error"
+                                  :armed="delArm === 'galref:' + r.path"
+                                  :tip="delArm === 'galref:' + r.path ? '再点一次确认移除' : '移除绑定'"
+                                  @click.stop="unbindGalRef(r)"></w-icon-btn>
+                    </div>
+                    <div class="gal-meta">{{ galMainRef === r.path ? "主参考" : "备选" }}</div>
+                  </div>
+                </n-gi>
+              </n-grid>
+              <div v-else class="dropzone" style="padding: 18px; text-align: center;">
+                <span class="bind-tip" style="margin-top: 0;">还没有绑定参考图：点「上传」或把图片直接拖进页面，会自动绑定到该角色</span>
+              </div>
+            </div>
           </div>
 
           <!-- ============ 分群绑定 ============ -->
@@ -495,7 +628,15 @@
               </n-space>
             </n-card>
           </div>
-        </n-space>
+          </n-space>
+        </div>
+        <!-- 底部分页栏（v0.6.0）：固定在底部，不用滚到内容末尾找分页器 -->
+        <div class="page-foot"
+             v-if="menu === 'chars' && charsMode === 'card' && filteredEntries.length > cardPageSize">
+          <n-pagination :item-count="filteredEntries.length"
+                        :page-size="cardPageSize"
+                        v-model:page="cardPage"></n-pagination>
+        </div>
       </n-layout-content>
     </n-layout>
 
@@ -590,13 +731,17 @@
                   <div class="gal-item">
                     <img v-if="r.thumb" :src="r.thumb" alt="参考图">
                     <div v-else class="gal-meta">文件丢失</div>
-                    <n-button class="gal-del" size="tiny" quaternary type="info"
-                              @click="designateRef(r.path)">
-                      {{ form.strategy_ref === r.path ? "★主参考" : "设为主参考" }}
-                    </n-button>
-                    <n-button class="gal-del" style="right: 64px;" size="tiny" quaternary
-                              type="error" @click="unbindDrawerRef(r.path)">移除</n-button>
-                    <div class="gal-meta">{{ form.strategy_ref === r.path ? "默认使用" : "备选" }}</div>
+                    <div class="gal-ops">
+                      <w-icon-btn icon="star" size="tiny"
+                                  :type="form.strategy_ref === r.path ? 'warning' : 'default'"
+                                  :tip="form.strategy_ref === r.path ? '当前主参考' : '设为主参考'"
+                                  @click.stop="designateRef(r.path)"></w-icon-btn>
+                      <w-icon-btn icon="trash" size="tiny" type="error"
+                                  :armed="delArm === 'drawer:' + r.path"
+                                  :tip="delArm === 'drawer:' + r.path ? '再点一次确认移除' : '移除绑定'"
+                                  @click.stop="unbindDrawerRef(r.path)"></w-icon-btn>
+                    </div>
+                    <div class="gal-meta">{{ form.strategy_ref === r.path ? "主参考" : "备选" }}</div>
                   </div>
                 </n-gi>
               </n-grid>
@@ -776,6 +921,67 @@
   }
   var lightbox = createLightbox();
 
+  // ---- 图标体系（v0.6.0）：内联 SVG（feather/lucide 风格线性图标）----
+  // vendored 的 naive-ui 不带 @vicons，这里手绘最常用的几个；stroke 继承
+  // currentColor，按钮变色图标自动跟随。innerHTML 直接落在 <svg> 元素上，
+  // 子节点按 SVG 命名空间解析（与 HTML 自闭合规则无关）。
+  var ICONS = {
+    back: '<path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/>',
+    wand: '<path d="M15 4V2"/><path d="M15 16v-2"/><path d="M8 9h2"/><path d="M20 9h2"/>' +
+          '<path d="M17.8 11.8L19 13"/><path d="M17.8 6.2L19 5"/><path d="M12.2 6.2L11 5"/>' +
+          '<path d="M3 21l9-9"/>',
+    image: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>' +
+           '<circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
+    edit: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>' +
+          '<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>',
+    trash: '<polyline points="3 6 5 6 21 6"/>' +
+           '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+    confirm: '<polyline points="20 6 9 17 4 12"/>',
+    star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+    target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+    refresh: '<polyline points="23 4 23 10 17 10"/>' +
+             '<path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>'
+  };
+  function icon(name, size) {
+    return h("svg", {
+      viewBox: "0 0 24 24", width: size || 15, height: size || 15,
+      fill: "none", stroke: "currentColor", "stroke-width": 2,
+      "stroke-linecap": "round", "stroke-linejoin": "round",
+      innerHTML: ICONS[name] || ""
+    });
+  }
+  // 图标按钮 + tooltip；armed（两段确认第二态）自动换确认钩并转实心。
+  // mode: ghost 淡态（默认）/ soft 浅底 / solid 实心。
+  var WIconBtn = {
+    name: "WIconBtn",
+    props: {
+      icon: { type: String, required: true },
+      tip: { type: String, default: "" },
+      type: { type: String, default: "default" },
+      size: { type: String, default: "small" },
+      mode: { type: String, default: "ghost" },
+      circle: Boolean, disabled: Boolean, loading: Boolean,
+      armed: Boolean
+    },
+    emits: ["click"],
+    render: function () {
+      var self = this;
+      var mode = this.armed ? "solid" : this.mode;
+      var btn = h(NS.NButton, {
+        size: this.size, type: this.type, circle: this.circle,
+        disabled: this.disabled, loading: this.loading,
+        quaternary: mode === "ghost",
+        secondary: mode === "soft",
+        onClick: function (e) { self.$emit("click", e); }
+      }, { icon: function () { return icon(self.armed ? "confirm" : self.icon); } });
+      if (!this.tip) return btn;
+      return h(NS.NTooltip, null, {
+        trigger: function () { return btn; },
+        default: function () { return self.tip; }
+      });
+    }
+  };
+
   // ---- 桥：Dashboard 会在文档末尾自动注入 bridge-sdk.js（晚于本脚本执行），
   // 必须轮询等它出现、找到才挂载（box member_panel 同款）。v0.2.2 及以前是
   // 「3 秒等不到就降级内置桩」——真机上注入稍慢就整页空数据 + 假横幅，已废弃。
@@ -910,14 +1116,15 @@
                    label: tryEntry.value.name + (setRef ? "（本次按参考图重绘）" : "（存入参考图库）") };
         }
         if (menu.value === "gallery" && galCharId.value) {
-          return { bindId: galCharId.value, setRef: false, label: galCharId.value + "（立绘库）" };
+          var dname = detailEntry.value ? detailEntry.value.name : galCharId.value;
+          return { bindId: galCharId.value, setRef: false, label: dname + "（角色详情·参考图）" };
         }
         return null;
       }
       function routeDroppedFile(file) {
         var target = dropTargetInfo();
         if (!target) {
-          message.error("当前页面不接收文件：请到试画台 / 立绘库 / 角色编辑（img2img）里拖拽上传");
+          message.error("当前页面不接收文件：请到试画台 / 角色详情 / 角色编辑（img2img）里拖拽上传");
           return;
         }
         uploading.value = true;
@@ -930,7 +1137,7 @@
           }
           return chain.then(function () {
             message.success("参考图已上传并绑定：" + ((res && res.rel) || path) + " → " + target.label);
-            if (menu.value === "gallery") { loadGallery(); }
+            if (menu.value === "gallery") { loadGallery(); loadGalRefs(); }
           });
         }).catch(function () { /* 已提示 */ }).finally(function () {
           uploading.value = false;
@@ -977,7 +1184,7 @@
         { label: "角色库", key: "chars" },
         { label: "作品库", key: "works" },
         { label: "试画台", key: "try" },
-        { label: "立绘库", key: "gallery" },
+        { label: "角色详情", key: "gallery" },
         { label: "分群绑定", key: "bind" },
         { label: "配置", key: "config" }
       ];
@@ -1274,9 +1481,10 @@
         setMenu("try");
       }
       function gotoGallery(charId) {
-        // galCharId 的 watch（gallery 段）会自动装载该角色立绘列表
+        // galCharId 的 watch（gallery 段）会自动装载该角色详情数据；
+        // 记住来路（角色详情的「返回」用），作品详情保持打开以便返回续看
+        galFrom.value = menu.value;
         galCharId.value = charId;
-        currentWork.value = null;
         setMenu("gallery");
       }
 
@@ -1327,10 +1535,12 @@
         message.success("已设为主参考（保存条目后生效）");
       }
       async function unbindDrawerRef(path) {
+        if (!armDelete("drawer:" + path)) return;
         try {
           var res = await apiPost("refs/unbind", { id: form.value.id, path: path });
           if (form.value.strategy_ref === path) { form.value.strategy_ref = ""; }
           message.success("已移除参考图" + (res && res.file_deleted ? "（文件已删）" : ""));
+          delArm.value = "";
           await loadDrawerRefs();
         } catch (e) { /* 已提示 */ }
       }
@@ -1372,28 +1582,19 @@
             }
           },
           {
-            title: "操作", key: "ops", width: 230,
+            title: "操作", key: "ops", width: 170,
             render: function (row) {
-              return h("div", { style: "display:flex;gap:6px;" }, [
-                h(NS.NButton, { size: "tiny", onClick: function () { openEdit(row); } },
-                  { default: function () { return "编辑"; } }),
-                h(NS.NButton, {
-                  size: "tiny", type: "primary", secondary: true,
-                  onClick: function () { tryCharId.value = row.id; setMenu("try"); }
-                }, { default: function () { return "试画"; } }),
-                h(NS.NButton, {
-                  size: "tiny", secondary: true,
-                  onClick: function () { gotoGallery(row.id); }
-                }, { default: function () { return "立绘"; } }),
-                h(NS.NButton, {
-                  size: "tiny", type: row.verified ? "default" : "warning", secondary: true,
-                  onClick: function () { doToggleVerified(row); }
-                }, { default: function () { return row.verified ? "取消验证" : "标记验证"; } }),
-                h(NS.NButton, {
-                  size: "tiny", type: "error",
-                  secondary: delArm.value !== "entry:" + row.id,
-                  onClick: function () { doDeleteEntry(row); }
-                }, { default: function () { return delArm.value === "entry:" + row.id ? "确认删除" : "删除"; } }),
+              return h("div", { style: "display:flex;gap:4px;align-items:center;" }, [
+                h(WIconBtn, { icon: "wand", mode: "soft", type: "primary", tip: "去试画台",
+                  onClick: function () { tryCharId.value = row.id; setMenu("try"); } }),
+                h(WIconBtn, { icon: "image", tip: "立绘 / 角色详情",
+                  onClick: function () { gotoGallery(row.id); } }),
+                h(WIconBtn, { icon: "edit", tip: "编辑条目",
+                  onClick: function () { openEdit(row); } }),
+                h(WIconBtn, { icon: "trash", type: "error",
+                  armed: delArm.value === "entry:" + row.id,
+                  tip: delArm.value === "entry:" + row.id ? "再点一次确认删除" : "删除条目",
+                  onClick: function () { doDeleteEntry(row); } })
               ]);
             }
           }
@@ -1729,20 +1930,29 @@
         } catch (e) { /* 已提示 */ }
       }
 
-      // ---- 立绘库 ----
+      // ---- 角色详情（v0.6.0：原「立绘库」升级——立绘 + 参考图 + 生成立绘） ----
       var galChars = Vue.ref([]);
       var galCharId = Vue.ref("");
       var galItems = Vue.ref([]);
       var loadingGal = Vue.ref(false);
       var refillRunning = Vue.ref(false);
       var refillError = Vue.ref("");
-      var refillJobId = Vue.ref("");
+      var galFrom = Vue.ref("chars");   // 角色详情的返回目标页签
 
       var galCharOpts = Vue.computed(function () {
         return galChars.value.map(function (c) {
           return { label: c.name + " · " + c.count + " 张" + (c.pack ? "" : " · 孤立"), value: c.id };
         });
       });
+      var detailEntry = Vue.computed(function () {
+        return allEntries.value.find(function (e) { return e.id === galCharId.value; }) || null;
+      });
+      function backFromGallery() { setMenu(galFrom.value === "works" ? "works" : "chars"); }
+      function gotoTryFromDetail() {
+        cameFrom.value = "gallery";
+        tryCharId.value = galCharId.value;
+        setMenu("try");
+      }
       async function loadGallery() {
         loadingGal.value = true;
         try {
@@ -1763,7 +1973,130 @@
           galItems.value = (res && res.items) || [];
         } catch (e) { galItems.value = []; }
       }
-      Vue.watch(galCharId, function () { loadGalItems(); });
+
+      // 参考图区（refs/list 与试画台/抽屉同源）
+      var galRefs = Vue.ref([]);
+      var galRefsLoading = Vue.ref(false);
+      var galMainRef = Vue.ref("");
+      function loadGalRefs() {
+        if (!galCharId.value) { galRefs.value = []; galMainRef.value = ""; return; }
+        galRefsLoading.value = true;
+        apiGet("refs/list", { id: galCharId.value }).then(function (res) {
+          galRefs.value = (res && res.items) || [];
+          galMainRef.value = (res && res.designated) || "";
+        }).catch(function () { galRefs.value = []; galMainRef.value = ""; })
+          .finally(function () { galRefsLoading.value = false; });
+      }
+      var refGalInput = Vue.ref(null);
+      async function onGalRefFile(ev) {
+        var file = ev && ev.target && ev.target.files && ev.target.files[0];
+        if (!file || !galCharId.value) return;
+        uploading.value = true;
+        try {
+          var res = await apiUpload(file);
+          await apiPost("refs/bind", { id: galCharId.value, path: (res && res.path) || "" });
+          message.success("参考图已上传并绑定：" + ((res && res.rel) || ""));
+          await loadAll();
+          await loadGalRefs();
+        } catch (e) { /* 已提示 */ } finally {
+          uploading.value = false;
+          if (ev.target) ev.target.value = "";
+        }
+      }
+      async function setMainRef(path) {
+        var e = detailEntry.value;
+        if (!e) { message.error("孤立立绘没有条目，无法指定主参考"); return; }
+        try {
+          var copy = JSON.parse(JSON.stringify(e));
+          copy.strategy = copy.strategy || {};
+          copy.strategy.ref = path;
+          await apiPost("pools/save_entry", { pack: e.pack, entry: copy });
+          message.success("已设为主参考（图生图时优先使用）");
+          await loadAll();
+          await loadGalRefs();
+        } catch (err2) { /* 已提示 */ }
+      }
+      async function unbindGalRef(r) {
+        if (!armDelete("galref:" + r.path)) return;
+        try {
+          var res = await apiPost("refs/unbind", { id: galCharId.value, path: r.path });
+          if (galRef.value === r.path) { galRef.value = ""; }
+          message.success("已移除参考图绑定" + (res && res.file_deleted ? "（文件已删）" : ""));
+          delArm.value = "";
+          await loadAll();
+          await loadGalRefs();
+        } catch (e) { /* 已提示 */ }
+      }
+
+      // 生成面板：补一张（跟随条目） / 图生图（选参考图或立绘做源）
+      var galMode = Vue.ref("refill");
+      var galRef = Vue.ref("");      // 图生图源（绝对路径）
+      var galWf = Vue.ref(null);     // 图生图工作流（空=全局配置）
+      var galDenoise = Vue.ref(null);
+      var genSources = Vue.computed(function () {
+        var out = [];
+        galRefs.value.forEach(function (r) {
+          out.push({ kind: "ref", path: r.path, thumb: r.thumb, seq: 0 });
+        });
+        galItems.value.forEach(function (it) {
+          if (it.abs) {
+            out.push({ kind: "portrait", path: it.abs, thumb: it.thumb, seq: it.seq });
+          }
+        });
+        return out;
+      });
+      function selectGenSource(g) {
+        // 再点一次取消选中 → 回到未选状态
+        galRef.value = (galRef.value === g.path) ? "" : g.path;
+      }
+      function useAsSource(path, label) {
+        if (!path) { message.error("该图缺可用路径（可能文件丢失）"); return; }
+        galRef.value = path;
+        galMode.value = "img2img";
+        message.success("已选" + label + "为图生图源");
+      }
+      async function doDetailGenerate() {
+        if (!galCharId.value || refillRunning.value) return;
+        var payload = { kind: "refill", id: galCharId.value };
+        if (galMode.value === "img2img") {
+          if (!String(galRef.value || "").trim()) {
+            message.error("图生图重绘需要先生成源：在下方墙上点 ⊕ 选定一张参考图或立绘");
+            return;
+          }
+          var ov = { strategy_type: "img2img", ref: String(galRef.value) };
+          if (galWf.value) { ov.img2img_workflow = String(galWf.value); }
+          if (galDenoise.value !== null && galDenoise.value !== undefined) {
+            ov.denoise = galDenoise.value;
+          }
+          payload.override = ov;
+        }
+        refillRunning.value = true;
+        refillError.value = "";
+        try {
+          var res = await apiPost("jobs/start", payload);
+          var jobId = (res && res.job_id) || "";
+          if (!jobId) {
+            refillRunning.value = false;
+            refillError.value = "任务未创建成功，请稍后重试";
+            return;
+          }
+          pollJob(jobId, function () {
+            refillRunning.value = false;
+            message.success("已生成并存入立绘库");
+            loadGallery();
+          }, function (why) {
+            refillRunning.value = false;
+            refillError.value = String(why || "生成失败");
+          });
+        } catch (e) { refillRunning.value = false; }
+      }
+
+      Vue.watch(galCharId, function () {
+        // 换角色：立绘/参考图都重取，图生图源跟着清（别的角色的图不能串用）
+        loadGalItems();
+        loadGalRefs();
+        galRef.value = "";
+      });
       async function doDeletePortrait(it) {
         if (!armDelete(it.file)) return;
         try {
@@ -1788,23 +2121,6 @@
           await loadAll();
           await loadGalItems();
         } catch (e) { /* 已提示 */ }
-      }
-      async function doRefill() {
-        if (!galCharId.value || refillRunning.value) return;
-        refillRunning.value = true;
-        refillError.value = "";
-        try {
-          var res = await apiPost("jobs/start", { kind: "refill", id: galCharId.value });
-          refillJobId.value = (res && res.job_id) || "";
-          pollJob(refillJobId.value, function () {
-            refillRunning.value = false;
-            message.success("补图完成，已存入立绘库");
-            loadGallery();
-          }, function (why) {
-            refillRunning.value = false;
-            refillError.value = String(why || "补图失败");
-          });
-        } catch (e) { refillRunning.value = false; }
       }
 
       // ---- 作品库 ----
@@ -2001,8 +2317,16 @@
         setWorkCover: setWorkCover,
         galCharId: galCharId, galCharOpts: galCharOpts, galItems: galItems,
         loadingGal: loadingGal, refillRunning: refillRunning, refillError: refillError,
-        doRefill: doRefill, doDeletePortrait: doDeletePortrait, loadGallery: loadGallery,
+        doDeletePortrait: doDeletePortrait, loadGallery: loadGallery,
         isCover: isCover, setPortraitCover: setPortraitCover,
+        galFrom: galFrom, backFromGallery: backFromGallery, detailEntry: detailEntry,
+        gotoTryFromDetail: gotoTryFromDetail,
+        galRefs: galRefs, galRefsLoading: galRefsLoading, galMainRef: galMainRef,
+        refGalInput: refGalInput, onGalRefFile: onGalRefFile,
+        setMainRef: setMainRef, unbindGalRef: unbindGalRef,
+        galMode: galMode, galRef: galRef, galWf: galWf, galDenoise: galDenoise,
+        genSources: genSources, selectGenSource: selectGenSource,
+        useAsSource: useAsSource, doDetailGenerate: doDetailGenerate,
         bindText: bindText, parsedBind: parsedBind, bindSaving: bindSaving,
         doSaveBind: doSaveBind,
         configSections: configSections, configModel: configModel, configSaving: configSaving,
@@ -2015,6 +2339,7 @@
   });
 
   app.use(NS);
+  app.component("w-icon-btn", WIconBtn);
   // 找到桥才挂载；4 秒等不到 = 不是从 Dashboard 插件拓展页打开，整页友好报错
   bridgeReady.then(function (b) {
     bridge = b;
