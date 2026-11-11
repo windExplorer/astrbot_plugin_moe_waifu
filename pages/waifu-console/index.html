@@ -508,7 +508,9 @@
                 <div v-if="galMode === 'img2img'">
                   <div class="bind-tip" style="margin-top: 0;">
                     在下方墙上点 ⊕ 选定生成源（再点一次取消）；用参考图适合稳脸型画风，用立绘适合做变体。
-                    想让姿势变化更大（站着/坐着/躺着…），把「重绘强度」调高到 0.75 以上，提示词里也会随机抽全身姿势。
+                    姿势变化主要靠提示词——每次生成按种子随机抽全身姿势（站/坐/躺/打瞌睡/搞怪…），
+                    想固定构图就用【模板】主题。「重绘强度」仅对带 KSampler 的经典 img2img 工作流生效，
+                    Qwen2.1 Turbo 编辑类工作流（ManualSigmas 固定调度表）没有该字段、会被忽略。
                   </div>
                   <div class="gen-strip" v-if="genSources.length > 0">
                     <div v-for="g in genSources" :key="g.kind + ':' + g.path"
