@@ -325,23 +325,19 @@
                               @click="gotoStep2">下一步：确认提示词 →</n-button>
                   </n-space>
                   <div v-if="tryMode === 'img2img'" style="margin-top: 10px;">
-                    <div class="dropzone" :class="{ drag: tryDrag }"
-                         @dragover.prevent="tryDrag = true"
-                         @dragleave.prevent="tryDrag = false"
-                         @drop.prevent="onDropTry($event)">
-                      <n-space :wrap="true" size="small" align="center">
-                        <n-input v-model:value="tryOverride.ref"
-                                 placeholder="留空=按种子从下方参考图随机选一张；也可填 URL / 路径"
-                                 style="width: 340px;"></n-input>
-                        <n-button size="small" :loading="uploading"
-                                @click="refFileInput && refFileInput.click()">上传参考图</n-button>
-                        <n-input-number v-model:value="tryOverride.denoise" :step="0.05" :min="0.2"
-                                        :max="0.95" placeholder="重绘强度"
-                                        style="width: 150px;"></n-input-number>
-                      </n-space>
-                      <div class="bind-tip">上传/拖入官方立绘（干净单人图），点缩略图选中为本次参考图；
-                        参考图留空时按种子从已绑定参考图里随机选一张（同种子同图）。</div>
-                    </div>
+                    <n-space :wrap="true" size="small" align="center">
+                      <n-input v-model:value="tryOverride.ref"
+                               placeholder="留空=按种子从下方参考图随机选一张；也可填 URL / 路径"
+                               style="width: 340px;"></n-input>
+                      <n-input-number v-model:value="tryOverride.denoise" :step="0.05" :min="0.2"
+                                      :max="0.95" placeholder="重绘强度"
+                                      style="width: 150px;"></n-input-number>
+                    </n-space>
+                    <!-- v0.6.3：上传收口到公共面板（拖拽/点击/粘贴三合一，可多选） -->
+                    <w-upload-panel compact multiple style="margin-top: 10px;"
+                                    title="拖拽 / 点击选择 / Ctrl+V 粘贴，上传本次参考图"
+                                    hint="上传/拖入官方立绘（干净单人图），点缩略图选中为本次参考图；参考图留空时按种子从已绑定参考图里随机选一张（同种子同图）。"
+                                    @files="onTryPanelFiles"></w-upload-panel>
                     <n-grid :cols="6" :x-gap="8" :y-gap="8" v-if="tryRefs.length > 0"
                             style="margin-top: 10px;">
                       <n-gi v-for="r in tryRefs" :key="r.path">
@@ -365,8 +361,6 @@
                     <div class="bind-tip" v-if="tryRefs.length === 0 && !tryRefsLoading">
                       该角色还没有绑定参考图：上传/拖入后会自动绑定并存起来，之后随时选用。
                     </div>
-                    <input type="file" accept="image/png,image/jpeg,image/webp"
-                           style="display: none;" ref="refFileInput" @change="onRefFile">
                   </div>
                   <div v-if="tryMode === 'lora'" style="margin-top: 10px;">
                     <n-input v-model:value="tryOverride.loras" type="textarea" :rows="2"
@@ -735,25 +729,15 @@
       </n-space>
     </n-modal>
 
-    <!-- ============ 角色详情 · 参考图上传弹窗（v0.6.2：拖拽 + 多选；preset 须 dialog，见上） ============ -->
+    <!-- ============ 角色详情 · 参考图上传弹窗（v0.6.2 拖拽多选；v0.6.3 换公共组件 + 粘贴；preset 须 dialog，见上） ============ -->
     <n-modal v-model:show="galUploadOpen" preset="dialog" title="上传参考图"
              style="width: 520px;">
       <n-space vertical size="medium">
-        <div class="dropzone" :class="{ drag: galUploadDrag }"
-             style="padding: 36px 20px; text-align: center; cursor: pointer;"
-             @click="galUploadInput && galUploadInput.click()"
-             @dragover.prevent="galUploadDrag = true"
-             @dragleave.prevent="galUploadDrag = false"
-             @drop.prevent="onGalDropUpload($event)">
-          <div style="font-size: 14px; font-weight: 600;">把图片拖到这里，或点击选择文件</div>
-          <div class="bind-tip" style="margin-top: 6px;">
-            支持 png / jpg / jpeg / webp / gif，可多选；单张不超过 15MB，上传后自动绑定到当前角色
-          </div>
-        </div>
-        <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple
-               style="display: none;" ref="galUploadInput" @change="onGalUploadFiles">
+        <w-upload-panel :multiple="true"
+                        hint="支持 png / jpg / jpeg / webp / gif，可多选；单张不超过 15MB，上传后自动绑定到当前角色"
+                        @files="onGalPanelFiles"></w-upload-panel>
         <div class="bind-tip" v-if="galUpNote" style="color: #d63384; opacity: 1;">{{ galUpNote }}</div>
-        <div class="bind-tip">提示：关闭弹窗后也可以把图直接拖进页面任何位置，当前在角色详情时会自动绑定。</div>
+        <div class="bind-tip">提示：Ctrl+V 可直接粘贴截图/图片；关闭弹窗后也可以把图直接拖进页面任何位置，当前在角色详情时会自动绑定。</div>
       </n-space>
     </n-modal>
 
@@ -810,41 +794,34 @@
                       placeholder="图生图工作流（留空=全局配置→萌绘默认）"></n-select>
             <n-input v-model:value="form.strategy_ref"
                      placeholder="主参考图 URL / 本地路径（可留空=从下方参考图库随机）"></n-input>
-            <div class="dropzone" :class="{ drag: drawerDrag }"
-                 @dragover.prevent="drawerDrag = true"
-                 @dragleave.prevent="drawerDrag = false"
-                 @drop.prevent="onDropDrawer($event)">
-              <n-space :wrap="true" size="small" align="center">
-                <n-button size="small" :loading="drawerRefsLoading"
-                          @click="refDrawerInput && refDrawerInput.click()">上传添加参考图</n-button>
-                <span class="bind-tip">或把图片拖到这里 · 可上传多张，点「设为主参考」指定默认用哪张</span>
-              </n-space>
-              <n-grid :cols="6" :x-gap="8" :y-gap="8" v-if="drawerRefs.length > 0"
-                      style="margin-top: 8px;">
-                <n-gi v-for="r in drawerRefs" :key="r.path">
-                  <div class="gal-item">
-                    <img v-if="r.thumb" :src="r.thumb" alt="参考图">
-                    <div v-else class="gal-meta">文件丢失</div>
-                    <div class="gal-ops">
-                      <w-icon-btn icon="star" size="tiny"
-                                  :type="form.strategy_ref === r.path ? 'warning' : 'default'"
-                                  :tip="form.strategy_ref === r.path ? '当前主参考' : '设为主参考'"
-                                  @click.stop="designateRef(r.path)"></w-icon-btn>
-                      <w-icon-btn icon="trash" size="tiny" type="error"
-                                  :armed="delArm === 'drawer:' + r.path"
-                                  :tip="delArm === 'drawer:' + r.path ? '再点一次确认移除' : '移除绑定'"
-                                  @click.stop="unbindDrawerRef(r.path)"></w-icon-btn>
-                    </div>
-                    <div class="gal-meta">{{ form.strategy_ref === r.path ? "主参考" : "备选" }}</div>
+            <!-- v0.6.3：上传收口到公共面板（拖拽/点击/粘贴三合一，可多选） -->
+            <w-upload-panel compact multiple style="margin-top: 8px;"
+                            title="拖拽 / 点击选择 / Ctrl+V 粘贴，添加参考图"
+                            hint="可上传多张，点「设为主参考」指定默认用哪张"
+                            @files="onDrawerPanelFiles"></w-upload-panel>
+            <n-grid :cols="6" :x-gap="8" :y-gap="8" v-if="drawerRefs.length > 0"
+                    style="margin-top: 8px;">
+              <n-gi v-for="r in drawerRefs" :key="r.path">
+                <div class="gal-item">
+                  <img v-if="r.thumb" :src="r.thumb" alt="参考图">
+                  <div v-else class="gal-meta">文件丢失</div>
+                  <div class="gal-ops">
+                    <w-icon-btn icon="star" size="tiny"
+                                :type="form.strategy_ref === r.path ? 'warning' : 'default'"
+                                :tip="form.strategy_ref === r.path ? '当前主参考' : '设为主参考'"
+                                @click.stop="designateRef(r.path)"></w-icon-btn>
+                    <w-icon-btn icon="trash" size="tiny" type="error"
+                                :armed="delArm === 'drawer:' + r.path"
+                                :tip="delArm === 'drawer:' + r.path ? '再点一次确认移除' : '移除绑定'"
+                                @click.stop="unbindDrawerRef(r.path)"></w-icon-btn>
                   </div>
-                </n-gi>
-              </n-grid>
-              <div class="bind-tip" v-if="drawerRefs.length === 0">
-                还没有绑定参考图：上传后会自动绑定到该角色；图生图时若无主参考则随机选一张。
-              </div>
+                  <div class="gal-meta">{{ form.strategy_ref === r.path ? "主参考" : "备选" }}</div>
+                </div>
+              </n-gi>
+            </n-grid>
+            <div class="bind-tip" v-if="drawerRefs.length === 0">
+              还没有绑定参考图：上传后会自动绑定到该角色；图生图时若无主参考则随机选一张。
             </div>
-            <input type="file" accept="image/png,image/jpeg,image/webp"
-                   style="display: none;" ref="refDrawerInput" @change="onDrawerRefFile">
             <n-input-number v-model:value="form.strategy_denoise" :step="0.05" :min="0.2" :max="0.95"
                             placeholder="重绘强度" style="width: 220px;"></n-input-number>
           </div>
@@ -1077,6 +1054,150 @@
         trigger: function () { return btn; },
         default: function () { return self.tip; }
       });
+    }
+  };
+
+  // ---- 上传面板公共组件（v0.6.3）：拖拽 / 点击选择 / Ctrl+V 粘贴 三合一 ----
+  // 只负责「拿文件」，上传与绑定由父级在 @files 里做（绑定目标各不相同）。
+  // 粘贴用「面板栈」路由：document 级 paste 监听只挂一份，后挂载的可见面板
+  // 优先吃剪贴板（顶层弹窗 > 抽屉 > 页面内联），面板卸载自动回落。
+  var pastePanels = [];
+  var pasteListenerOn = false;
+  function filesFromClipboard(e) {
+    var out = [];
+    var dt = e && e.clipboardData;
+    if (!dt) return out;
+    var i, f;
+    if (dt.files && dt.files.length) {
+      for (i = 0; i < dt.files.length; i++) {
+        if ((dt.files[i].type || "").indexOf("image/") === 0) { out.push(dt.files[i]); }
+      }
+    }
+    if (!out.length && dt.items) {
+      for (i = 0; i < dt.items.length; i++) {
+        if (dt.items[i].kind === "file" && (dt.items[i].type || "").indexOf("image/") === 0) {
+          f = dt.items[i].getAsFile();
+          if (f) { out.push(f); }
+        }
+      }
+    }
+    return out;
+  }
+  function ensurePasteListener() {
+    if (pasteListenerOn) return;
+    pasteListenerOn = true;
+    document.addEventListener("paste", function (e) {
+      for (var i = pastePanels.length - 1; i >= 0; i--) {
+        var reg = pastePanels[i];
+        if (reg.el && reg.el.isConnected && reg.el.offsetHeight > 0) {
+          var files = filesFromClipboard(e);
+          if (files.length) { reg.emit(files); e.preventDefault(); }
+          return;  // 顶层可见面板接管本次 paste（无论有没有图都不再穿透）
+        }
+      }
+    });
+  }
+  function filesFromDataTransfer(dt) {
+    var out = [];
+    if (!dt) return out;
+    var i, f;
+    if (dt.files && dt.files.length) {
+      for (i = 0; i < dt.files.length; i++) {
+        if ((dt.files[i].type || "").indexOf("image/") === 0) { out.push(dt.files[i]); }
+      }
+    }
+    if (!out.length && dt.items) {
+      for (i = 0; i < dt.items.length; i++) {
+        if (dt.items[i].kind === "file" && (dt.items[i].type || "").indexOf("image/") === 0) {
+          f = dt.items[i].getAsFile();
+          if (f) { out.push(f); }
+        }
+      }
+    }
+    return out;
+  }
+  var WUploadPanel = {
+    name: "WUploadPanel",
+    props: {
+      multiple: { type: Boolean, default: false },
+      compact: { type: Boolean, default: false },   // 试画台/抽屉的内联小面板
+      disabled: { type: Boolean, default: false },
+      title: { type: String, default: "把图片拖到这里、点击选择，或直接 Ctrl+V 粘贴" },
+      hint: { type: String, default: "" }
+    },
+    emits: ["files"],
+    data: function () { return { drag: false }; },
+    mounted: function () {
+      var self = this;
+      var reg = {
+        el: this.$el,
+        emit: function (files) { self.emitFiles(files); }
+      };
+      this.__pasteReg = reg;
+      pastePanels.push(reg);
+      ensurePasteListener();
+    },
+    unmounted: function () {
+      var i = pastePanels.indexOf(this.__pasteReg);
+      if (i >= 0) { pastePanels.splice(i, 1); }
+    },
+    methods: {
+      emitFiles: function (rawList) {
+        if (this.disabled) return;
+        var list = [];
+        for (var i = 0; i < rawList.length; i++) {
+          var f = rawList[i];
+          if (f && (f.type || "").indexOf("image/") === 0) { list.push(f); }
+        }
+        if (!list.length) return;
+        if (!this.multiple) { list = list.slice(0, 1); }
+        this.$emit("files", list);
+      },
+      pick: function () {
+        if (!this.disabled && this.$refs.inp) { this.$refs.inp.click(); }
+      },
+      onDrop: function (e) {
+        // 先 preventDefault（document 级拖拽路由见 defaultPrevented 会跳过，防双传），
+        // 再 stopPropagation（嵌套在旧 dropzone 里时不让外层再收一次）
+        e.preventDefault();
+        e.stopPropagation();
+        this.drag = false;
+        this.emitFiles(filesFromDataTransfer(e.dataTransfer));
+      },
+      onChange: function (e) {
+        this.emitFiles((e.target && e.target.files) || []);
+        if (e.target) { e.target.value = ""; }
+      }
+    },
+    render: function () {
+      var self = this;
+      var style = self.compact
+        ? "padding:10px 12px; cursor:pointer; font-size:13px;"
+        : "padding:36px 20px; text-align:center; cursor:pointer;";
+      var kids = [
+        h("div", { style: self.compact
+          ? "display:flex; align-items:center; gap:6px; flex-wrap:wrap;"
+          : "font-size:14px; font-weight:600;" }, [
+          h("span", "📎 " + self.title),
+          self.hint ? h("span", { class: "bind-tip",
+            style: self.compact ? "margin-top:0;" : "margin-top:6px; width:100%;" }, self.hint) : null
+        ]),
+        h("input", {
+          ref: "inp", type: "file",
+          accept: "image/png,image/jpeg,image/webp,image/gif",
+          multiple: self.multiple,
+          style: "display:none;",
+          onChange: self.onChange
+        })
+      ];
+      return h("div", {
+        class: ["dropzone", { drag: self.drag }],
+        style: style,
+        onClick: self.pick,
+        onDragover: function (e) { e.preventDefault(); self.drag = true; },
+        onDragleave: function (e) { e.preventDefault(); self.drag = false; },
+        onDrop: self.onDrop
+      }, kids);
     }
   };
 
@@ -1589,8 +1710,6 @@
       // ---- 抽屉参考图库（多张绑定/主参考/删除，v0.5.0） ----
       var drawerRefs = Vue.ref([]);
       var drawerRefsLoading = Vue.ref(false);
-      var drawerDrag = Vue.ref(false);
-      var refDrawerInput = Vue.ref(null);
       function loadDrawerRefs() {
         if (!form.value.id) { drawerRefs.value = []; return; }
         drawerRefsLoading.value = true;
@@ -1604,29 +1723,25 @@
         return apiPost("refs/bind", { id: form.value.id, path: path })
           .then(function () { return loadDrawerRefs(); });
       }
-      async function onDrawerRefFile(ev) {
-        var file = ev && ev.target && ev.target.files && ev.target.files[0];
-        if (!file || !form.value.id) return;
-        try {
-          var res = await apiUpload(file);
-          await bindAndReloadRefs((res && res.path) || "");
-          message.success("参考图已上传并绑定：" + ((res && res.rel) || ""));
-        } catch (e) { /* 已提示 */ } finally {
-          if (ev.target) ev.target.value = "";
-        }
-      }
-      function onDropDrawer(ev) {
-        drawerDrag.value = false;
-        var file = ev && ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
-        if (!file || !form.value.id) return;
+      // v0.6.3：上传收口到 w-upload-panel（拖拽/点击/粘贴），多选逐张绑定
+      async function onDrawerPanelFiles(files) {
+        var list = Array.prototype.slice.call(files || []);
+        if (!list.length) return;
+        if (!form.value.id) { message.error("先填角色 id 再上传参考图"); return; }
         uploading.value = true;
-        apiUpload(file).then(function (res) {
-          return bindAndReloadRefs((res && res.path) || "");
-        }).then(function () {
-          message.success("参考图已上传并绑定");
-        }).catch(function () { /* 已提示 */ }).finally(function () {
-          uploading.value = false;
-        });
+        var okN = 0;
+        for (var i = 0; i < list.length; i++) {
+          try {
+            var res = await apiUpload(list[i]);
+            await apiPost("refs/bind", { id: form.value.id, path: (res && res.path) || "" });
+            okN += 1;
+          } catch (e) { /* 单张失败不挡后续 */ }
+        }
+        uploading.value = false;
+        if (!okN) return;
+        message.success("参考图已上传并绑定 " + okN + " 张");
+        await loadAll();
+        await loadDrawerRefs();
       }
       function designateRef(path) {
         form.value.strategy_ref = path;
@@ -1700,33 +1815,30 @@
       });
 
       // ---- 试画台 ----
-      var tryDrag = Vue.ref(false);
-      async function onRefFile(ev) {
-        var file = ev && ev.target && ev.target.files && ev.target.files[0];
-        if (!file) return;
+      // v0.6.3：上传收口到 w-upload-panel（拖拽/点击/粘贴），这里只管收到文件后
+      // 上传绑定；多选时全部入库、第一张选为本次参考图
+      async function onTryPanelFiles(files) {
+        var list = Array.prototype.slice.call(files || []);
+        if (!list.length) return;
+        if (!tryCharId.value) { message.error("先选择要试画的角色"); return; }
         uploading.value = true;
-        try {
-          var res = await apiUpload(file);
-          tryOverride.value.ref = (res && res.path) || "";
-          if (tryEntry.value) {
-            // 上传的参考图同步绑进该角色的参考图库（存起来，后续可指定/随机）
-            apiPost("refs/bind", { id: tryEntry.value.id, path: (res && res.path) || "" })
-              .then(function () { return loadAll(); })
-              .then(function () { return loadTryRefs(); })
-              .catch(function () { /* 绑定失败不影响本次试画 */ });
-          }
-          message.success("参考图已上传并选用：" + ((res && res.rel) || ""));
-        } catch (e) { /* 已提示 */ } finally {
-          uploading.value = false;
-          if (ev.target) ev.target.value = "";
+        var firstPath = "", okN = 0;
+        for (var i = 0; i < list.length; i++) {
+          try {
+            var res = await apiUpload(list[i]);
+            var p = (res && res.path) || "";
+            if (i === 0) { firstPath = p; }
+            await apiPost("refs/bind", { id: tryCharId.value, path: p });
+            okN += 1;
+          } catch (e) { /* 单张失败不挡后续 */ }
         }
-      }
-      function onDropTry(ev) {
-        tryDrag.value = false;
-        var file = ev && ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
-        if (!file) return;
-        var fakeEv = { target: { files: [file] } };
-        onRefFile(fakeEv);
+        uploading.value = false;
+        if (!okN) return;  // apiUpload/apiPost 已提示
+        if (firstPath) { tryOverride.value.ref = firstPath; }
+        message.success("参考图已上传并绑定 " + okN + " 张" +
+          (firstPath ? "，已选用第一张为本次参考图" : ""));
+        await loadAll();
+        await loadTryRefs();
       }
       var tryCharId = Vue.ref("");
       var tryRunning = Vue.ref(false);
@@ -1801,8 +1913,6 @@
       }
       var tryElapsed = Vue.ref(0);
       var uploading = Vue.ref(false);
-      var refFileInput = Vue.ref(null);
-
       var charOpts = Vue.computed(function () {
         return allEntries.value.map(function (e) {
           return {
@@ -2085,10 +2195,8 @@
         }).catch(function () { galRefs.value = []; galMainRef.value = ""; })
           .finally(function () { galRefsLoading.value = false; });
       }
-      // 上传弹窗（v0.6.2）：拖拽 + 多选，逐张上传绑定，弹窗里显示进度
+      // 上传弹窗（v0.6.2 拖拽多选；v0.6.3 换 w-upload-panel 公共组件 + 粘贴）
       var galUploadOpen = Vue.ref(false);
-      var galUploadDrag = Vue.ref(false);
-      var galUploadInput = Vue.ref(null);
       var galUpNote = Vue.ref("");
       async function uploadAndBindFiles(files) {
         var list = Array.prototype.slice.call(files || []).filter(Boolean);
@@ -2109,17 +2217,7 @@
         await loadAll();
         await loadGalRefs();
       }
-      function onGalUploadFiles(ev) {
-        var files = ev && ev.target && ev.target.files;
-        uploadAndBindFiles(files).then(function () {
-          if (ev && ev.target) { ev.target.value = ""; }
-        });
-      }
-      function onGalDropUpload(ev) {
-        galUploadDrag.value = false;
-        var files = (ev && ev.dataTransfer && ev.dataTransfer.files) || [];
-        if (files.length) { uploadAndBindFiles(files); }
-      }
+      function onGalPanelFiles(files) { uploadAndBindFiles(files); }
       async function setMainRef(path) {
         var e = detailEntry.value;
         if (!e) { message.error("孤立立绘没有条目，无法指定主参考"); return; }
@@ -2481,9 +2579,9 @@
         form: form, saving: saving, tierOpts: tierOpts, drawerPackOpts: drawerPackOpts,
         openNew: openNew, openEdit: openEdit, saveForm: saveForm,
         doDeleteEntry: doDeleteEntry, doToggleVerified: doToggleVerified, togglePack: togglePack,
-        drawerRefs: drawerRefs, drawerRefsLoading: drawerRefsLoading, drawerDrag: drawerDrag,
-        refDrawerInput: refDrawerInput, onDrawerRefFile: onDrawerRefFile,
-        onDropDrawer: onDropDrawer, designateRef: designateRef, unbindDrawerRef: unbindDrawerRef,
+        drawerRefs: drawerRefs, drawerRefsLoading: drawerRefsLoading,
+        onDrawerPanelFiles: onDrawerPanelFiles,
+        designateRef: designateRef, unbindDrawerRef: unbindDrawerRef,
         catLabel: catLabel, stratLabel: stratLabel, portraitCount: portraitCount, delArm: delArm,
         tryCharId: tryCharId, charOpts: charOpts, tryEntry: tryEntry,
         tryRunning: tryRunning, tryError: tryError, tryPreview: tryPreview, tryOk: tryOk,
@@ -2496,11 +2594,10 @@
         tryPromptLoading: tryPromptLoading, tryStyle: tryStyle,
         gotoStep2: gotoStep2, generatePromptPreview: generatePromptPreview,
         onThemeChange: onThemeChange,
-        uploading: uploading, refFileInput: refFileInput, onRefFile: onRefFile,
+        uploading: uploading, onTryPanelFiles: onTryPanelFiles,
         cancelTryWait: cancelTryWait, adoptTryParams: adoptTryParams, backFromTry: backFromTry,
         tryRefs: tryRefs, tryRefsLoading: tryRefsLoading, selectTryRef: selectTryRef,
         deleteTryRef: deleteTryRef, discardTry: discardTry,
-        tryDrag: tryDrag, onDropTry: onDropTry,
         openViewer: openViewer,
         trySrcPath: trySrcPath,
         works: works, worksLoading: worksLoading, currentWork: currentWork,
@@ -2516,9 +2613,8 @@
         gotoTryFromDetail: gotoTryFromDetail,
         galRefs: galRefs, galRefsLoading: galRefsLoading, galMainRef: galMainRef,
         setMainRef: setMainRef, unbindGalRef: unbindGalRef,
-        galUploadOpen: galUploadOpen, galUploadDrag: galUploadDrag,
-        galUploadInput: galUploadInput, galUpNote: galUpNote,
-        onGalUploadFiles: onGalUploadFiles, onGalDropUpload: onGalDropUpload,
+        galUploadOpen: galUploadOpen, galUpNote: galUpNote,
+        onGalPanelFiles: onGalPanelFiles,
         galMode: galMode, galRef: galRef, galWf: galWf, galDenoise: galDenoise,
         genSources: genSources, selectGenSource: selectGenSource,
         useAsSource: useAsSource, doDetailGenerate: doDetailGenerate,
@@ -2541,6 +2637,7 @@
 
   app.use(NS);
   app.component("w-icon-btn", WIconBtn);
+  app.component("w-upload-panel", WUploadPanel);
   // 找到桥才挂载；4 秒等不到 = 不是从 Dashboard 插件拓展页打开，整页友好报错
   bridgeReady.then(function (b) {
     bridge = b;
