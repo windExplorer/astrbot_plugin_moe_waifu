@@ -455,7 +455,7 @@ async def h_portraits_list(plugin) -> dict:
             # abs：绝对路径（v0.6.0）——立绘可被选为图生图源；draw 侧
             # Path(ref).exists() 按 CWD 解析相对路径，必须传绝对路径
             "abs": str(full),
-            "thumb": _thumb_data_url(str(full), 220) if full.is_file() else None,
+            "thumb": _thumb_data_url(str(full), 420) if full.is_file() else None,
         })
     return ok({"char_id": cid, "items": items})
 
@@ -763,9 +763,10 @@ async def h_refs_list(plugin) -> dict:
         if not p:
             continue
         fp = _safe_data_file(plugin, p)
+        # 缩略 420（v0.6.2）：旧值 120 在参考图墙上放大约 2.5 倍，糊到没法看
         items.append({
             "path": p, "exists": fp is not None,
-            "thumb": _thumb_cached(fp, 120) if fp is not None else None,
+            "thumb": _thumb_cached(fp, 420) if fp is not None else None,
         })
     return ok({"id": cid, "items": items, "designated": str(st.get("ref") or "")})
 

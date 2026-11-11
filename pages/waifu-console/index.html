@@ -31,10 +31,16 @@
   .bind-tip { font-size: 12px; opacity: .62; margin-top: 8px; }
   .work-card { cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; }
   .work-card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(150,90,130,.14); }
+  /* v0.6.2：作品卡悬停「进入详情」指示（卡片可点但此前没有任何视觉提示） */
+  .work-hint { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
+    background: linear-gradient(180deg, transparent, rgba(20,12,20,.74));
+    color: #fff; font-size: 12px; text-align: center; padding: 20px 0 8px;
+    opacity: 0; transition: opacity .15s ease; pointer-events: none; }
+  .work-card:hover .work-hint { opacity: 1; }
   /* 角色卡/作品卡封面同为竖版比例（7:12），与立绘一致。
      v0.6.1：max-height 封顶——列数少时不再按比例疯长（object-position 偏上保住脸），
      封面高度封顶后所有卡片高度一致，消除参差不齐 */
-  .work-cover { height: auto; aspect-ratio: 7 / 12; max-height: 320px;
+  .work-cover { position: relative; height: auto; aspect-ratio: 7 / 12; max-height: 320px;
     border-radius: 8px; overflow: hidden; display: flex;
     align-items: center; justify-content: center; }
   .work-cover-img { width: 100%; height: 100%; object-fit: cover;
@@ -233,6 +239,7 @@
                     <div class="work-cover" :style="{ background: 'linear-gradient(135deg,' + w.color + 'cc,' + w.color + '55)' }">
                       <img v-if="w.cover" :src="w.cover" class="work-cover-img">
                       <span v-else class="work-initial">{{ w.series.slice(0, 2) }}</span>
+                      <div class="work-hint">点击查看角色详情 →</div>
                     </div>
                     <div class="card-title-row">
                       <b>{{ w.series }}</b>
@@ -261,6 +268,7 @@
                            title="点击查看大图" alt="封面"
                            @click.stop="openViewer(c.cover_path, c.name)">
                       <span v-else class="work-initial">{{ c.name.slice(0, 1) }}</span>
+                      <div class="work-hint">点击查看角色详情 →</div>
                     </div>
                     <div class="card-title-row">
                       <b>{{ c.name }}</b>
@@ -481,10 +489,17 @@
                   </n-radio-group>
                   <n-select v-if="galMode === 'img2img'" v-model:value="galWf"
                             :options="wfOpts('img')" filterable tag clearable
-                            placeholder="工作流（留空=全局配置）" style="width: 220px;"></n-select>
+                            placeholder="工作流（留空=全局配置）" style="width: 200px;"></n-select>
                   <n-input-number v-if="galMode === 'img2img'" v-model:value="galDenoise"
                                   :step="0.05" :min="0.2" :max="0.95"
-                                  placeholder="重绘强度" style="width: 130px;"></n-input-number>
+                                  placeholder="重绘强度" style="width: 120px;"></n-input-number>
+                  <!-- v0.6.2：主题 + 提示词（与试画台同款主题库；确认后的提示词直通出图） -->
+                  <n-select v-model:value="galTheme" :options="themeOpts" size="small"
+                            style="width: 140px;" @update:value="galPromptConfirmed = false"></n-select>
+                  <n-button size="small" :type="galPromptConfirmed ? 'success' : 'default'"
+                            :secondary="galPromptConfirmed" @click="openPromptModal">
+                    {{ galPromptConfirmed ? "提示词已确认 ✓" : "查看 / 编辑提示词" }}
+                  </n-button>
                   <n-button type="primary" size="small" :loading="refillRunning"
                             :disabled="!galCharId" @click="doDetailGenerate">
                     {{ galMode === "img2img" ? "按所选图生成" : "开始补图" }}
@@ -552,10 +567,8 @@
             <div>
               <div class="sec-title">参考图
                 <span class="cnt">{{ galRefs.length }} 张{{ galMainRef ? " · 主参考已指定" : " · 未指定主参考（图生图随机选）" }}</span>
-                <n-button size="tiny" :loading="uploading"
-                          @click="refGalInput && refGalInput.click()">上传</n-button>
-                <input type="file" accept="image/png,image/jpeg,image/webp" style="display: none;"
-                       ref="refGalInput" @change="onGalRefFile">
+                <!-- v0.6.2：上传改弹窗（可拖拽可多选），不再是一颗孤零零的小按钮 -->
+                <n-button size="tiny" type="primary" secondary @click="galUploadOpen = true">上传</n-button>
               </div>
               <n-grid :cols="6" :x-gap="8" :y-gap="8" v-if="galRefs.length > 0">
                 <n-gi v-for="r in galRefs" :key="r.path">
@@ -680,6 +693,67 @@
         <n-space>
           <n-button size="small" @click="setWorkCover(null)">清除作品封面（回退自动）</n-button>
         </n-space>
+      </n-space>
+    </n-modal>
+
+    <!-- ============ 角色详情 · 提示词弹窗（v0.6.2：查看/编辑/换一版，确认后直通出图）
+         ⚠️ 必须用 preset="dialog"：card 预设（含 drawer）在部分环境下插槽内按钮点击
+         不触发（冒烟实测：dialog 内按钮正常、card/drawer 内全灭，原因未明——
+         疑似 vendored naive 自带 Vue 与页面 Vue 双运行时下 Teleport 插槽的监听器问题），
+         而生产验证过的 workCoverModal 正是 dialog。新弹窗一律 dialog。 ============ -->
+    <n-modal v-model:show="galPromptOpen" preset="dialog" title="生成立绘提示词"
+             style="width: 680px;">
+      <n-space vertical size="medium">
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+          <span class="bind-tip" style="margin-top: 0;">主题</span>
+          <n-select v-model:value="galTheme" :options="themeOpts" size="small"
+                    style="width: 160px;"
+                    @update:value="galAttempt = 0; genPromptPreview()"></n-select>
+          <n-input v-model:value="galCustom" size="small" clearable
+                   placeholder="自定义附加要求（可选，如：红色蝴蝶结）"
+                   style="width: 280px;"></n-input>
+          <n-button size="small" :loading="galPromptLoading"
+                    @click="galAttempt = 0; genPromptPreview()">重新生成</n-button>
+          <n-button size="small" :disabled="galPromptLoading"
+                    @click="galAttempt++; genPromptPreview()">换一版</n-button>
+        </div>
+        <div v-if="galDims.length > 0">
+          <n-tag v-for="d in galDims" :key="d.label" size="small" :bordered="false"
+                 style="margin: 0 6px 6px 0;">{{ d.label }}：{{ d.zh }}</n-tag>
+        </div>
+        <n-input v-model:value="galPrompt" type="textarea" :rows="7"
+                 placeholder="提示词（可直接修改，生成时按这里的内容出图）"></n-input>
+        <div class="bind-tip">
+          来源：{{ galPromptSource || "尚未生成" }}。点「使用这份提示词」后回到面板按「生成 / 开始补图」即按此文本出图；
+          换主题或附加要求后需重新生成。
+        </div>
+        <n-space>
+          <n-button type="primary" :disabled="!galPrompt || galPromptLoading"
+                    @click="confirmPrompt">使用这份提示词</n-button>
+          <n-button @click="galPromptOpen = false">取消</n-button>
+        </n-space>
+      </n-space>
+    </n-modal>
+
+    <!-- ============ 角色详情 · 参考图上传弹窗（v0.6.2：拖拽 + 多选；preset 须 dialog，见上） ============ -->
+    <n-modal v-model:show="galUploadOpen" preset="dialog" title="上传参考图"
+             style="width: 520px;">
+      <n-space vertical size="medium">
+        <div class="dropzone" :class="{ drag: galUploadDrag }"
+             style="padding: 36px 20px; text-align: center; cursor: pointer;"
+             @click="galUploadInput && galUploadInput.click()"
+             @dragover.prevent="galUploadDrag = true"
+             @dragleave.prevent="galUploadDrag = false"
+             @drop.prevent="onGalDropUpload($event)">
+          <div style="font-size: 14px; font-weight: 600;">把图片拖到这里，或点击选择文件</div>
+          <div class="bind-tip" style="margin-top: 6px;">
+            支持 png / jpg / jpeg / webp / gif，可多选；单张不超过 15MB，上传后自动绑定到当前角色
+          </div>
+        </div>
+        <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple
+               style="display: none;" ref="galUploadInput" @change="onGalUploadFiles">
+        <div class="bind-tip" v-if="galUpNote" style="color: #d63384; opacity: 1;">{{ galUpNote }}</div>
+        <div class="bind-tip">提示：关闭弹窗后也可以把图直接拖进页面任何位置，当前在角色详情时会自动绑定。</div>
       </n-space>
     </n-modal>
 
@@ -918,6 +992,7 @@
     stage.addEventListener("pointercancel", endPointer);
     function setSrc(src, downloadName) {
       img.src = src;
+      img.style.visibility = "";   // 新图就位才显示（v0.6.2 清残留）
       var dl = el.querySelector('[data-act="dl"]');
       dl.href = src;
       dl.download = downloadName || "image";
@@ -929,6 +1004,9 @@
         el.querySelector(".wlb-title").textContent = title || "查看大图";
         el.querySelector('[data-act="dl"]').download =
           String(title || "image").replace(/[\\/:*?"<>|]+/g, "_");
+        // v0.6.2：打开先藏掉旧图——不 clear 的话，新图加载完成前会显示上一张的残留
+        img.removeAttribute("src");
+        img.style.visibility = "hidden";
         moved = false; reset();
         el.classList.add("show", "loading");
         document.body.style.overflow = "hidden";
@@ -2007,21 +2085,40 @@
         }).catch(function () { galRefs.value = []; galMainRef.value = ""; })
           .finally(function () { galRefsLoading.value = false; });
       }
-      var refGalInput = Vue.ref(null);
-      async function onGalRefFile(ev) {
-        var file = ev && ev.target && ev.target.files && ev.target.files[0];
-        if (!file || !galCharId.value) return;
-        uploading.value = true;
-        try {
-          var res = await apiUpload(file);
-          await apiPost("refs/bind", { id: galCharId.value, path: (res && res.path) || "" });
-          message.success("参考图已上传并绑定：" + ((res && res.rel) || ""));
-          await loadAll();
-          await loadGalRefs();
-        } catch (e) { /* 已提示 */ } finally {
-          uploading.value = false;
-          if (ev.target) ev.target.value = "";
+      // 上传弹窗（v0.6.2）：拖拽 + 多选，逐张上传绑定，弹窗里显示进度
+      var galUploadOpen = Vue.ref(false);
+      var galUploadDrag = Vue.ref(false);
+      var galUploadInput = Vue.ref(null);
+      var galUpNote = Vue.ref("");
+      async function uploadAndBindFiles(files) {
+        var list = Array.prototype.slice.call(files || []).filter(Boolean);
+        if (!list.length || !galCharId.value) return;
+        var done = 0;
+        for (var i = 0; i < list.length; i++) {
+          galUpNote.value = "上传中 " + (i + 1) + "/" + list.length + "：" + list[i].name;
+          uploading.value = true;
+          try {
+            var res = await apiUpload(list[i]);
+            await apiPost("refs/bind", { id: galCharId.value, path: (res && res.path) || "" });
+            done += 1;
+          } catch (e) { /* 单张失败不挡后续 */ }
         }
+        uploading.value = false;
+        galUpNote.value = "已上传并绑定 " + done + "/" + list.length + " 张";
+        message.success("参考图已上传 " + done + "/" + list.length + " 张");
+        await loadAll();
+        await loadGalRefs();
+      }
+      function onGalUploadFiles(ev) {
+        var files = ev && ev.target && ev.target.files;
+        uploadAndBindFiles(files).then(function () {
+          if (ev && ev.target) { ev.target.value = ""; }
+        });
+      }
+      function onGalDropUpload(ev) {
+        galUploadDrag.value = false;
+        var files = (ev && ev.dataTransfer && ev.dataTransfer.files) || [];
+        if (files.length) { uploadAndBindFiles(files); }
       }
       async function setMainRef(path) {
         var e = detailEntry.value;
@@ -2075,6 +2172,54 @@
         galMode.value = "img2img";
         message.success("已选" + label + "为图生图源");
       }
+
+      // 主题 + 提示词（v0.6.2）：与试画台同款主题库/预览管线；
+      // 确认后的提示词经 jobs/start 的 prompt 字段直通出图
+      var galTheme = Vue.ref("random");
+      var galCustom = Vue.ref("");
+      var galAttempt = Vue.ref(0);
+      var galPrompt = Vue.ref("");
+      var galPromptSource = Vue.ref("");
+      var galDims = Vue.ref([]);
+      var galPromptLoading = Vue.ref(false);
+      var galPromptOpen = Vue.ref(false);
+      var galPromptConfirmed = Vue.ref(false);
+      function galPreviewOverride() {
+        // 预览用 override：ref 不参与提示词生成（文本层面只看画法/工作流/强度）
+        if (galMode.value !== "img2img") return null;
+        var ov = { strategy_type: "img2img" };
+        if (galWf.value) { ov.img2img_workflow = galWf.value; }
+        if (galDenoise.value !== null && galDenoise.value !== undefined) {
+          ov.denoise = galDenoise.value;
+        }
+        return ov;
+      }
+      async function genPromptPreview() {
+        if (!galCharId.value) return;
+        galPromptLoading.value = true;
+        try {
+          var res = await apiPost("prompt/preview", {
+            id: galCharId.value, theme: galTheme.value, custom: galCustom.value,
+            attempt: galAttempt.value, override: galPreviewOverride()
+          });
+          galDims.value = (res && res.dims) || [];
+          galPrompt.value = (res && res.prompt) || "";
+          galPromptSource.value = (res && res.source) || "";
+        } catch (e) { /* 已提示；prompt 留空禁止确认 */ } finally {
+          galPromptLoading.value = false;
+        }
+      }
+      function openPromptModal() {
+        if (!galCharId.value) return;
+        galPromptOpen.value = true;
+        if (!String(galPrompt.value || "").trim()) { genPromptPreview(); }  // 首开自动出一版
+      }
+      function confirmPrompt() {
+        if (!String(galPrompt.value || "").trim() || galPromptLoading.value) return;
+        galPromptConfirmed.value = true;
+        galPromptOpen.value = false;
+        message.success("已确认提示词：点「生成」按这份文本出图");
+      }
       async function doDetailGenerate() {
         if (!galCharId.value || refillRunning.value) return;
         var payload = { kind: "refill", id: galCharId.value };
@@ -2089,6 +2234,19 @@
             ov.denoise = galDenoise.value;
           }
           payload.override = ov;
+        }
+        // 提示词：确认过的直通；没确认过就按当前主题/附加要求现生成一版（一键直出）
+        if (galPromptConfirmed.value && String(galPrompt.value || "").trim()) {
+          payload.prompt = String(galPrompt.value).trim();
+        } else {
+          galAttempt.value = 0;
+          await genPromptPreview();
+          var pt = String(galPrompt.value || "").trim();
+          if (!pt) {
+            message.error("提示词生成失败：请打开「查看 / 编辑提示词」重试或手写一份");
+            return;
+          }
+          payload.prompt = pt;
         }
         refillRunning.value = true;
         refillError.value = "";
@@ -2112,10 +2270,12 @@
       }
 
       Vue.watch(galCharId, function () {
-        // 换角色：立绘/参考图都重取，图生图源跟着清（别的角色的图不能串用）
+        // 换角色：立绘/参考图都重取，图生图源与提示词跟着清（别的角色的不能串用）
         loadGalItems();
         loadGalRefs();
         galRef.value = "";
+        galPrompt.value = ""; galPromptSource.value = ""; galDims.value = [];
+        galAttempt.value = 0; galPromptConfirmed.value = false;
       });
       async function doDeletePortrait(it) {
         if (!armDelete(it.file)) return;
@@ -2355,11 +2515,19 @@
         galFrom: galFrom, backFromGallery: backFromGallery, detailEntry: detailEntry,
         gotoTryFromDetail: gotoTryFromDetail,
         galRefs: galRefs, galRefsLoading: galRefsLoading, galMainRef: galMainRef,
-        refGalInput: refGalInput, onGalRefFile: onGalRefFile,
         setMainRef: setMainRef, unbindGalRef: unbindGalRef,
+        galUploadOpen: galUploadOpen, galUploadDrag: galUploadDrag,
+        galUploadInput: galUploadInput, galUpNote: galUpNote,
+        onGalUploadFiles: onGalUploadFiles, onGalDropUpload: onGalDropUpload,
         galMode: galMode, galRef: galRef, galWf: galWf, galDenoise: galDenoise,
         genSources: genSources, selectGenSource: selectGenSource,
         useAsSource: useAsSource, doDetailGenerate: doDetailGenerate,
+        galTheme: galTheme, galCustom: galCustom, galAttempt: galAttempt,
+        galPrompt: galPrompt, galPromptSource: galPromptSource,
+        galDims: galDims, galPromptLoading: galPromptLoading,
+        galPromptOpen: galPromptOpen, galPromptConfirmed: galPromptConfirmed,
+        openPromptModal: openPromptModal, confirmPrompt: confirmPrompt,
+        genPromptPreview: genPromptPreview,
         bindText: bindText, parsedBind: parsedBind, bindSaving: bindSaving,
         doSaveBind: doSaveBind,
         configSections: configSections, configModel: configModel, configSaving: configSaving,
