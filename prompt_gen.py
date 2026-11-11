@@ -69,16 +69,44 @@ BACKGROUNDS = [
 ]
 
 POSES = [
-    {"w": 7, "zh": "双手在胸前比出爱心", "en": "heart hands"},
-    {"w": 6, "zh": "回头看向镜头", "en": "looking back, looking at viewer"},
-    {"w": 6, "zh": "双臂抱胸、自信地站立", "en": "arms crossed, confident pose"},
-    {"w": 6, "zh": "单手撩动头发", "en": "hand in own hair"},
-    {"w": 6, "zh": "抬手挥手打招呼", "en": "waving"},
-    {"w": 5, "zh": "双手捧住脸颊", "en": "hands on own cheeks"},
-    {"w": 5, "zh": "怀里抱着毛绒玩偶", "en": "holding plush toy"},
-    {"w": 5, "zh": "手里拿着一杯奶茶", "en": "holding cup, holding drink"},
-    {"w": 5, "zh": "双手背在身后、身体微微前倾", "en": "arms behind back, leaning forward"},
+    {"w": 6, "zh": "双手在胸前比出爱心", "en": "heart hands"},
+    {"w": 5, "zh": "回头看向镜头", "en": "looking back, looking at viewer"},
+    {"w": 5, "zh": "双臂抱胸、自信地站立", "en": "arms crossed, confident pose"},
+    {"w": 5, "zh": "单手撩动头发", "en": "hand in own hair"},
+    {"w": 5, "zh": "抬手挥手打招呼", "en": "waving"},
+    {"w": 4, "zh": "双手捧住脸颊", "en": "hands on own cheeks"},
+    {"w": 4, "zh": "怀里抱着毛绒玩偶", "en": "holding plush toy"},
+    {"w": 4, "zh": "手里拿着一杯奶茶", "en": "holding cup, holding drink"},
+    {"w": 4, "zh": "双手背在身后、身体微微前倾", "en": "arms behind back, leaning forward"},
     {"w": 4, "zh": "侧过身闭眼感受微风", "en": "side view, closed eyes, wind"},
+    # —— v0.7.0：补全身姿势（zh 里写明腿/脚的动作，img2img 编辑指令才能带动下半身，
+    #    修「腿和脚几乎不变、姿势永远一样」）——
+    {"w": 6, "zh": "自然站立，双脚并拢微微内八", "en": "standing, full body, feet together"},
+    {"w": 5, "zh": "盘腿坐在地上", "en": "sitting, cross-legged, on floor, full body"},
+    {"w": 5, "zh": "坐在椅子上、双腿并拢斜放", "en": "sitting on chair, legs together, full body"},
+    {"w": 4, "zh": "蹲下抱住膝盖", "en": "squatting, hugging own knees, full body"},
+    {"w": 4, "zh": "侧躺在地上、一只手撑着头", "en": "lying on side, on floor, head in hand, full body"},
+    {"w": 3, "zh": "仰面躺着、双腿翘起", "en": "lying on back, on floor, legs raised, full body"},
+    {"w": 4, "zh": "单腿站立、另一条腿屈膝抬起", "en": "standing on one leg, leg raised, balancing, full body"},
+    {"w": 4, "zh": "原地轻跳、双脚离地", "en": "jumping, feet off ground, full body"},
+    {"w": 4, "zh": "迈步走路、裙摆飘动", "en": "walking, full body, dynamic pose"},
+    {"w": 4, "zh": "趴在桌上打瞌睡", "en": "sleeping on desk, dozing off, full body"},
+    {"w": 4, "zh": "抱着枕头蜷缩打瞌睡", "en": "sleeping, hugging pillow, curled up, full body"},
+    {"w": 4, "zh": "弯腰凑近镜头做搞怪鬼脸", "en": "bending forward, playful pose, funny face"},
+    {"w": 3, "zh": "伸展双臂伸懒腰", "en": "stretching, arms up, full body"},
+    {"w": 3, "zh": "背对镜头回眸", "en": "from behind, looking back at viewer, full body"},
+]
+
+# 构图/视图维度（v0.7.0）：默认不提及（普通单张立绘），低权重随机命中
+# 全身站姿/三视图/四视图；「立绘模板」主题（THEMES 带 tpl_ 前缀）强制约束到此维度。
+COMPOSE = [
+    {"w": 24, "zh": "", "en": ""},
+    {"w": 3, "zh": "正常站姿的全身立绘（正面朝向镜头，纯色背景）",
+     "en": "simple background, standing, full body, front-facing"},
+    {"w": 1, "zh": "三视图（正面、侧面、背面同框，纯色背景）",
+     "en": "character sheet, three views, front view, side view, back view, simple background"},
+    {"w": 1, "zh": "四视图（四个不同角度同框，纯色背景）",
+     "en": "character sheet, multiple views, four views, simple background"},
 ]
 
 EXPRESSIONS = [
@@ -106,6 +134,7 @@ BODY = [
 ]
 
 DIMS = {
+    "compose": COMPOSE,
     "outfit": OUTFITS,
     "background": BACKGROUNDS,
     "pose": POSES,
@@ -114,10 +143,18 @@ DIMS = {
 }
 
 # ---------- 主题预设（试画台「第 2 步：提示词」用） ----------
-# outfit_kw / bg_kw：从对应维度池里按中文子串筛子集，再在该子集内按种子加权；
+# {dim}_kw：从对应维度池里按中文子串筛子集，再在该子集内按种子加权
+# （支持 outfit / background / pose / compose 四个维度，缺省 = 不约束该维度）；
 # 筛不出子集（池里没这个词）就退回全池随机。custom 由用户在预览面板自填。
+# tpl_ 前缀 = 「立绘模板」：强制构图/姿势/背景，给图生图当稳定底稿用。
 THEMES = (
     {"id": "random", "label": "随机（按种子变化）", "outfit_kw": [], "bg_kw": []},
+    {"id": "tpl_standing", "label": "【模板】纯色背景 · 正常站姿",
+     "outfit_kw": [], "bg_kw": ["纯"], "pose_kw": ["站立"], "compose_kw": ["正常站姿"]},
+    {"id": "tpl_3view", "label": "【模板】三视图（正/侧/背）",
+     "outfit_kw": [], "bg_kw": ["纯"], "pose_kw": ["站立"], "compose_kw": ["三视图"]},
+    {"id": "tpl_4view", "label": "【模板】四视图（多角度同框）",
+     "outfit_kw": [], "bg_kw": ["纯"], "pose_kw": ["站立"], "compose_kw": ["四视图"]},
     {"id": "swimsuit", "label": "泳装 · 夏日", "outfit_kw": ["泳装"], "bg_kw": ["海边"]},
     {"id": "campus", "label": "校园 · JK", "outfit_kw": ["水手服", "运动外套"], "bg_kw": ["教室", "樱花"]},
     {"id": "wedding", "label": "婚纱 · 典礼", "outfit_kw": ["婚纱"], "bg_kw": ["纯白", "浅粉"]},
@@ -138,13 +175,16 @@ def get_theme(theme_id: str) -> dict | None:
 
 
 def apply_theme(picks: dict, seed_int: int, theme: dict | None) -> dict:
-    """主题约束：outfit / background 在主题子集内重摇（其余维度保持种子随机）。
+    """主题约束：带维度关键词的主题在对应维度池子集内重摇（其余维度保持种子随机）。
 
+    支持 outfit / background / pose / compose 四维（v0.7.0 起后两维）；
+    ⚠️ background 的主题键是历史沿革的 bg_kw（不是 background_kw），别写错。
     纯函数：同 (seed, theme) 恒定；子集为空时不动（回全池结果）。
     """
     if not theme:
         return picks
-    for dim, kw_key in (("outfit", "outfit_kw"), ("background", "bg_kw")):
+    for dim, kw_key in (("outfit", "outfit_kw"), ("background", "bg_kw"),
+                        ("pose", "pose_kw"), ("compose", "compose_kw")):
         kws = [str(k).strip() for k in (theme.get(kw_key) or []) if str(k).strip()]
         if not kws:
             continue
@@ -188,7 +228,7 @@ def pick_variations(seed_int: int, theme: dict | None = None) -> dict:
 
 def variation_zh_list(picks: dict) -> list:
     """本轮要改的中文维度短语（跳过「保持不变」的空项），LLM 元提示用。"""
-    order = [("服装", "outfit"), ("背景与光照", "background"),
+    order = [("构图视图", "compose"), ("服装", "outfit"), ("背景与光照", "background"),
              ("姿势动作", "pose"), ("表情", "expression"), ("体型", "body")]
     out = []
     for label, tag in order:
@@ -208,7 +248,9 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "") -> str:
     """
     parts = []
     for label, zh in variation_zh_list(picks):
-        if label == "服装":
+        if label == "构图视图":
+            parts.append(f"把构图改为{zh}")
+        elif label == "服装":
             parts.append(f"把角色的服装换成{zh}")
         elif label == "背景与光照":
             parts.append(f"把背景改为{zh}")
@@ -234,7 +276,7 @@ def build_t2i_prompt(entry: dict, picks: dict) -> str:
     base = "1girl, solo, best quality, looking at viewer"
     tags = str(entry.get("tags_en") or "").strip().rstrip(",")
     extra = []
-    for tag in ("outfit", "background", "pose", "expression", "body"):
+    for tag in ("compose", "outfit", "background", "pose", "expression", "body"):
         en = str((picks.get(tag) or {}).get("en") or "").strip().strip(",")
         if en:
             extra.append(en)
@@ -256,7 +298,7 @@ def build_t2i_natural_local(entry: dict, picks: dict, custom: str = "") -> str:
     tags = str(entry.get("tags_en") or "").strip().rstrip(",")
     if tags:
         segs.append(tags)
-    for tag in ("outfit", "background", "pose", "expression", "body"):
+    for tag in ("compose", "outfit", "background", "pose", "expression", "body"):
         en = str((picks.get(tag) or {}).get("en") or "").strip().strip(",")
         if en:
             segs.append(en)
@@ -270,7 +312,7 @@ def build_t2i_qwen_local(entry: dict, picks: dict, custom: str = "") -> str:
     """Qwen-Image-2.1 文生图用：中文长描述本地兜底（官方格式是约 20 句长段，
     本地只能给个结构完整的短版，真长段交给 LLM 通道）。"""
     zh = [str((picks.get(k) or {}).get("zh") or "").strip().strip("。")
-          for k in ("background", "outfit", "pose", "expression", "body")]
+          for k in ("compose", "background", "outfit", "pose", "expression", "body")]
     extra = str(custom or "").strip().strip("。")
     if extra:
         zh.append(extra)

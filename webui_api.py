@@ -282,7 +282,8 @@ async def h_pools(plugin) -> dict:
                 # 卡片视图封面（v0.5.0）：角色 cover 优先 → 首张立绘
                 cover_fp = _char_cover_path(plugin, entry)
                 if cover_fp:
-                    thumbs[entry["id"]] = _thumb_cached(cover_fp, 160)
+                    # 420（v0.7.0）：角色卡封面在卡上显示约 260px，160 太糊
+                    thumbs[entry["id"]] = _thumb_cached(cover_fp, 420)
                 cover_paths[entry["id"]] = cover_fp
             entry["cover_path"] = cover_paths.get(entry["id"])
             entries.append(entry)
@@ -428,7 +429,7 @@ async def h_portraits_index(plugin) -> dict:
             "color": meta[1],
             "pack": meta[2],
             "count": len(rows),
-            "thumb": _thumb_data_url(str(plugin._data_dir / first["file"]), 160) if first else None,
+            "thumb": _thumb_data_url(str(plugin._data_dir / first["file"]), 420) if first else None,
         })
     return ok({"chars": chars})
 
@@ -681,7 +682,7 @@ async def h_works(plugin) -> dict:
             w["characters"].append({
                 "id": e["id"], "name": e["name"], "tier": e["tier"],
                 "color": e["color"], "verified": e["verified"], "portraits": n,
-                "thumb": _thumb_cached(char_cover, 160) if char_cover else None,
+                "thumb": _thumb_cached(char_cover, 420) if char_cover else None,
                 "cover_path": char_cover,   # 作品封面候选（v0.5.0）
             })
     works = []
@@ -692,11 +693,11 @@ async def h_works(plugin) -> dict:
         if meta_cover:
             fp = _safe_data_file(plugin, meta_cover)
             if fp is not None:
-                cover = _thumb_cached(fp, 320)
+                cover = _thumb_cached(fp, 420)
         if cover is None:
             for c in w["characters"]:
                 if c.get("cover_path"):
-                    cover = _thumb_cached(c["cover_path"], 320)
+                    cover = _thumb_cached(c["cover_path"], 420)
                     if cover:
                         break
         w["cover"] = cover

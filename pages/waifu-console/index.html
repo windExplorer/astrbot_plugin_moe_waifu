@@ -493,16 +493,13 @@
                   <n-input-number v-if="galMode === 'img2img'" v-model:value="galDenoise"
                                   :step="0.05" :min="0.2" :max="0.95"
                                   placeholder="重绘强度" style="width: 120px;"></n-input-number>
-                  <!-- v0.6.2：主题 + 提示词（与试画台同款主题库；确认后的提示词直通出图） -->
+                  <!-- v0.7.0：主题快选 + 主按钮（v0.6.2 的「查看/编辑提示词」并入主按钮——
+                       点主按钮打开提示词面板，在面板里点「开始生成」才出图） -->
                   <n-select v-model:value="galTheme" :options="themeOpts" size="small"
                             style="width: 140px;" @update:value="galPromptConfirmed = false"></n-select>
-                  <n-button size="small" :type="galPromptConfirmed ? 'success' : 'default'"
-                            :secondary="galPromptConfirmed" @click="openPromptModal">
-                    {{ galPromptConfirmed ? "提示词已确认 ✓" : "查看 / 编辑提示词" }}
-                  </n-button>
                   <n-button type="primary" size="small" :loading="refillRunning"
-                            :disabled="!galCharId" @click="doDetailGenerate">
-                    {{ galMode === "img2img" ? "按所选图生成" : "开始补图" }}
+                            :disabled="!galCharId" @click="openPromptModal">
+                    {{ galMode === "img2img" ? "按所选图生成…" : "开始补图…" }}
                   </n-button>
                   <span class="bind-tip" style="margin-top: 0;" v-if="refillRunning">
                     萌绘生成中，已等待 {{ tryElapsed }} 秒…
@@ -511,6 +508,7 @@
                 <div v-if="galMode === 'img2img'">
                   <div class="bind-tip" style="margin-top: 0;">
                     在下方墙上点 ⊕ 选定生成源（再点一次取消）；用参考图适合稳脸型画风，用立绘适合做变体。
+                    想让姿势变化更大（站着/坐着/躺着…），把「重绘强度」调高到 0.75 以上，提示词里也会随机抽全身姿势。
                   </div>
                   <div class="gen-strip" v-if="genSources.length > 0">
                     <div v-for="g in genSources" :key="g.kind + ':' + g.path"
@@ -696,12 +694,12 @@
       </n-space>
     </n-modal>
 
-    <!-- ============ 角色详情 · 提示词弹窗（v0.6.2：查看/编辑/换一版，确认后直通出图）
+    <!-- ============ 角色详情 · 生成立绘弹窗（v0.6.2 提示词面板；v0.7.0 起「开始生成」在此触发）
          ⚠️ 必须用 preset="dialog"：card 预设（含 drawer）在部分环境下插槽内按钮点击
          不触发（冒烟实测：dialog 内按钮正常、card/drawer 内全灭，原因未明——
          疑似 vendored naive 自带 Vue 与页面 Vue 双运行时下 Teleport 插槽的监听器问题），
          而生产验证过的 workCoverModal 正是 dialog。新弹窗一律 dialog。 ============ -->
-    <n-modal v-model:show="galPromptOpen" preset="dialog" title="生成立绘提示词"
+    <n-modal v-model:show="galPromptOpen" preset="dialog" title="生成立绘"
              style="width: 680px;">
       <n-space vertical size="medium">
         <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
@@ -724,13 +722,14 @@
         <n-input v-model:value="galPrompt" type="textarea" :rows="7"
                  placeholder="提示词（可直接修改，生成时按这里的内容出图）"></n-input>
         <div class="bind-tip">
-          来源：{{ galPromptSource || "尚未生成" }}。点「使用这份提示词」后回到面板按「生成 / 开始补图」即按此文本出图；
-          换主题或附加要求后需重新生成。
+          来源：{{ galPromptSource || "尚未生成" }}。点「开始生成」即按这份文本出图（v0.7.0 起：
+          面板上的主按钮只负责打开本面板，在这里按下生成才真正开始）；换主题或附加要求后需重新生成。
         </div>
         <n-space>
-          <n-button type="primary" :disabled="!galPrompt || galPromptLoading"
-                    @click="confirmPrompt">使用这份提示词</n-button>
-          <n-button @click="galPromptOpen = false">取消</n-button>
+          <n-button type="primary" :loading="refillRunning"
+                    :disabled="!galPrompt || galPromptLoading"
+                    @click="generateFromModal">开始生成</n-button>
+          <n-button :disabled="refillRunning" @click="galPromptOpen = false">取消</n-button>
         </n-space>
       </n-space>
     </n-modal>
@@ -2253,7 +2252,8 @@
       var galMode = Vue.ref("refill");
       var galRef = Vue.ref("");      // 图生图源（绝对路径）
       var galWf = Vue.ref(null);     // 图生图工作流（空=全局配置）
-      var galDenoise = Vue.ref(null);
+      // v0.7.0：默认 0.75（全局兜底 0.6 偏保守——用户反馈姿势/腿脚几乎不变）
+      var galDenoise = Vue.ref(0.75);
       var genSources = Vue.computed(function () {
         var out = [];
         galRefs.value.forEach(function (r) {
@@ -2318,11 +2318,17 @@
         galPromptOpen.value = true;
         if (!String(galPrompt.value || "").trim()) { genPromptPreview(); }  // 首开自动出一版
       }
-      function confirmPrompt() {
-        if (!String(galPrompt.value || "").trim() || galPromptLoading.value) return;
+      function generateFromModal() {
+        // v0.7.0：用户口径——面板主按钮只开面板，这里按「开始生成」才出图
+        if (galPromptLoading.value) return;
+        if (!String(galPrompt.value || "").trim()) return;
+        if (galMode.value === "img2img" && !String(galRef.value || "").trim()) {
+          message.error("图生图重绘需要先生成源：关掉面板后在下方墙上点 ⊕ 选定一张");
+          return;
+        }
         galPromptConfirmed.value = true;
         galPromptOpen.value = false;
-        message.success("已确认提示词：点「生成」按这份文本出图");
+        doDetailGenerate();
       }
       async function doDetailGenerate() {
         if (!galCharId.value || refillRunning.value) return;
@@ -2628,7 +2634,7 @@
         galPrompt: galPrompt, galPromptSource: galPromptSource,
         galDims: galDims, galPromptLoading: galPromptLoading,
         galPromptOpen: galPromptOpen, galPromptConfirmed: galPromptConfirmed,
-        openPromptModal: openPromptModal, confirmPrompt: confirmPrompt,
+        openPromptModal: openPromptModal, generateFromModal: generateFromModal,
         genPromptPreview: genPromptPreview,
         bindText: bindText, parsedBind: parsedBind, bindSaving: bindSaving,
         doSaveBind: doSaveBind,

@@ -35,10 +35,12 @@ ENTRY = {"id": "miku", "name": "初音未来", "series": "Vocaloid",
 p1 = prompt_gen.pick_variations(12345)
 p2 = prompt_gen.pick_variations(12345)
 check("同种子同选择", p1 == p2)
-check("五个维度齐全", set(p1.keys()) == {"outfit", "background", "pose", "expression", "body"})
+check("六个维度齐全", set(p1.keys()) == {"compose", "outfit", "background",
+                                     "pose", "expression", "body"})
 check("维度取自池内", p1["outfit"] in prompt_gen.OUTFITS
       and p1["background"] in prompt_gen.BACKGROUNDS
-      and p1["body"] in prompt_gen.BODY)
+      and p1["body"] in prompt_gen.BODY
+      and p1["compose"] in prompt_gen.COMPOSE)
 
 # 分布非退化：1000 个种子里服装至少出现 8 种（排除全撞同一项的退化）
 seen = set()
@@ -110,7 +112,8 @@ sw = prompt_gen.get_theme("swimsuit")
 check("主题表齐全", sw is not None and len(prompt_gen.THEMES) >= 9)
 # 主题关键词必须能在池里筛出子集（写错关键词 = 主题悄悄失效）
 for t in prompt_gen.THEMES:
-    for kw_key, dim in (("outfit_kw", "outfit"), ("bg_kw", "background")):
+    for kw_key, dim in (("outfit_kw", "outfit"), ("bg_kw", "background"),
+                        ("pose_kw", "pose"), ("compose_kw", "compose")):
         for kw in t.get(kw_key) or []:
             if not any(kw in str(it.get("zh") or "") for it in prompt_gen.DIMS[dim]):
                 check(f"主题 {t['id']} 关键词命中池", False, f"{kw_key}:{kw}")
@@ -119,9 +122,34 @@ check("主题关键词全部命中池", True)
 p_rand = prompt_gen.pick_variations(12345)
 p_th = prompt_gen.pick_variations(12345, sw)
 check("主题后服装在泳装子集", "泳装" in p_th["outfit"]["zh"])
-check("主题不影响其它维度", p_th["pose"] == p_rand["pose"])
+check("主题后背景在海边子集", "海边" in p_th["background"]["zh"])
+check("主题不影响其它维度", p_th["pose"] == p_rand["pose"]
+      and p_th["compose"] == p_rand["compose"])
 check("主题决定论", prompt_gen.pick_variations(12345, sw) == p_th)
 check("随机模式与主题版不同（子集过滤生效）", p_th["outfit"] != p_rand["outfit"])
+
+# ---------- 立绘模板主题 + 全身姿势池（v0.7.0） ----------
+tpl3 = prompt_gen.get_theme("tpl_3view")
+tpl4 = prompt_gen.get_theme("tpl_4view")
+tpl_s = prompt_gen.get_theme("tpl_standing")
+check("三套立绘模板主题存在", tpl3 is not None and tpl4 is not None and tpl_s is not None)
+for seed in (1, 42, 777, 99999):
+    p3 = prompt_gen.pick_variations(seed, tpl3)
+    check(f"三视图模板强制三视图(seed={seed})", "三视图" in p3["compose"]["zh"])
+    check(f"三视图模板强制站立(seed={seed})", "站立" in p3["pose"]["zh"])
+    check(f"三视图模板强制纯色背景(seed={seed})", "纯" in p3["background"]["zh"])
+p4 = prompt_gen.pick_variations(42, tpl4)
+check("四视图模板强制四视图", "四视图" in p4["compose"]["zh"])
+ps = prompt_gen.pick_variations(42, tpl_s)
+check("站姿模板强制正常站姿构图", "正常站姿" in ps["compose"]["zh"])
+# 全身姿势池：zh 必须写腿/脚动作（否则 img2img 编辑指令带不动下半身）
+leg_kws = ("腿", "脚", "躺", "坐", "蹲", "跳", "走", "趴", "站立")
+leg_n = sum(1 for p in prompt_gen.POSES if any(k in p["zh"] for k in leg_kws))
+check("姿势池含足量全身姿势（腿脚参与）", leg_n >= 10)
+# 随机 compose 大权重保持普通单张
+plain_n = sum(1 for s in range(2000)
+              if prompt_gen.pick_variations(s)["compose"].get("zh") == "")
+check("compose 维度大权重保持普通单张", plain_n >= 1500)
 
 # custom 附加
 picks_c = prompt_gen.pick_variations(777)
