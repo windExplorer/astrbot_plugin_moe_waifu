@@ -95,6 +95,9 @@ POSES = [
     {"w": 4, "zh": "弯腰凑近镜头做搞怪鬼脸", "en": "bending forward, playful pose, funny face"},
     {"w": 3, "zh": "伸展双臂伸懒腰", "en": "stretching, arms up, full body"},
     {"w": 3, "zh": "背对镜头回眸", "en": "from behind, looking back at viewer, full body"},
+    # 立绘模板专用（tpl_ 主题用 pose_kw「标准站姿」精确命中）：character sheet 惯例
+    # 是双臂自然下垂、正面直视，不摆性格姿势
+    {"w": 0, "zh": "双臂自然下垂的标准站姿", "en": "standing, arms at sides, straight-on, full body"},
 ]
 
 # 构图/视图维度（v0.7.0）：默认不提及（普通单张立绘），低权重随机命中
@@ -146,15 +149,20 @@ DIMS = {
 # {dim}_kw：从对应维度池里按中文子串筛子集，再在该子集内按种子加权
 # （支持 outfit / background / pose / compose 四个维度，缺省 = 不约束该维度）；
 # 筛不出子集（池里没这个词）就退回全池随机。custom 由用户在预览面板自填。
-# tpl_ 前缀 = 「立绘模板」：强制构图/姿势/背景，给图生图当稳定底稿用。
+# tpl_ 前缀 = 「立绘模板」：按 character sheet 行业惯例强制构图 + 标准站姿 +
+# 平静表情（微笑上限）+ 纯色背景，且 plain_dims 置空 outfit——模板用角色原始
+# 服装（entry tags 自带），不注入变装；给图生图当稳定底稿用。
 THEMES = (
     {"id": "random", "label": "随机（按种子变化）", "outfit_kw": [], "bg_kw": []},
     {"id": "tpl_standing", "label": "【模板】纯色背景 · 正常站姿",
-     "outfit_kw": [], "bg_kw": ["纯"], "pose_kw": ["站立"], "compose_kw": ["正常站姿"]},
+     "outfit_kw": [], "bg_kw": ["纯"], "pose_kw": ["标准站姿"],
+     "expression_kw": ["微笑"], "compose_kw": ["正常站姿"], "plain_dims": ["outfit"]},
     {"id": "tpl_3view", "label": "【模板】三视图（正/侧/背）",
-     "outfit_kw": [], "bg_kw": ["纯"], "pose_kw": ["站立"], "compose_kw": ["三视图"]},
+     "outfit_kw": [], "bg_kw": ["纯"], "pose_kw": ["标准站姿"],
+     "expression_kw": ["微笑"], "compose_kw": ["三视图"], "plain_dims": ["outfit"]},
     {"id": "tpl_4view", "label": "【模板】四视图（多角度同框）",
-     "outfit_kw": [], "bg_kw": ["纯"], "pose_kw": ["站立"], "compose_kw": ["四视图"]},
+     "outfit_kw": [], "bg_kw": ["纯"], "pose_kw": ["标准站姿"],
+     "expression_kw": ["微笑"], "compose_kw": ["四视图"], "plain_dims": ["outfit"]},
     {"id": "swimsuit", "label": "泳装 · 夏日", "outfit_kw": ["泳装"], "bg_kw": ["海边"]},
     {"id": "campus", "label": "校园 · JK", "outfit_kw": ["水手服", "运动外套"], "bg_kw": ["教室", "樱花"]},
     {"id": "wedding", "label": "婚纱 · 典礼", "outfit_kw": ["婚纱"], "bg_kw": ["纯白", "浅粉"]},
@@ -177,14 +185,18 @@ def get_theme(theme_id: str) -> dict | None:
 def apply_theme(picks: dict, seed_int: int, theme: dict | None) -> dict:
     """主题约束：带维度关键词的主题在对应维度池子集内重摇（其余维度保持种子随机）。
 
-    支持 outfit / background / pose / compose 四维（v0.7.0 起后两维）；
-    ⚠️ background 的主题键是历史沿革的 bg_kw（不是 background_kw），别写错。
+    支持 outfit / background / pose / compose / expression 五维（v0.7.0 起
+    pose/compose，v0.7.2 起 expression）；⚠️ background 的主题键是历史沿革的
+    bg_kw（不是 background_kw），别写错。
+    plain_dims：列出的维度直接置空（zh/en 均空 = 提示词不提及）——立绘模板用它
+    关掉 outfit 变装、回归角色原始服装。
     纯函数：同 (seed, theme) 恒定；子集为空时不动（回全池结果）。
     """
     if not theme:
         return picks
     for dim, kw_key in (("outfit", "outfit_kw"), ("background", "bg_kw"),
-                        ("pose", "pose_kw"), ("compose", "compose_kw")):
+                        ("pose", "pose_kw"), ("compose", "compose_kw"),
+                        ("expression", "expression_kw")):
         kws = [str(k).strip() for k in (theme.get(kw_key) or []) if str(k).strip()]
         if not kws:
             continue
@@ -193,6 +205,9 @@ def apply_theme(picks: dict, seed_int: int, theme: dict | None) -> dict:
         if subset:
             picks[dim] = _weighted_pick(
                 subset, _sub(seed_int, f"{dim}@{theme.get('id')}", 2 ** 30))
+    for dim in (theme.get("plain_dims") or []):
+        if str(dim) in DIMS:
+            picks[str(dim)] = {"w": 0, "zh": "", "en": ""}
     return picks
 
 

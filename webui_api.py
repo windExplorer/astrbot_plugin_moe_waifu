@@ -530,10 +530,14 @@ async def h_job_start(plugin) -> dict:
     override = body.get("override") if isinstance(body.get("override"), dict) else None
     if override:
         entry = draw.effective_entry(entry, override)
-        if entry["strategy_type"] == "img2img" and not str(
-            (entry.get("strategy") or {}).get("ref") or ""
-        ).strip():
-            return err("图生图重绘需要参考图：先上传图片或填 URL / 本地路径")
+        if entry["strategy_type"] == "img2img":
+            # 主参考或参考图库任一有图即可（v0.7.2：补一张带工作流 override 的
+            # img2img 条目走 refs[] 随机，不再误报缺参考图）
+            st_now = entry.get("strategy") or {}
+            has_ref = str(st_now.get("ref") or "").strip() or [
+                r for r in (st_now.get("refs") or []) if str(r or "").strip()]
+            if not has_ref:
+                return err("图生图重绘需要参考图：先上传图片或填 URL / 本地路径")
     # 预览确认过的提示词直通（v0.5.9）：非空时不再走 prompt_gen，按原文出图
     prompt_override = str(body.get("prompt") or "").strip()[:2000]
     job_id = f"{kind}:{cid}:{int(time.time() * 1000)}"

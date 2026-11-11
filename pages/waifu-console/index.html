@@ -490,6 +490,11 @@
                   <n-select v-if="galMode === 'img2img'" v-model:value="galWf"
                             :options="wfOpts('img')" filterable tag clearable
                             placeholder="工作流（留空=全局配置）" style="width: 200px;"></n-select>
+                  <!-- v0.7.2：补一张也可指定工作流（txt+img 合并；条目是 img2img 时
+                       走 img2img_workflow，base/lora 走 workflow，留空跟随配置） -->
+                  <n-select v-if="galMode === 'refill'" v-model:value="galWfAny"
+                            :options="wfAllOpts" filterable tag clearable
+                            placeholder="工作流（留空=跟随配置）" style="width: 200px;"></n-select>
                   <n-input-number v-if="galMode === 'img2img'" v-model:value="galDenoise"
                                   :step="0.05" :min="0.2" :max="0.95"
                                   placeholder="重绘强度" style="width: 120px;"></n-input-number>
@@ -2254,6 +2259,12 @@
       var galMode = Vue.ref("refill");
       var galRef = Vue.ref("");      // 图生图源（绝对路径）
       var galWf = Vue.ref(null);     // 图生图工作流（空=全局配置）
+      // v0.7.2：补一张的工作流覆盖（txt+img 合并下拉；base/lora→workflow、
+      // img2img 条目→img2img_workflow，空=跟随配置）
+      var galWfAny = Vue.ref(null);
+      var wfAllOpts = Vue.computed(function () {
+        return wfOpts("txt").concat(wfOpts("img"));
+      });
       // v0.7.0：默认 0.75（全局兜底 0.6 偏保守——用户反馈姿势/腿脚几乎不变）
       var galDenoise = Vue.ref(0.75);
       var genSources = Vue.computed(function () {
@@ -2346,6 +2357,13 @@
             ov.denoise = galDenoise.value;
           }
           payload.override = ov;
+        } else if (String(galWfAny.value || "").trim()) {
+          // v0.7.2：补一张选了工作流 → 按条目画法透传（base/lora→workflow、
+          // img2img 条目→img2img_workflow；不带 strategy_type 即不强制改画法）
+          payload.override = {
+            workflow: String(galWfAny.value).trim(),
+            img2img_workflow: String(galWfAny.value).trim()
+          };
         }
         // 提示词：确认过的直通；没确认过就按当前主题/附加要求现生成一版（一键直出）
         if (galPromptConfirmed.value && String(galPrompt.value || "").trim()) {
@@ -2630,6 +2648,7 @@
         galUploadOpen: galUploadOpen, galUpNote: galUpNote,
         onGalPanelFiles: onGalPanelFiles,
         galMode: galMode, galRef: galRef, galWf: galWf, galDenoise: galDenoise,
+        galWfAny: galWfAny, wfAllOpts: wfAllOpts,
         genSources: genSources, selectGenSource: selectGenSource,
         useAsSource: useAsSource, doDetailGenerate: doDetailGenerate,
         galTheme: galTheme, galCustom: galCustom, galAttempt: galAttempt,

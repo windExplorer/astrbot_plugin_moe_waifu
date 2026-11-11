@@ -85,6 +85,16 @@ eff3 = draw.effective_entry(base_entry, None)
 check("无覆盖=原样", eff3["strategy"]["type"] == "base")
 eff4 = draw.effective_entry(base_entry, {"strategy_type": "lora", "loras": ["m:0.8", " "]})
 check("lora 覆盖", eff4["strategy"]["loras"] == ["m:0.8"])
+# 条目级工作流覆盖（v0.7.2 补一张工作流下拉）
+eff5 = draw.effective_entry(base_entry, {"workflow": "txt-anime"})
+check("工作流覆盖写入 base", eff5["strategy"]["workflow"] == "txt-anime"
+      and eff5["strategy_type"] == "base")
+img_entry = {"id": "rem", "name": "蕾姆", "strategy": {"type": "img2img", "refs": ["r.png"]},
+             "strategy_type": "img2img", "tags_en": "rem"}
+eff6 = draw.effective_entry(img_entry, {"img2img_workflow": "img-clean"})
+check("img2img 条目工作流覆盖走 img2img_workflow",
+      eff6["strategy"]["img2img_workflow"] == "img-clean"
+      and "workflow" not in eff6["strategy"])
 
 # _first_sentence（v0.5.3：萌绘失败文本取首句，不吐提示语尾巴）
 check("失败文本取首句", draw._first_sentence(

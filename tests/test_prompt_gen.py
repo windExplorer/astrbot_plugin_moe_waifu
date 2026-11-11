@@ -113,7 +113,8 @@ check("主题表齐全", sw is not None and len(prompt_gen.THEMES) >= 9)
 # 主题关键词必须能在池里筛出子集（写错关键词 = 主题悄悄失效）
 for t in prompt_gen.THEMES:
     for kw_key, dim in (("outfit_kw", "outfit"), ("bg_kw", "background"),
-                        ("pose_kw", "pose"), ("compose_kw", "compose")):
+                        ("pose_kw", "pose"), ("compose_kw", "compose"),
+                        ("expression_kw", "expression")):
         for kw in t.get(kw_key) or []:
             if not any(kw in str(it.get("zh") or "") for it in prompt_gen.DIMS[dim]):
                 check(f"主题 {t['id']} 关键词命中池", False, f"{kw_key}:{kw}")
@@ -136,12 +137,16 @@ check("三套立绘模板主题存在", tpl3 is not None and tpl4 is not None an
 for seed in (1, 42, 777, 99999):
     p3 = prompt_gen.pick_variations(seed, tpl3)
     check(f"三视图模板强制三视图(seed={seed})", "三视图" in p3["compose"]["zh"])
-    check(f"三视图模板强制站立(seed={seed})", "站立" in p3["pose"]["zh"])
+    check(f"三视图模板强制标准站姿(seed={seed})", "标准站姿" in p3["pose"]["zh"])
+    check(f"三视图模板强制微笑(seed={seed})", "微笑" in p3["expression"]["zh"])
+    check(f"三视图模板置空服装(seed={seed})", p3["outfit"]["zh"] == "")
     check(f"三视图模板强制纯色背景(seed={seed})", "纯" in p3["background"]["zh"])
 p4 = prompt_gen.pick_variations(42, tpl4)
 check("四视图模板强制四视图", "四视图" in p4["compose"]["zh"])
+check("四视图模板置空服装", p4["outfit"]["zh"] == "")
 ps = prompt_gen.pick_variations(42, tpl_s)
 check("站姿模板强制正常站姿构图", "正常站姿" in ps["compose"]["zh"])
+check("站姿模板置空服装", ps["outfit"]["zh"] == "")
 # 全身姿势池：zh 必须写腿/脚动作（否则 img2img 编辑指令带不动下半身）
 leg_kws = ("腿", "脚", "躺", "坐", "蹲", "跳", "走", "趴", "站立")
 leg_n = sum(1 for p in prompt_gen.POSES if any(k in p["zh"] for k in leg_kws))

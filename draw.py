@@ -190,6 +190,11 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
         if handler is None:
             return None, _STATUS_NO_ANIMA, "未安装萌绘（comfyui_draw 工具不存在）", 0
         kwargs = _base_kwargs(cfg, prompt, seed_int)
+        # 条目级工作流覆盖（v0.7.2）：strategy.workflow 优先于全局 draw_workflow
+        # （补一张/试画的工作流下拉经 effective_entry 写到这里；img2img 分支不用它）
+        st_workflow = str(strategy.get("workflow") or "").strip()
+        if st_workflow:
+            kwargs["workflow"] = st_workflow
         if stype == "lora":
             loras = strategy.get("loras")
             if isinstance(loras, list) and loras:
@@ -268,6 +273,12 @@ def effective_entry(entry: dict, override: dict) -> dict:
         loras = (override or {}).get("loras")
         if isinstance(loras, list) and loras:
             st["loras"] = [str(x) for x in loras if str(x).strip()]
+    # 条目级工作流覆盖（v0.7.2）：补一张选了工作流时按条目画法透传——
+    # base/lora 吃 workflow（generate_portrait base 分支读取）；img2img 条目
+    # 用的是 img2img_workflow，此键对其无作用
+    wf = str((override or {}).get("workflow") or "").strip()
+    if wf:
+        st["workflow"] = wf
     e["strategy"] = st
     return e
 

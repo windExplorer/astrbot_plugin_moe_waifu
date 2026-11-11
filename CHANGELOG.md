@@ -2,6 +2,36 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.7.2 (2026-11-12)
+
+立绘模板按行业标准收紧 + 补一张可选工作流（版本 v0.7.1 -> v0.7.2）。
+
+- **① 立绘模板按 character sheet 行业惯例收紧（用户反馈「生成的角色很奇怪」）**：
+  模板此前的实现只强制构图/姿势/背景，服装与表情仍在按种子随机——
+  「纯色站姿模板」可能出泳装+坏笑的诡异组合。行业规则是模板图 =
+  **正常站立 + 平静表情（微笑上限）+ 角色原始服装（不注入变装）**，穿搭变化交给
+  普通主题。落地：
+  - `apply_theme` 新增 `expression_kw`（表情约束）与 `plain_dims`（维度置空语义：
+    zh/en 均空 = 提示词不提及该维度）。
+  - 三套【模板】主题统一改为：compose 强制 + `pose_kw ["标准站姿"]`（新增专用
+    姿势条目「双臂自然下垂的标准站姿」，不再泛匹配抱胸/单腿等性格姿势）+
+    `expression_kw ["微笑"]` + `plain_dims ["outfit"]`（回归 entry tags 自带服装）。
+    img2img 编辑指令相应变成「构图改 X、标准站姿、微笑、纯色背景」，
+    文生图 tags 相应不再追加服装变化词。
+- **② 补一张可选工作流（用户需求）**：角色详情生成面板在「补一张」模式下新增
+  工作流下拉（文生图+图生图合并列表，留空=跟随配置）。链路：override 带
+  `workflow` + `img2img_workflow`（不带 strategy_type，画法跟随条目）→
+  `effective_entry` 写入 `strategy.workflow` / `strategy.img2img_workflow` →
+  `draw.generate_portrait` base/lora 分支读 `strategy.workflow` 优先于全局
+  `draw_workflow`；img2img 条目走既有 `img2img_workflow` 三级解析。
+  `h_job_start` 的 img2img 参考图校验放宽：主参考或 refs[] 任一有图即可
+  （补一张带工作流 override 的 img2img 条目不再误报缺参考图）。
+- **测试**：test_prompt_gen 模板断言补微笑/置空服装/标准站姿（多 seed）+
+  关键词命中循环加 expression_kw；test_draw 补工作流覆盖两条（base 写入 /
+  img2img 走 img2img_workflow 键）。全过；HTML/内联脚本守卫全过；冒烟实测
+  补一张选工作流后 `jobs/start` 负载 `{override:{workflow, img2img_workflow}}`
+  正确且不带 strategy_type。
+
 ## v0.7.1 (2026-11-12)
 
 修正「重绘强度」的误导性提示（版本 v0.7.0 -> v0.7.1；纯文案勘误）。
