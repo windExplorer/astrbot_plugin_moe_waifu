@@ -2,6 +2,22 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.6.4 (2026-11-12)
+
+插件图标（版本 v0.6.3 -> v0.6.4）。
+
+- **需求（用户）**：给插件加个图标。
+- **机制（查 AstrBot 4.29.4 源码确认）**：`star_manager` 在插件装载时探测插件根目录的
+  `logo.png`（`self.logo_fname`），存在则写入 `metadata.logo_path`；Dashboard 的
+  插件详情/列表经 `plugin_service.resolve_plugin_logo_url` 走 `/api/file/<token>`
+  展示（无 logo 回落默认图标），零配置——放对位置即生效。
+- **实现**：新增插件根目录 `logo.png`（256×256，品牌粉紫对角渐变圆角方块 +
+  白色爱心 + 三颗星光，4x 超采样抗锯齿，与工坊侧栏渐变同色系），Pillow 程序化
+  生成（临时脚本用完即删）；打包清单加 `logo.png`；工坊侧栏标题 ♥ 替换为
+  24px 圆角 logo 图（`pages/waifu-console/assets/logo.png`，与 vendored 资产同路，
+  避免依赖插件根目录的静态路由可达性）。
+- 守卫全过；logo 资产 200、侧栏标记在位。
+
 ## v0.6.3 (2026-11-12)
 
 上传公共组件 `w-upload-panel` + 粘贴上传（版本 v0.6.2 -> v0.6.3）。

@@ -10,10 +10,13 @@
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-thumb { background: rgba(140,120,140,.28); border-radius: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  .waifu-logo { font-weight: 700; font-size: 17px; padding: 16px 18px 4px;
+  .waifu-logo { display: flex; align-items: center; gap: 8px;
+    font-weight: 700; font-size: 17px; padding: 16px 18px 4px;
     background: linear-gradient(120deg, #d63384, #9b72c9);
     -webkit-background-clip: text; background-clip: text; color: transparent;
     width: fit-content; }
+  .waifu-logo img { width: 24px; height: 24px; border-radius: 6px;
+    box-shadow: 0 1px 4px rgba(120,60,110,.28); flex: none; }
   .waifu-sub { font-size: 11px; padding: 0 18px 12px; opacity: .55; letter-spacing: 1px; }
   .entry-name { font-weight: 600; }
   .entry-id { font-size: 11px; opacity: .55; }
@@ -131,7 +134,7 @@
   <n-config-provider :theme="theme" :theme-overrides="themeOverrides">
     <n-layout has-sider style="height: 100vh;">
       <n-layout-sider bordered :width="176">
-        <div class="waifu-logo">♥ 萌萌今日老婆</div>
+        <div class="waifu-logo"><img src="assets/logo.png" alt="萌萌今日老婆">萌萌今日老婆</div>
         <div class="waifu-sub">角色库工坊</div>
         <n-menu :value="menu" :options="menuOpts" @update:value="onMenu"></n-menu>
       </n-layout-sider>

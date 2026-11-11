@@ -69,6 +69,7 @@ $includeList = @(
     "prompt_gen.py",
     "webui_api.py",
     "seed_pool.json",
+    "logo.png",
     "pages",
     "_conf_schema.json",
     "metadata.yaml",
