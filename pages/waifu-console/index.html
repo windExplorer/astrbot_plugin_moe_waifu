@@ -43,8 +43,11 @@
   /* 角色卡/作品卡封面同为竖版比例（7:12），与立绘一致。
      v0.6.1：max-height 封顶——列数少时不再按比例疯长（object-position 偏上保住脸），
      封面高度封顶后所有卡片高度一致，消除参差不齐 */
-  .work-cover { position: relative; height: auto; aspect-ratio: 7 / 12; max-height: 320px;
-    border-radius: 8px; overflow: hidden; display: flex;
+  /* ⚠️ width:100% 必须显式声明：块级元素 width:auto 时，max-height 会按
+     aspect-ratio「转移」成 max-width（320×7/12≈187px），封面被钉死在 187 宽
+     （v0.6.4 冒烟实测）；宽度定了之后 max-height 只裁高度、宽度照常随卡片拉伸 */
+  .work-cover { position: relative; width: 100%; height: auto; aspect-ratio: 7 / 12;
+    max-height: 320px; border-radius: 8px; overflow: hidden; display: flex;
     align-items: center; justify-content: center; }
   .work-cover-img { width: 100%; height: 100%; object-fit: cover;
     object-position: 50% 12%; display: block; }
