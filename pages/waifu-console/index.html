@@ -23,14 +23,17 @@
     background: rgba(128,128,128,.12);
     transition: transform .15s ease, box-shadow .15s ease; }
   .gal-item:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(120,80,120,.14); }
-  .gal-item img { width: 100%; height: 150px; object-fit: cover; display: block; }
+  /* 立绘是 700×1200 竖图：缩略卡统一 7:12 竖版比例（横图裁切体验差，v0.5.10） */
+  .gal-item img { width: 100%; height: auto; aspect-ratio: 7 / 12;
+    object-fit: cover; display: block; }
   .gal-meta { font-size: 11px; opacity: .65; padding: 4px 8px; }
   .gal-del { position: absolute; top: 6px; right: 6px; }
   .bind-tip { font-size: 12px; opacity: .62; margin-top: 8px; }
   .work-card { cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; }
   .work-card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(150,90,130,.14); }
-  .work-cover { height: 140px; border-radius: 8px; overflow: hidden; display: flex;
-    align-items: center; justify-content: center; }
+  /* 角色卡/作品卡封面同为竖版比例（7:12），与立绘一致 */
+  .work-cover { height: auto; aspect-ratio: 7 / 12; border-radius: 8px;
+    overflow: hidden; display: flex; align-items: center; justify-content: center; }
   .work-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .work-initial { font-size: 36px; color: #fff; opacity: .9; font-weight: 700;
     letter-spacing: 2px; }
@@ -73,6 +76,8 @@
     transform: translate(-50%, -50%); color: #fff; font-size: 13px; opacity: .7; }
   .wlb.loading .wlb-loading { display: block; }
   .wlb:not(.loading) .wlb-loading { display: none; }
+  /* ---- 间距修缮（v0.5.10）：区块级子元素统一留白，别挤在一起 ---- */
+  .stack > * + * { margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -114,7 +119,7 @@
               <n-input v-model:value="keyword" placeholder="搜 id / 名字 / 作品" size="small"
                        clearable style="width: 180px;"></n-input>
             </n-space>
-            <n-space :wrap="true" size="small" align="center" style="margin-top: 2px;">
+            <n-space :wrap="true" size="small" align="center" style="margin-top: 12px;">
               <span style="font-size: 13px; opacity: .7;">角色卷</span>
               <div v-for="p in meta.packs" :key="p.pack" class="pack-pill"
                    :style="p.enabled ? '' : 'opacity: .5;'">
@@ -126,7 +131,7 @@
             </n-space>
 
             <!-- 卡片视图（默认） -->
-            <div v-if="charsMode === 'card'">
+            <div v-if="charsMode === 'card'" style="margin-top: 14px;">
               <n-grid :cols="4" :x-gap="12" :y-gap="12">
                 <n-gi v-for="e in pagedEntries" :key="e.id">
                   <n-card size="small" :bordered="true" class="work-card">
@@ -170,13 +175,13 @@
 
             <!-- 列表视图 -->
             <n-data-table v-if="charsMode === 'list'" :columns="entryCols"
-                          :data="filteredEntries" :row-key="rowKey"
+                          :data="filteredEntries" :row-key="rowKey" style="margin-top: 14px;"
                           :pagination="{ pageSize: 20 }" size="small"></n-data-table>
           </div>
 
           <!-- ============ 作品库 ============ -->
           <div v-if="menu === 'works'">
-            <div v-if="!currentWork">
+            <div v-if="!currentWork" class="stack">
               <n-grid :cols="4" :x-gap="12" :y-gap="12">
                 <n-gi v-for="w in works" :key="w.series">
                   <n-card size="small" :bordered="true" class="work-card" @click="openWork(w)">
@@ -195,7 +200,7 @@
               <n-empty v-if="!worksLoading && works.length === 0"
                        description="还没有作品：给角色条目填上「作品名」，就会自动归入作品库"></n-empty>
             </div>
-            <div v-if="currentWork">
+            <div v-if="currentWork" class="stack">
               <n-space align="center" style="margin-bottom: 12px;" :wrap="true">
                 <n-button size="small" @click="backWorks">← 返回作品列表</n-button>
                 <b style="font-size: 16px;">{{ currentWork.series }}</b>
@@ -393,7 +398,7 @@
           </div>
 
           <!-- ============ 立绘库 ============ -->
-          <div v-if="menu === 'gallery'">
+          <div v-if="menu === 'gallery'" class="stack">
             <n-space align="center" :wrap="true">
               <n-select v-model:value="galCharId" :options="galCharOpts" filterable
                         placeholder="选择角色（按立绘数）" style="width: 300px;"></n-select>
