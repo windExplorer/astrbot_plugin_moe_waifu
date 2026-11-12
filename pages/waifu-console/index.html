@@ -539,9 +539,16 @@
                       <n-input v-model:value="tryOverride.ref"
                                placeholder="单张 URL / 路径（多图请点选下方参考图）"
                                style="width: 340px;"></n-input>
-                      <n-input-number v-model:value="tryOverride.denoise" :step="0.05" :min="0.2"
-                                      :max="0.95" placeholder="重绘强度"
-                                      style="width: 150px;"></n-input-number>
+                    <n-input-number v-model:value="tryOverride.denoise" :step="0.05" :min="0.2"
+                                    :max="0.95" placeholder="重绘强度"
+                                    style="width: 150px;"></n-input-number>
+                    <!-- v0.13.3：本次图生图显式尺寸（留空 = 配置） -->
+                    <n-input-number v-model:value="tryOverride.width" :min="256" :max="4096"
+                                    :step="16" placeholder="宽（空=配置）"
+                                    style="width: 130px;"></n-input-number>
+                    <n-input-number v-model:value="tryOverride.height" :min="256" :max="4096"
+                                    :step="16" placeholder="高（空=配置）"
+                                    style="width: 130px;"></n-input-number>
                     </n-space>
                     <!-- v0.6.3：上传收口到公共面板（拖拽/点击/粘贴三合一，可多选） -->
                     <w-upload-panel compact multiple style="margin-top: 10px;"
@@ -727,6 +734,14 @@
                   <n-input-number v-if="galMode === 'img2img'" v-model:value="galDenoise"
                                   :step="0.05" :min="0.2" :max="0.95"
                                   placeholder="重绘强度" style="width: 120px;"></n-input-number>
+                  <!-- v0.13.3：图生图显式尺寸（留空 = 配置 draw_width/height）——
+                       旧版普通重绘不传宽高，输出尺寸跟参考图走，多视图源转单图会得横版 -->
+                  <n-input-number v-if="galMode === 'img2img'" v-model:value="galWidth"
+                                  :min="256" :max="4096" :step="16"
+                                  placeholder="宽（空=配置）" style="width: 128px;"></n-input-number>
+                  <n-input-number v-if="galMode === 'img2img'" v-model:value="galHeight"
+                                  :min="256" :max="4096" :step="16"
+                                  placeholder="高（空=配置）" style="width: 128px;"></n-input-number>
                   <!-- v0.7.0：主题快选 + 主按钮（v0.6.2 的「查看/编辑提示词」并入主按钮——
                        点主按钮打开提示词面板，在面板里点「开始生成」才出图） -->
                   <n-select v-model:value="galTheme" :options="themeOpts" size="small"
@@ -745,7 +760,10 @@
                     可一次喂正/侧/背多张，顺序即「图1/图2/图3」，多数最多 3 张。
                     用参考图适合稳脸型画风，用立绘适合做变体。
                     姿势变化主要靠提示词——每次生成按种子随机抽全身姿势（站/坐/躺/打瞌睡/搞怪…），
-                    想固定构图就用【模板】主题。「重绘强度」仅对带 KSampler 的经典 img2img 工作流生效，
+                    想固定构图就用【模板】主题；从多视图设定稿转单张立绘，指令会自动只保留正面视角。
+                    「宽/高」留空 = 用配置尺寸（draw_width/height），填了按本次出图；
+                    带尺寸开关的工作流（Qwen 2.1 Edit）按此出图，普通工作流仍跟参考图尺寸。
+                    「重绘强度」仅对带 KSampler 的经典 img2img 工作流生效，
                     Qwen2.1 Turbo 编辑类工作流（ManualSigmas 固定调度表）没有该字段、会被忽略。
                   </div>
                   <div class="bind-tip" style="margin-top: 0;" v-if="galRefsSel.length > 0">
@@ -3040,7 +3058,9 @@
       var cameFrom = Vue.ref("chars");          // 试画台的返回目标
       // 本次画法（临时参数）：entry=跟随条目；其余为试画临时覆盖（不写条目）
       var tryMode = Vue.ref("entry");
-      var tryOverride = Vue.ref({ ref: "", refs: [], denoise: null, loras: "" });
+      // v0.13.3：width/height = 本次图生图显式尺寸（留空 = 配置；不随「按本次参数保存」固化）
+      var tryOverride = Vue.ref({ ref: "", refs: [], denoise: null, loras: "",
+                                  width: null, height: null });
       function tryHasSource() {
         // 本次多选、手动填的单张、或条目自带的主参考/多图源，任一存在即可
         var ov = tryOverride.value || {};
@@ -3179,6 +3199,12 @@
           }
           if (tryOverride.value.denoise !== null && tryOverride.value.denoise !== undefined) {
             ov.denoise = tryOverride.value.denoise;
+          }
+          // v0.13.3：显式尺寸成对传（后端只收完整对）
+          if (tryOverride.value.width !== null && tryOverride.value.width !== undefined
+              && tryOverride.value.height !== null && tryOverride.value.height !== undefined) {
+            ov.width = tryOverride.value.width;
+            ov.height = tryOverride.value.height;
           }
         }
         if (tryMode.value === "lora") {
@@ -3543,6 +3569,9 @@
       });
       // v0.7.0：默认 0.75（全局兜底 0.6 偏保守——用户反馈姿势/腿脚几乎不变）
       var galDenoise = Vue.ref(0.75);
+      // v0.13.3：图生图显式尺寸（null = 跟随配置 draw_width/height；本次生成有效）
+      var galWidth = Vue.ref(null);
+      var galHeight = Vue.ref(null);
       var genSources = Vue.computed(function () {
         var out = [];
         galRefs.value.forEach(function (r) {
@@ -3638,6 +3667,12 @@
           if (galWf.value) { ov.img2img_workflow = String(galWf.value); }
           if (galDenoise.value !== null && galDenoise.value !== undefined) {
             ov.denoise = galDenoise.value;
+          }
+          // v0.13.3：显式尺寸成对传（留空 = 跟随配置 draw_width/height）
+          if (galWidth.value !== null && galWidth.value !== undefined
+              && galHeight.value !== null && galHeight.value !== undefined) {
+            ov.width = galWidth.value;
+            ov.height = galHeight.value;
           }
           payload.override = ov;
         } else if (String(galWfAny.value || "").trim()) {
@@ -4870,7 +4905,7 @@
         galUploadOpen: galUploadOpen, galUpNote: galUpNote,
         onGalPanelFiles: onGalPanelFiles,
         galMode: galMode, galRefsSel: galRefsSel, galWf: galWf, galDenoise: galDenoise,
-        galAsRef: galAsRef,
+        galWidth: galWidth, galHeight: galHeight, galAsRef: galAsRef,
         galWfAny: galWfAny, wfAllOpts: wfAllOpts,
         genSources: genSources, selectGenSource: selectGenSource,
         doDetailGenerate: doDetailGenerate,

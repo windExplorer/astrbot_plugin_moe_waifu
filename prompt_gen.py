@@ -326,6 +326,20 @@ def _compose_is_multi(picks: dict) -> bool:
     return ("三视图" in zh) or ("四视图" in zh)
 
 
+def force_single_view(picks: dict) -> dict:
+    """图生图编辑模式（非模板主题）把 compose 维度置空（v0.13.3）。
+
+    COMPOSE 池有约 10% 权重随机命中三/四视图——落到编辑指令就是「把构图改为
+    三视图」，以多视图设定稿为源重绘立绘时输出仍是拼接设定稿（用户实测：
+    「根据多视图生成的立绘也是多视图」）；且种子决定论让重试也复现。
+    图生图的默认预期是单张立绘：想出设定稿请显式选 tpl_ 主题（其 compose_kw
+    会重新约束本维度）。纯函数，返回新 dict。
+    """
+    out = dict(picks)
+    out["compose"] = {"w": 0, "zh": "", "en": ""}
+    return out
+
+
 def variation_zh_list(picks: dict) -> list:
     """本轮要改的中文维度短语（跳过「保持不变」的空项），LLM 元提示用。"""
     order = [("构图视图", "compose"), ("服装", "outfit"), ("背景与光照", "background"),
@@ -368,10 +382,17 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "") -> str:
     compose_zh = str((picks.get("compose") or {}).get("zh") or "")
     multi_view = ("三视图" in compose_zh) or ("四视图" in compose_zh)
     tail = "。保持人物的面部特征、发型发色与角色辨识度不变，只做上述改动；"
+    # v0.13.3：非多视图指令必须显式处理「源是多视图设定稿」的情况——
+    # 编辑类模型（Qwen 2.1 Edit）会强烈复刻输入图布局，只说「输出单人
+    # 完整竖版立绘」拉不回单图，必须写明「只保留一个视角、去掉拼接」。
     tail += ("在同一张图内并列展示上述各个视角，输出角色设定稿"
-             if multi_view else "输出单人完整竖版立绘")
+             if multi_view
+             else "输出单人完整竖版立绘；若参考图是多视角拼接的角色设定稿，"
+                  "只保留其中一个视角（通常是正面），去掉其余视角的拼接")
     if not parts:
         return ("根据参考图重新绘制该角色的单人完整竖版立绘"
+                "（若参考图是多视角拼接的角色设定稿，只保留其中一个视角、"
+                "通常是正面，去掉其余视角的拼接）"
                 "，保持人物的面部特征、发型发色与角色辨识度不变")
     return "，".join(parts) + tail
 
@@ -477,7 +498,12 @@ def build_meta_prompt(entry: dict, picks: dict, custom: str = "") -> str:
     tags = str(entry.get("tags_en") or "").strip() or "无"
     lines = [
         f"角色：{name}（出自 {series}），特征 tags：{tags}。",
-        "参考图是该角色的官方立绘（单人）。本轮由抽签决定的改动维度：",
+        # v0.13.3：源图不再硬编码「单人立绘」——生成源可能是多视图设定稿，
+        # 硬编码会让 LLM 写不出「转单图」指令，输出复刻设定稿布局（实测）。
+        "参考图是该角色的一条生成源：可能是单张立绘，也可能是多视角拼接的"
+        "角色设定稿；若参考图是多视角设定稿，输出必须收敛为单张全身立绘"
+        "（保留其中一个视角，通常是正面），不要保留拼接布局。"
+        "本轮由抽签决定的改动维度：",
     ]
     zh_list = variation_zh_list(picks)
     if zh_list:
@@ -668,6 +694,10 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
         if not bool(cfg.get("variations_enabled", True)):
             return build_prompt_tags(entry), "static"
         picks = pick_variations(seed_int, theme, outfit)
+        # v0.13.3：图生图编辑模式（非模板主题）compose 强制单视图——
+        # 别让 COMPOSE 池随机命中三/四视图混进编辑指令（见 force_single_view）
+        if not (theme and theme.get("compose_kw")):
+            picks = force_single_view(picks)
         if not bool(cfg.get("prompt_llm_enabled", True)):
             return build_local_instruction(entry, picks, custom), "local"
         provider = await _resolve_provider(context, cfg.get("prompt_llm_provider", ""))
@@ -698,9 +728,10 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
         logger.error("[moe_waifu] 提示词生成异常，回落本地模板", exc_info=True)
         try:
             if str(entry.get("strategy_type") or "base") == "img2img":
-                return (build_local_instruction(
-                    entry, pick_variations(seed_int, theme, outfit), custom),
-                    "local")
+                picks = pick_variations(seed_int, theme, outfit)
+                if not (theme and theme.get("compose_kw")):
+                    picks = force_single_view(picks)
+                return (build_local_instruction(entry, picks, custom), "local")
             return build_prompt_tags(entry), "static"
         except Exception:
             return "1girl, solo, best quality, looking at viewer", "static"

@@ -251,4 +251,49 @@ async def _run_disabled():
 off_text, off_src = asyncio.run(_run_disabled())
 check("变化关闭时按 tags 原样出图", off_src == "static" and "twintails" in off_text)
 
+# ---------- v0.13.3：img2img 单视图守卫 + 多视图源转单图条款 ----------
+# 用户实测：以多视图设定稿为源重绘立绘，输出仍是多视图。三个根因一起修：
+# a) 编辑指令/元提示写明「多视图源只保留一个视角」；
+# b) 非模板主题下 compose 不再随机混入三/四视图（种子决定论会复现）；
+# c) tpl_ 主题（compose_kw 显式约束）仍可出多视图设定稿。
+check("本地编辑指令（非多视图）带转单图条款", "只保留其中一个视角" in inst)
+check("无变化兜底指令也带转单图条款", "只保留其中一个视角" in inst0)
+inst_3v2 = prompt_gen.build_local_instruction(ENTRY, prompt_gen.pick_variations(42, tpl3))
+check("三视图模板指令仍要求并列多视角",
+      "并列" in inst_3v2 and "三视图" in inst_3v2
+      and "只保留其中一个视角" not in inst_3v2)
+p_multi = prompt_gen.pick_variations(42, tpl3)
+fsv = prompt_gen.force_single_view(dict(p_multi))
+check("force_single_view 置空 compose（纯函数不动原 dict）",
+      fsv["compose"]["zh"] == "" and fsv["compose"]["en"] == ""
+      and p_multi["compose"]["zh"] != "")
+check("元提示词不再硬编码「源是单人立绘」",
+      "官方立绘（单人）" not in meta
+      and "多视角拼接" in meta and "收敛为单张全身立绘" in meta)
+
+async def _run_i2i(seed):
+    return await prompt_gen.build_generation_prompt(
+        _BrokenContext(),
+        {"prompt_llm_enabled": True, "prompt_llm_provider": "",
+         "variations_enabled": True},
+        ENTRY, seed)
+
+bad_seeds = []
+for s in range(60):
+    txt, _s = asyncio.run(_run_i2i(s))
+    if ("三视图" in txt) or ("四视图" in txt) or ("multiple views" in txt.lower()):
+        bad_seeds.append(s)
+check("img2img 非模板主题 60 种子无随机多视图（命中种子 " + str(bad_seeds) + "）",
+      not bad_seeds)
+
+async def _run_i2i_tpl(seed):
+    return await prompt_gen.build_generation_prompt(
+        _BrokenContext(),
+        {"prompt_llm_enabled": True, "prompt_llm_provider": "",
+         "variations_enabled": True},
+        ENTRY, seed, theme_id="tpl_3view")
+
+txt_tpl, _src_tpl = asyncio.run(_run_i2i_tpl(7))
+check("tpl_3view 主题仍输出三视图指令", "三视图" in txt_tpl)
+
 print("test_prompt_gen: ALL OK")

@@ -54,6 +54,7 @@ fmtTime cfgBoundGroups pickSimGroup simScopeText
 avatarOf hashColor thumbOf colorOf rerollLabel tv brandColor zhLocale
 bindRows bindPackOpts bindRawOpen bindLoading loadBindPools onBindRawInput
 addBindRow setRowGid setRowPacks removeBindRow
+galWidth galHeight
 """.split()
 
 ROUTES = """

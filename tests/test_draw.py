@@ -118,6 +118,52 @@ with tempfile.TemporaryDirectory() as ref_td:
           "refs_stage" in str(seen.get("image") or ""))
     check("原参考图未被搬走（仍在 refs/）", (ref_dir / "refs" / "b.png").is_file())
 
+    # ---- v0.13.3：img2img 尺寸——默认配置宽高 + custom_size，显式覆盖优先 ----
+    # 旧版只有多视图底稿才传宽高，普通重绘输出尺寸跟参考图走（多视图源转单图
+    # 得横版单图）。现在默认传配置 draw_width/height（对齐 16：700→704）。
+    check("img2img 默认传配置宽高 + 尺寸开关",
+          seen.get("width") == 704 and seen.get("height") == 1200
+          and seen.get("custom_size") is True)
+    # 多视图底稿提示词 → 自动横/方版（v0.7.3 行为保持）
+    mv_entry = {"strategy_type": "img2img", "tags_en": "miku",
+                "strategy": {"ref": "refs/b.png"}}
+    asyncio.run(draw.generate_portrait(
+        _FakeContext(), cfg_ref, mv_entry, 1,
+        prompt="三视图（正面、侧面、背面同框，灰色纯色背景），保持角色外观不变"))
+    check("多视图底稿提示词用横版尺寸",
+          seen.get("width") == 1216 and seen.get("height") == 832
+          and seen.get("custom_size") is True)
+    # 工坊 img2img 面板的显式尺寸（strategy.width/height）优先于一切
+    sized = {"strategy_type": "img2img", "tags_en": "miku",
+             "strategy": {"ref": "refs/b.png", "width": 512, "height": 768}}
+    asyncio.run(draw.generate_portrait(_FakeContext(), cfg_ref, sized, 1))
+    check("显式尺寸覆盖默认", seen.get("width") == 512 and seen.get("height") == 768)
+    # 只填一边 → 视同未指定，回配置默认
+    half = {"strategy_type": "img2img", "tags_en": "miku",
+            "strategy": {"ref": "refs/b.png", "width": 512}}
+    asyncio.run(draw.generate_portrait(_FakeContext(), cfg_ref, half, 1))
+    check("只填宽不生效（回配置默认）",
+          seen.get("width") == 704 and seen.get("height") == 1200)
+    check("_strategy_size 成对生效",
+          draw._strategy_size({"width": 512, "height": 768}) == (512, 768))
+    check("_strategy_size 单边/越界/非 dict 不生效",
+          draw._strategy_size({"width": 512}) == (0, 0)
+          and draw._strategy_size({"width": 9999, "height": 768}) == (0, 0)
+          and draw._strategy_size(None) == (0, 0))
+    # effective_entry：本次显式尺寸写进 strategy（成对生效，单边弹旧值防残留）
+    plain_entry = {"id": "miku", "name": "初音未来", "strategy": {"type": "base"},
+                   "strategy_type": "base", "tags_en": "miku"}
+    eff_w = draw.effective_entry(plain_entry, {"strategy_type": "img2img",
+                                               "ref": "x.png",
+                                               "width": 512, "height": 768})
+    check("override 尺寸写进 strategy",
+          eff_w["strategy"].get("width") == 512
+          and eff_w["strategy"].get("height") == 768)
+    eff_h = draw.effective_entry(plain_entry, {"strategy_type": "img2img",
+                                               "ref": "x.png", "width": 512})
+    check("override 单边尺寸不残留",
+          "width" not in eff_h["strategy"] and "height" not in eff_h["strategy"])
+
 # plan_source（v0.9.6 出图方式规划：mix/pool/img2img 三模式 + 回退链）
 # 满配额一律取库
 check("满配额→取库", draw.plan_source("img2img", 5, 5, True, 0, 100) == "from_pool")

@@ -80,6 +80,25 @@ def _snap16(v) -> int:
         return 1024
 
 
+def _strategy_size(strategy: dict) -> tuple:
+    """显式指定的图生图宽高（strategy.width/height，v0.13.3）。
+
+    来源是工坊 img2img 面板的「宽/高」输入（经 effective_entry 写进 strategy），
+    两者都合法（256~4096）才生效——只填一边视同未指定（尺寸是成对语义）。
+    返回 (0, 0) = 未指定，调用方走 多视图自动尺寸 / 配置默认。
+    """
+    if not isinstance(strategy, dict):
+        return 0, 0
+    try:
+        w = int(strategy.get("width") or 0)
+        h = int(strategy.get("height") or 0)
+    except (TypeError, ValueError):
+        return 0, 0
+    if w < 256 or h < 256 or w > 4096 or h > 4096:
+        return 0, 0
+    return w, h
+
+
 def _first_sentence(raw: str, limit: int = 80) -> str:
     """取萌绘失败文本的首句（萌绘失败时会附一句给 LLM 的提示语，别原样吐给用户）。"""
     text = str(raw or "").strip()
@@ -365,14 +384,27 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
             )
         except (TypeError, ValueError):
             kwargs["denoise"] = 0.65
-        # 多视图底稿（v0.7.3）：横/方形尺寸 + 调用级尺寸开关（萌绘 v7.7.100+）。
-        # 带「尺寸来源开关」的工作流（Qwen 2.1 Edit 等）→ 拨开关注入宽高；
-        # 普通图生图工作流 → 宽高被忽略（尺寸仍跟参考图，萌绘日志有说明），
-        # 旧版萌绘（< v7.7.100）→ 未知参数被丢弃并 WARN，均无害。
-        view_i2i = detect_view_layout(prompt)
-        if view_i2i:
-            kwargs["width"], kwargs["height"] = _VIEW_SIZES[view_i2i]
+        # 尺寸（v0.13.3）：img2img **默认也传宽高** + 调用级尺寸开关
+        # （萌绘 v7.7.100+ 的 custom_size）。旧版只有多视图底稿才传宽高，
+        # 普通重绘输出尺寸跟参考图走——多视图源转单图会得到横版「单图」，
+        # 正常立绘该用配置的 draw_width/height。优先级：
+        #   本次显式指定（strategy.width/height，工坊 img2img 面板可填）
+        #   > 多视图底稿自动横/方版 > 配置 draw_width/height。
+        # 带「尺寸来源开关」的工作流（Qwen 2.1 Edit 等）按宽高出图；
+        # 普通图生图工作流忽略宽高（仍跟参考图，萌绘日志有说明）；
+        # 旧版萌绘（< v7.7.100）丢弃未知参数并 WARN，均无害。
+        w_in, h_in = _strategy_size(strategy)
+        if w_in and h_in:
+            kwargs["width"], kwargs["height"] = _snap16(w_in), _snap16(h_in)
             kwargs["custom_size"] = True
+        else:
+            view_i2i = detect_view_layout(prompt)
+            kwargs["custom_size"] = True
+            if view_i2i:
+                kwargs["width"], kwargs["height"] = _VIEW_SIZES[view_i2i]
+            else:
+                kwargs["width"] = _snap16(cfg.get("draw_width", 700))
+                kwargs["height"] = _snap16(cfg.get("draw_height", 1200))
     else:
         tool_name = "comfyui_draw"
         handler = _get_tool_handler(context, tool_name)
@@ -473,10 +505,12 @@ def effective_entry(entry: dict, override: dict) -> dict:
     """试画台临时参数 → 生效条目（深拷贝，绝不改原条目）。
 
     override: {strategy_type?: base|lora|img2img, ref?, refs?: [str], denoise?,
-               img2img_workflow?, loras?: [str]}
+               img2img_workflow?, loras?: [str], width?, height?}
     仅覆盖本次用到的字段；img2img 时清掉条目自带的 img2img_workflow（跟随本次输入/
     全局配置），未传 denoise 则沿用条目/全局。`refs` 是**本次多图源**（写进
     `strategy.gen_refs`，不碰资料库 `strategy.refs`）。
+    width/height（v0.13.3）：本次图生图显式尺寸（工坊 img2img 面板「宽/高」，
+    留空 = 跟随配置）；成对生效，写进 strategy 供 _strategy_size 读取。
     """
     import json as _json
 
@@ -507,6 +541,17 @@ def effective_entry(entry: dict, override: dict) -> dict:
             st["img2img_workflow"] = wf
         else:
             st.pop("img2img_workflow", None)
+        # v0.13.3：本次显式尺寸（成对生效；只填一边 = 未指定，弹出旧值防残留）
+        try:
+            w_in = int((override or {}).get("width") or 0)
+            h_in = int((override or {}).get("height") or 0)
+        except (TypeError, ValueError):
+            w_in = h_in = 0
+        if w_in >= 256 and h_in >= 256 and w_in <= 4096 and h_in <= 4096:
+            st["width"], st["height"] = w_in, h_in
+        else:
+            st.pop("width", None)
+            st.pop("height", None)
     if st.get("type") == "lora":
         loras = (override or {}).get("loras")
         if isinstance(loras, list) and loras:
