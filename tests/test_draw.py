@@ -102,4 +102,39 @@ check("失败文本取首句", draw._first_sentence(
 check("空文本兜底", draw._first_sentence("") == "萌绘未返回结果")
 check("无句号截断限长", len(draw._first_sentence("x" * 200)) <= 80)
 
+# detect_view_layout（v0.7.3：多视图底稿识别，中英都认）
+check("英文三视图", draw.detect_view_layout(
+    "character sheet, three views, front view, side view, back view") == "3view")
+check("英文四视图", draw.detect_view_layout(
+    "character sheet, multiple views, four views, simple background") == "4view")
+check("中文三视图", draw.detect_view_layout("改成三视图（正面、侧面、背面同框，纯色背景）") == "3view")
+check("中文四视图", draw.detect_view_layout("画一张四视图，服装改成泳装") == "4view")
+check("普通立绘不误判", draw.detect_view_layout(
+    "1girl, solo, standing, full body, front-facing, simple background") == "")
+check("空输入", draw.detect_view_layout("") == "")
+
+# 多视图尺寸 + 负面剥离（v0.7.3）
+cfg_mv = {"draw_negative_enabled": True, "draw_negative_prompt": "", "draw_width": 700,
+          "draw_height": 1200}
+p3 = draw.build_prompt({"tags_en": "hatsune miku, character sheet, three views, "
+                                     "front view, side view, back view, simple background"})
+kw3 = draw._base_kwargs(cfg_mv, p3, 1)
+check("三视图→横版 1216×832", kw3["width"] == 1216 and kw3["height"] == 832)
+check("三视图负面剥 multiple views/girls",
+      "multiple views" not in kw3["negative_prompt"]
+      and "multiple girls" not in kw3["negative_prompt"]
+      and "1boy" in kw3["negative_prompt"])
+p4 = draw.build_prompt({"tags_en": "rem, character sheet, multiple views, four views"})
+kw4 = draw._base_kwargs(cfg_mv, p4, 1)
+check("四视图→方形 1024×1024", kw4["width"] == 1024 and kw4["height"] == 1024)
+check("四视图负面同样剥离", "multiple views" not in kw4["negative_prompt"])
+kw_norm = draw._base_kwargs(cfg_mv, "1girl, solo, standing", 1)
+check("普通立绘→配置尺寸并对齐16（700→704）",
+      kw_norm["width"] == 704 and kw_norm["height"] == 1200)
+kw_none = draw._base_kwargs({"draw_negative_enabled": False}, "普通", 1)
+check("负面关闭→不传", "negative_prompt" not in kw_none)
+check("resolve_negative 兼容旧签名", draw.resolve_negative(cfg_mv).startswith("1boy"))
+check("_snap16", draw._snap16(700) == 704 and draw._snap16(1200) == 1200
+      and draw._snap16("bad") == 1024)
+
 print("test_draw: ALL OK")

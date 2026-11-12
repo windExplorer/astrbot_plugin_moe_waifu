@@ -7,6 +7,9 @@
 - source 只填本插件标识（萌绘日志/审计用，不兼任行为开关）；
 - seed / width / height 透传；动漫角色用英文 danbooru tag；raw_prompt=True 跳过
   萌绘侧的 LLM 润色/翻译（我们的 tags_en 是库里精修好的，不需要再处理）。
+- 图生图尺寸（v0.7.3）：多视图底稿（三/四视图）会额外传 width/height + custom_size
+  （萌绘 v7.7.100+ 的调用级尺寸开关；图生图顶层宽高需萌绘 v7.8.0+）。
+  旧版萌绘会丢弃未知参数并打 WARN，功能不受影响，只是图生图尺寸不生效。
 - **硬依赖**：未装萌绘 / 超时 / 异常 → 报错不出卡（PRD 铁律 1），不做无图降级。
 
 立绘库决策（PRD §5.2）：当日已生成 → 复用；< 配额 → 生成并存档；满配额 → 取模取库存图。
@@ -33,7 +36,46 @@ DEFAULT_DRAW_NEGATIVE = (
 # 构图基础词：单人立绘（非外观特征，可与角色 tag 共存）
 _PROMPT_BASE = "1girl, solo, best quality, looking at viewer"
 
+# ---- 多视图底稿（character sheet）尺寸决策（v0.7.3）----
+# 三视图（正/侧/背横排）与四视图（多角度同框）是横/方形构图——沿用竖版 700×1200
+# 会把几个人挤进瘦长条，躯干四肢全变形。按行业惯例给：
+#   三视图 → 1216×832（横版，每人约 400px 宽，够画清全身）
+#   四视图 → 1024×1024（方形，模型通常自发排 2×2 网格）
+# 「正常站姿全身」（tpl_standing）仍是竖版立绘，用配置的 draw_width/height。
+_VIEW_SIZES = {"3view": (1216, 832), "4view": (1024, 1024)}
+
+# 识别正则：中英都认（文生图走英文 tags，图生图的 LLM 编辑指令是中文）。
+# 四视图先判——它的英文串里也有 multiple views，但 three views/三视图 只属于三视图。
+_VIEW_4_RE = re.compile(r"four views|四视图|multiple views", re.IGNORECASE)
+_VIEW_3_RE = re.compile(r"three views|三视图|front view[，,、\s]*side view", re.IGNORECASE)
+
+# 多视图底稿时要从负面里剥掉的词：multiple views / multiple girls 会跟「同框多个
+# 视图」直接打架（模型大概率被压回单人图），检测到视图词就剥掉，其余保留。
+_VIEW_NEG_STRIP = {"multiple views", "multiple girls"}
+
 _STATUS_NO_ANIMA = "skipped_no_anima"  # 界面文案「萌绘未安装」；历史落库枚举
+
+
+def detect_view_layout(prompt: str) -> str:
+    """从提示词识别多视图底稿类型（v0.7.3）。返回 "3view" / "4view" / ""。
+
+    文生图（英文 tags）与图生图（中文 LLM 编辑指令）都能命中；
+    普通立绘（含「正面朝向镜头」这类单视图描述）不会被误判。
+    """
+    text = str(prompt or "")
+    if _VIEW_4_RE.search(text):
+        return "4view"
+    if _VIEW_3_RE.search(text):
+        return "3view"
+    return ""
+
+
+def _snap16(v) -> int:
+    """对齐到 16 的倍数（扩散模型latent 的习惯步长，最小 64）。"""
+    try:
+        return max(64, int(round(int(v) / 16)) * 16)
+    except (TypeError, ValueError):
+        return 1024
 
 
 def _first_sentence(raw: str, limit: int = 80) -> str:
@@ -88,10 +130,17 @@ def build_prompt(entry: dict) -> str:
     return f"{_PROMPT_BASE}, {tags}" if tags else _PROMPT_BASE
 
 
-def resolve_negative(cfg: dict) -> str:
+def resolve_negative(cfg: dict, prompt: str = "") -> str:
     if not bool(cfg.get("draw_negative_enabled", True)):
         return ""
-    return str(cfg.get("draw_negative_prompt") or "").strip() or DEFAULT_DRAW_NEGATIVE
+    neg = str(cfg.get("draw_negative_prompt") or "").strip() or DEFAULT_DRAW_NEGATIVE
+    # 多视图底稿：负面里的 multiple views / multiple girls 会压制「同框多视图」，
+    # 检测到视图词就剥掉这两条（其余排除项保留）（v0.7.3）
+    if detect_view_layout(prompt):
+        parts = [t.strip() for t in neg.split(",")]
+        parts = [t for t in parts if t and t.lower() not in _VIEW_NEG_STRIP]
+        neg = ", ".join(parts)
+    return neg
 
 
 def _get_tool_handler(context, tool_name: str):
@@ -117,13 +166,18 @@ def _base_kwargs(cfg: dict, prompt: str, seed_int: int,
         raw_prompt=True,
     )
     if with_size:
-        # 仅文生图收宽高；img2img 传了会被萌绘当「LLM 未知参数」丢弃并刷 WARN
-        kwargs["width"] = int(cfg.get("draw_width", 700))
-        kwargs["height"] = int(cfg.get("draw_height", 1200))
+        # 多视图底稿 → 横/方形专用尺寸；普通立绘 → 配置尺寸（对齐 16，
+        # 700×1200 这类非 16 步长的配置值会对齐成 704×1200，对模型更友好）
+        view = detect_view_layout(prompt)
+        if view:
+            kwargs["width"], kwargs["height"] = _VIEW_SIZES[view]
+        else:
+            kwargs["width"] = _snap16(cfg.get("draw_width", 700))
+            kwargs["height"] = _snap16(cfg.get("draw_height", 1200))
     workflow = str(cfg.get("draw_workflow") or "").strip()
     if with_workflow and workflow:
         kwargs["workflow"] = workflow
-    negative = resolve_negative(cfg)
+    negative = resolve_negative(cfg, prompt)
     if negative:
         kwargs["negative_prompt"] = negative
     return kwargs
@@ -184,6 +238,14 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
             )
         except (TypeError, ValueError):
             kwargs["denoise"] = 0.65
+        # 多视图底稿（v0.7.3）：横/方形尺寸 + 调用级尺寸开关（萌绘 v7.7.100+）。
+        # 带「尺寸来源开关」的工作流（Qwen 2.1 Edit 等）→ 拨开关注入宽高；
+        # 普通图生图工作流 → 宽高被忽略（尺寸仍跟参考图，萌绘日志有说明），
+        # 旧版萌绘（< v7.7.100）→ 未知参数被丢弃并 WARN，均无害。
+        view_i2i = detect_view_layout(prompt)
+        if view_i2i:
+            kwargs["width"], kwargs["height"] = _VIEW_SIZES[view_i2i]
+            kwargs["custom_size"] = True
     else:
         tool_name = "comfyui_draw"
         handler = _get_tool_handler(context, tool_name)
