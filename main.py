@@ -407,6 +407,15 @@ class MoeWaifuPlugin(Star):
 
     @filter.command("老婆帮助", alias={"waifu帮助"})
     async def help_cmd(self, event: AstrMessageEvent):
+        # v0.17.0：帮助图（纯 Pillow，复用 card.py 视觉语言）；渲染失败回落纯文本
+        try:
+            path = card.render_help(version=f"v{_plugin_version()}",
+                                    data_dir=str(self._data_dir))
+            yield event.chain_result([Image.fromFileSystem(path)])
+            return
+        except Exception:
+            logger.error("[{}] 帮助图渲染失败，回落纯文本".format(PLUGIN_NAME),
+                         exc_info=True)
         yield event.plain_result(
             "萌萌今日老婆\n"
             "/今日老婆（别名 /老婆）：抽取今天的角色，一人一天一位\n"

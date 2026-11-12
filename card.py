@@ -430,3 +430,112 @@ def sample_card_demo(portrait_path, out_path) -> str:
     return render_card(portrait_path, entry, date_str="2026-11-11",
                        same_count=3, total_count=12, rerolled=False,
                        out_path=out_path)
+
+
+# ---------- 帮助图（v0.17.0）：纯 Pillow 竖版说明卡，无外部依赖 ----------
+
+_HELP_W = 700
+
+
+def render_help(version: str = "", data_dir=None, out_path=None) -> str:
+    """渲染帮助图，返回输出路径。纯 Pillow，不读立绘库（无图也可用）。"""
+    W, pad = _HELP_W, 46
+    # 内容驱动高度：指令 3 条 + 玩法 5 条 + 尾注
+    H = 1092
+    brand = (214, 51, 132)          # 品牌粉（与工坊一致）
+    ink = (74, 52, 64)              # 正文墨色
+    sub = (128, 108, 120)           # 次要文字
+    line = (236, 214, 226)          # 分隔线
+
+    if out_path is None:
+        # 固定文件名覆盖写：帮助图内容随版本变化，旧图无需保留（防堆积）
+        out_dir = Path(data_dir or ".") / "cache"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / "help.png"
+
+    # 底：竖向粉白渐变（浅粉到白），顶部品牌粉条压边
+    img = Image.new("RGBA", (W, H), (255, 255, 255, 255))
+    grad = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(grad)
+    for y in range(H):
+        t = y / H
+        gd.line((0, y, W, y), fill=(253, 240, 246, int(255 * (1 - t) * 0.55)))
+    img.alpha_composite(grad)
+    layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    ld.rectangle((0, 0, W, 10), fill=(*brand, 255))
+
+    title_f = load_font(46, style="name", data_dir=data_dir)
+    sub_f = load_font(21, style="soft", data_dir=data_dir)
+    cmd_f = load_font(27, style="name", data_dir=data_dir)
+    body_f = load_font(22, data_dir=data_dir)
+    body_s = load_font(20, style="soft", data_dir=data_dir)
+    head_f = load_font(24, style="name", data_dir=data_dir)
+
+    def _dark_text(xy, text, font, fill=ink, alpha=255):
+        ld.text((xy[0] + 1, xy[1] + 1), text, font=font, fill=(90, 60, 75, 36))
+        ld.text(xy, text, font=font, fill=(*fill, alpha))
+
+    y = 62
+    _dark_text((pad, y), "萌萌今日老婆", title_f, ink)
+    tw = title_f.getlength("萌萌今日老婆")
+    _dark_text((pad + tw + 18, y + title_f.size - 24), version, sub_f, brand)
+    y += title_f.size + 10
+    _dark_text((pad, y), "每次抽到一位老婆，都值得一张专属立绘", sub_f, sub)
+    y += sub_f.size + 30
+
+    # 指令卡（白底圆角 + 粉描边）
+    cmds = [
+        ("/今日老婆", "抽取今天的角色，别名 /老婆 · /jrlp"),
+        ("/换老婆", "重新抽一位，受「每日换老婆次数」限制"),
+        ("/老婆帮助", "查看本帮助（别名 /waifu帮助）"),
+    ]
+    card_h = len(cmds) * 62 + 26
+    ld.rounded_rectangle((pad - 8, y, W - pad + 8, y + card_h), radius=16,
+                         fill=(255, 255, 255, 235), outline=(214, 51, 132, 90), width=1)
+    cy = y + 16
+    for cmd, desc in cmds:
+        ld.rounded_rectangle((pad + 6, cy + 4, pad + 6 + cmd_f.getlength(cmd) + 26, cy + 4 + cmd_f.size + 14),
+                             radius=12, fill=(214, 51, 132, 26))
+        _dark_text((pad + 19, cy + 4), cmd, cmd_f, brand)
+        _dark_text((pad + 30 + cmd_f.getlength(cmd) + 26, cy + 12), desc, body_s, sub)
+        cy += 62
+    y += card_h + 34
+
+    # 玩法区
+    _dark_text((pad, y), "玩法", head_f, ink)
+    ld.rounded_rectangle((pad, y + head_f.size + 6, pad + 56, y + head_f.size + 10),
+                         radius=2, fill=(*brand, 215))
+    y += head_f.size + 26
+    tips = [
+        "一人一天一位：同一角色同一天人人同款，次日换新",
+        "立绘库沉淀：抽到过的角色会积累立绘，满配额后秒出图",
+        "卡图印象语与档位徽章随角色变化，换老婆解锁不同画法",
+        "主题立绘：工坊可为角色按泳装 / 和风 / 职场等主题补立绘",
+        "立绘不足时后台批量补图队列会自动生成（管理员配置）",
+    ]
+    for tip in tips:
+        dot_y = y + body_s.size // 2
+        ld.ellipse((pad + 2, dot_y - 4, pad + 10, dot_y + 4), fill=(*brand, 220))
+        # 逐行折行（像素宽）
+        lines = _wrap(tip, body_f, W - pad * 2 - 24, max_lines=2)
+        for ln in lines:
+            _dark_text((pad + 22, y), ln, body_f, ink, alpha=225)
+            y += body_f.size + 8
+        y += 12
+    y += 8
+
+    # 尾注：分隔线 + 管理提示
+    ld.rounded_rectangle((pad, y, pad + 76, y + 3), radius=2, fill=(*brand, 150))
+    y += 26
+    _dark_text((pad, y), "角色库 / 试画 / 立绘维护 / 批量补图等管理功能", body_s, sub)
+    y += body_s.size + 6
+    _dark_text((pad, y), "在 AstrBot 后台的插件页（WebUI 工坊）里，仅管理员可见", body_s, sub)
+
+    img.alpha_composite(layer)
+    # 内容驱动高度：按实际内容底部裁掉多余空白（布局常数变化时自动适配）
+    img = img.crop((0, 0, W, min(H, y + 56)))
+    out = Image.new("RGB", img.size, (255, 255, 255))
+    out.paste(img.convert("RGB"), (0, 0))
+    out.save(out_path, "PNG")
+    return str(out_path)
