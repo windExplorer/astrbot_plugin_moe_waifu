@@ -393,6 +393,10 @@
                     <span style="font-size: 13px;">主题：</span>
                     <n-select v-model:value="tryTheme" :options="themeOpts" size="small"
                               style="width: 190px;" @update:value="onThemeChange"></n-select>
+                    <n-input v-model:value="tryOutfit" size="small" clearable
+                             placeholder="穿搭（可选，留空 = 随机，如：白色婚纱、女仆装）"
+                             style="width: 260px;"
+                             @change="generatePromptPreview()"></n-input>
                     <n-input v-model:value="tryCustom" size="small" clearable
                              placeholder="自定义附加要求（可选，如：红色蝴蝶结，手持小猫）"
                              style="width: 320px;"></n-input>
@@ -714,6 +718,10 @@
           <n-select v-model:value="galTheme" :options="themeOpts" size="small"
                     style="width: 160px;"
                     @update:value="galAttempt = 0; genPromptPreview()"></n-select>
+          <n-input v-model:value="galOutfit" size="small" clearable
+                   placeholder="穿搭（可选，留空 = 随机）"
+                   style="width: 200px;"
+                   @change="genPromptPreview()"></n-input>
           <n-input v-model:value="galCustom" size="small" clearable
                    placeholder="自定义附加要求（可选，如：红色蝴蝶结）"
                    style="width: 280px;"></n-input>
@@ -1871,6 +1879,7 @@
       // ---- 三步流 + 提示词预览（v0.5.9） ----
       var tryStep = Vue.ref(1);
       var tryTheme = Vue.ref("random");
+      var tryOutfit = Vue.ref("");
       var tryCustom = Vue.ref("");
       var tryAttempt = Vue.ref(0);
       var tryDims = Vue.ref([]);
@@ -1899,6 +1908,7 @@
           var res = await apiPost("prompt/preview", {
             id: tryCharId.value,
             theme: tryTheme.value,
+            outfit: tryOutfit.value,
             custom: tryCustom.value,
             attempt: tryAttempt.value,
             override: overrideOf()
@@ -2293,6 +2303,7 @@
       // 主题 + 提示词（v0.6.2）：与试画台同款主题库/预览管线；
       // 确认后的提示词经 jobs/start 的 prompt 字段直通出图
       var galTheme = Vue.ref("random");
+      var galOutfit = Vue.ref("");
       var galCustom = Vue.ref("");
       var galAttempt = Vue.ref(0);
       var galPrompt = Vue.ref("");
@@ -2316,7 +2327,8 @@
         galPromptLoading.value = true;
         try {
           var res = await apiPost("prompt/preview", {
-            id: galCharId.value, theme: galTheme.value, custom: galCustom.value,
+            id: galCharId.value, theme: galTheme.value, outfit: galOutfit.value,
+            custom: galCustom.value,
             attempt: galAttempt.value, override: galPreviewOverride()
           });
           galDims.value = (res && res.dims) || [];
@@ -2621,6 +2633,7 @@
         doTry: doTry, doMarkVerified: doMarkVerified, doArchive: doArchive,
         tryMode: tryMode, tryOverride: tryOverride, tryElapsed: tryElapsed,
         tryStep: tryStep, tryTheme: tryTheme, themeOpts: themeOpts,
+        tryOutfit: tryOutfit,
         tryCustom: tryCustom, tryDims: tryDims, tryBodyZh: tryBodyZh,
         tryPrompt: tryPrompt, tryPromptSource: tryPromptSource,
         tryPromptLoading: tryPromptLoading, tryStyle: tryStyle,
@@ -2651,7 +2664,7 @@
         galWfAny: galWfAny, wfAllOpts: wfAllOpts,
         genSources: genSources, selectGenSource: selectGenSource,
         useAsSource: useAsSource, doDetailGenerate: doDetailGenerate,
-        galTheme: galTheme, galCustom: galCustom, galAttempt: galAttempt,
+        galTheme: galTheme, galOutfit: galOutfit, galCustom: galCustom, galAttempt: galAttempt,
         galPrompt: galPrompt, galPromptSource: galPromptSource,
         galDims: galDims, galPromptLoading: galPromptLoading,
         galPromptOpen: galPromptOpen, galPromptConfirmed: galPromptConfirmed,

@@ -129,24 +129,38 @@ check("主题不影响其它维度", p_th["pose"] == p_rand["pose"]
 check("主题决定论", prompt_gen.pick_variations(12345, sw) == p_th)
 check("随机模式与主题版不同（子集过滤生效）", p_th["outfit"] != p_rand["outfit"])
 
-# ---------- 立绘模板主题 + 全身姿势池（v0.7.0） ----------
+# ---------- 立绘模板主题 + 全身姿势池（v0.7.0；v0.7.4 起模板恢复随机穿搭） ----------
 tpl3 = prompt_gen.get_theme("tpl_3view")
 tpl4 = prompt_gen.get_theme("tpl_4view")
 tpl_s = prompt_gen.get_theme("tpl_standing")
 check("三套立绘模板主题存在", tpl3 is not None and tpl4 is not None and tpl_s is not None)
+check("模板主题已不再置空服装", all("outfit" not in (t.get("plain_dims") or [])
+                                  for t in prompt_gen.THEMES))
+pool_zh = {str(it.get("zh") or "") for it in prompt_gen.OUTFITS}
 for seed in (1, 42, 777, 99999):
     p3 = prompt_gen.pick_variations(seed, tpl3)
     check(f"三视图模板强制三视图(seed={seed})", "三视图" in p3["compose"]["zh"])
     check(f"三视图模板强制标准站姿(seed={seed})", "标准站姿" in p3["pose"]["zh"])
     check(f"三视图模板强制微笑(seed={seed})", "微笑" in p3["expression"]["zh"])
-    check(f"三视图模板置空服装(seed={seed})", p3["outfit"]["zh"] == "")
+    check(f"三视图模板随机穿搭在池内(seed={seed})", p3["outfit"]["zh"] in pool_zh)
     check(f"三视图模板强制纯色背景(seed={seed})", "纯" in p3["background"]["zh"])
 p4 = prompt_gen.pick_variations(42, tpl4)
 check("四视图模板强制四视图", "四视图" in p4["compose"]["zh"])
-check("四视图模板置空服装", p4["outfit"]["zh"] == "")
+check("四视图模板随机穿搭在池内", p4["outfit"]["zh"] in pool_zh)
 ps = prompt_gen.pick_variations(42, tpl_s)
 check("站姿模板强制正常站姿构图", "正常站姿" in ps["compose"]["zh"])
-check("站姿模板置空服装", ps["outfit"]["zh"] == "")
+check("站姿模板随机穿搭在池内", ps["outfit"]["zh"] in pool_zh)
+# 指定穿搭（outfit_override，v0.7.4）
+p_fix = prompt_gen.pick_variations(42, tpl3, "白色婚纱")
+check("指定穿搭覆盖随机", p_fix["outfit"]["zh"] == "白色婚纱")
+check("指定穿搭不动其它维度", p_fix["compose"] == prompt_gen.pick_variations(42, tpl3)["compose"])
+p_fix2 = prompt_gen.pick_variations(42, None, "  机械义体装甲  ")
+check("任意文本可指定", p_fix2["outfit"]["zh"] == "机械义体装甲"
+      and p_fix2["outfit"]["en"] == "机械义体装甲")
+check("空串不干预", prompt_gen.pick_variations(42, None, "")["outfit"]
+      == prompt_gen.pick_variations(42)["outfit"])
+inst_fix = prompt_gen.build_local_instruction(ENTRY, p_fix)
+check("指定穿搭进编辑指令", "把角色的服装换成白色婚纱" in inst_fix)
 # 全身姿势池：zh 必须写腿/脚动作（否则 img2img 编辑指令带不动下半身）
 leg_kws = ("腿", "脚", "躺", "坐", "蹲", "跳", "走", "趴", "站立")
 leg_n = sum(1 for p in prompt_gen.POSES if any(k in p["zh"] for k in leg_kws))

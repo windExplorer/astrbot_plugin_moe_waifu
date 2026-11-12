@@ -150,19 +150,20 @@ DIMS = {
 # （支持 outfit / background / pose / compose 四个维度，缺省 = 不约束该维度）；
 # 筛不出子集（池里没这个词）就退回全池随机。custom 由用户在预览面板自填。
 # tpl_ 前缀 = 「立绘模板」：按 character sheet 行业惯例强制构图 + 标准站姿 +
-# 平静表情（微笑上限）+ 纯色背景，且 plain_dims 置空 outfit——模板用角色原始
-# 服装（entry tags 自带），不注入变装；给图生图当稳定底稿用。
+# 平静表情（微笑上限）+ 纯色背景。服装不置空、按种子从 OUTFITS 池随机
+# （v0.7.2 曾置空回归原始服装，用户反馈模板也要能换装——v0.7.4 起随机 +
+# 可在预览面板指定任意穿搭，见 pick_variations 的 outfit_override）。
 THEMES = (
     {"id": "random", "label": "随机（按种子变化）", "outfit_kw": [], "bg_kw": []},
     {"id": "tpl_standing", "label": "【模板】纯色背景 · 正常站姿",
      "outfit_kw": [], "bg_kw": ["纯"], "pose_kw": ["标准站姿"],
-     "expression_kw": ["微笑"], "compose_kw": ["正常站姿"], "plain_dims": ["outfit"]},
+     "expression_kw": ["微笑"], "compose_kw": ["正常站姿"]},
     {"id": "tpl_3view", "label": "【模板】三视图（正/侧/背）",
      "outfit_kw": [], "bg_kw": ["纯"], "pose_kw": ["标准站姿"],
-     "expression_kw": ["微笑"], "compose_kw": ["三视图"], "plain_dims": ["outfit"]},
+     "expression_kw": ["微笑"], "compose_kw": ["三视图"]},
     {"id": "tpl_4view", "label": "【模板】四视图（多角度同框）",
      "outfit_kw": [], "bg_kw": ["纯"], "pose_kw": ["标准站姿"],
-     "expression_kw": ["微笑"], "compose_kw": ["四视图"], "plain_dims": ["outfit"]},
+     "expression_kw": ["微笑"], "compose_kw": ["四视图"]},
     {"id": "swimsuit", "label": "泳装 · 夏日", "outfit_kw": ["泳装"], "bg_kw": ["海边"]},
     {"id": "campus", "label": "校园 · JK", "outfit_kw": ["水手服", "运动外套"], "bg_kw": ["教室", "樱花"]},
     {"id": "wedding", "label": "婚纱 · 典礼", "outfit_kw": ["婚纱"], "bg_kw": ["纯白", "浅粉"]},
@@ -188,8 +189,8 @@ def apply_theme(picks: dict, seed_int: int, theme: dict | None) -> dict:
     支持 outfit / background / pose / compose / expression 五维（v0.7.0 起
     pose/compose，v0.7.2 起 expression）；⚠️ background 的主题键是历史沿革的
     bg_kw（不是 background_kw），别写错。
-    plain_dims：列出的维度直接置空（zh/en 均空 = 提示词不提及）——立绘模板用它
-    关掉 outfit 变装、回归角色原始服装。
+    plain_dims：列出的维度直接置空（zh/en 均空 = 提示词不提及）——机制保留
+    （v0.7.2 曾用它关掉模板变装，v0.7.4 起模板恢复随机穿搭，当前无主题使用）。
     纯函数：同 (seed, theme) 恒定；子集为空时不动（回全池结果）。
     """
     if not theme:
@@ -231,14 +232,23 @@ def _weighted_pick(items: list, r: int) -> dict:
     return items[-1]
 
 
-def pick_variations(seed_int: int, theme: dict | None = None) -> dict:
+def pick_variations(seed_int: int, theme: dict | None = None,
+                    outfit_override: str = "") -> dict:
     """按种子从各维度池确定性挑选（纯函数，可测）。返回 {维度: 条目}。
 
     theme 传入主题预设时，outfit / background 在主题子集内重摇。
+    outfit_override 非空 = 用户指定穿搭（预览面板「穿搭」输入框）：
+    整体覆盖 outfit 维度（zh/en 同文——任意自定义服装没有池内英文对照，
+    LLM 通道与文生图 caption 都能吃中文，danbooru tag 串为次优兜底）。
+    空串 = 不干预（主题子集重摇或全池随机）。
     """
     picks = {tag: _weighted_pick(items, _sub(seed_int, tag, 2 ** 30))
              for tag, items in DIMS.items()}
-    return apply_theme(picks, seed_int, theme)
+    picks = apply_theme(picks, seed_int, theme)
+    text = str(outfit_override or "").strip().strip("。，,")[:80]
+    if text:
+        picks["outfit"] = {"w": 0, "zh": text, "en": text}
+    return picks
 
 
 def variation_zh_list(picks: dict) -> list:
@@ -516,7 +526,7 @@ def _t2i_local_of(style: str, entry: dict, picks: dict, custom: str = "") -> tup
 
 async def build_generation_prompt(context, cfg: dict, entry: dict,
                                   seed_int: int, theme_id: str = "",
-                                  custom: str = "") -> tuple:
+                                  custom: str = "", outfit: str = "") -> tuple:
     """产出生图提示词。返回 (prompt, source)；source ∈ llm / local / static。
 
     绝不抛异常——LLM 链路任何失败都回落本地模板（提示词不是阻塞出卡的理由）。
@@ -525,6 +535,7 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
     长描述（风格探测失败一律回落 danbooru tag 拼装）。
     theme_id：主题预设（试画台预览用；random/空 = 纯种子随机）。
     custom：用户自填的附加要求（融入指令/描述）。
+    outfit：用户指定穿搭（预览面板「穿搭」框，空 = 按种子/主题随机）。
     """
     theme = get_theme(theme_id)
     try:
@@ -532,7 +543,7 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
         if stype != "img2img":
             if not bool(cfg.get("variations_enabled", True)):
                 return build_prompt_tags(entry), "static"
-            picks = pick_variations(seed_int, theme)
+            picks = pick_variations(seed_int, theme, outfit)
             style = detect_t2i_style(context, cfg.get("draw_workflow", ""))
             if not bool(cfg.get("prompt_llm_enabled", True)) or style == "danbooru":
                 return _t2i_local_of(style, entry, picks, custom)
@@ -565,7 +576,7 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
             return _t2i_local_of(style, entry, picks, custom)
         if not bool(cfg.get("variations_enabled", True)):
             return build_prompt_tags(entry), "static"
-        picks = pick_variations(seed_int, theme)
+        picks = pick_variations(seed_int, theme, outfit)
         if not bool(cfg.get("prompt_llm_enabled", True)):
             return build_local_instruction(entry, picks, custom), "local"
         provider = await _resolve_provider(context, cfg.get("prompt_llm_provider", ""))
@@ -597,7 +608,8 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
         try:
             if str(entry.get("strategy_type") or "base") == "img2img":
                 return (build_local_instruction(
-                    entry, pick_variations(seed_int, theme), custom), "local")
+                    entry, pick_variations(seed_int, theme, outfit), custom),
+                    "local")
             return build_prompt_tags(entry), "static"
         except Exception:
             return "1girl, solo, best quality, looking at viewer", "static"

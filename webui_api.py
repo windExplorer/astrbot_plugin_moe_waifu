@@ -910,6 +910,7 @@ async def h_prompt_preview(plugin) -> dict:
         entry = draw.effective_entry(entry, override)
     theme_id = str(body.get("theme") or "random").strip()
     custom = str(body.get("custom") or "").strip()[:300]
+    outfit = str(body.get("outfit") or "").strip().strip("。，,")[:80]
     try:
         attempt = max(0, int(body.get("attempt") or 0))
     except (TypeError, ValueError):
@@ -922,9 +923,10 @@ async def h_prompt_preview(plugin) -> dict:
         seed_int = (seed_int + attempt * 7919) % (2 ** 31)
     cfg = plugin._draw_cfg()
     prompt_text, source = await prompt_gen.build_generation_prompt(
-        plugin.context, cfg, entry, seed_int, theme_id, custom
+        plugin.context, cfg, entry, seed_int, theme_id, custom, outfit
     )
-    picks = prompt_gen.pick_variations(seed_int, prompt_gen.get_theme(theme_id))
+    picks = prompt_gen.pick_variations(seed_int, prompt_gen.get_theme(theme_id),
+                                       outfit)
     dims = [{"label": label, "zh": zh}
             for label, zh in prompt_gen.variation_zh_list(picks)]
     body_zh = str((picks.get("body") or {}).get("zh") or "").strip()
