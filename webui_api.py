@@ -1447,6 +1447,209 @@ async def h_prompt_pools(plugin) -> dict:
     return ok({"pools": prompt_gen.dim_pool_options()})
 
 
+# ---------- 作品发现（v0.18.0）：作品名 → websearch(可选增强) + LLM → 角色草稿 → 勾选入库 ----------
+
+_DISCOVER_SYSTEM = (
+    "你为「萌萌今日老婆」插件的角色库草稿补充角色。只输出一个 JSON 数组——不要 "
+    "markdown 围栏、不要解释、不要多余文本。每项字段：name（角色中文常用译名）、"
+    "series（作品名）、category（anime / gal / game / other 之一）、tier（S/A/B/C，"
+    "人气越高越高档，宁低勿高）、tags_en（英文 danbooru 风格画图 tags，逗号分隔，"
+    "必须包含发色、瞳色、发型、显著服饰或特征）、color（贴合角色形象的 #RRGGBB "
+    "主题色）。只收录女性角色（本插件抽卡对象为女角色）；5~12 位；拿不准的角色"
+    "宁缺勿编。"
+)
+
+
+def _extract_json_array(text: str) -> list:
+    """从 LLM 输出里抠第一个平衡的 JSON 数组（容错围栏/前后废话/转义引号）。"""
+    s = str(text or "")
+    start = s.find("[")
+    if start < 0:
+        return []
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(s)):
+        ch = s[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                import json as _json
+                try:
+                    arr = _json.loads(s[start:i + 1])
+                    return arr if isinstance(arr, list) else []
+                except Exception:
+                    return []
+    return []
+
+
+def _ws_run_context(plugin):
+    """给内部 websearch 工具的 call(context) 造最小 ContextWrapper 桩。
+
+    TavilyWebSearchTool.call 等只经 _get_runtime(context) 读
+    context.context.event.unified_msg_origin 与 context.context.context.get_config(umo)
+    （拿 provider_settings 里的 API key），三个属性齐即可。
+    """
+    import types as _types
+    try:
+        cfg = plugin.context.get_config()
+    except Exception:
+        cfg = {}
+    event = _types.SimpleNamespace(unified_msg_origin="webui")
+    inner = _types.SimpleNamespace(get_config=lambda umo=None: cfg)
+    agent_ctx = _types.SimpleNamespace(event=event, context=inner)
+    return _types.SimpleNamespace(context=agent_ctx)
+
+
+async def _discover_search_text(plugin, series: str) -> str:
+    """内部 websearch 工具链（按常用顺序探测第一个可用且配置了 key 的）。
+
+    失败/未配置/超时一律返回空串（降级 LLM-only，作品发现不因此不可用）。
+    """
+    names = ("web_search_tavily", "web_search_bocha", "web_search_brave",
+             "web_search_baidu", "web_search_exa", "web_search_anysearch",
+             "web_search_serpapi", "web_search_deepseek")
+    try:
+        manager = plugin.context.get_llm_tool_manager()
+        if manager is None:
+            return ""
+        run_ctx = _ws_run_context(plugin)
+        for name in names:
+            try:
+                tool = manager.get_tool(name)
+            except Exception:
+                tool = None
+            if tool is None or not bool(getattr(tool, "active", True)):
+                continue
+            try:
+                res = await asyncio.wait_for(
+                    tool.call(run_ctx, query=series + " 角色 成员 列表 资料",
+                              max_results=10),
+                    timeout=25)
+            except Exception:
+                continue
+            text = res if isinstance(res, str) else str(res)
+            if text and not text.startswith("Error"):
+                return text[:6000]
+    except Exception:
+        logger.warning("[" + PLUGIN_NAME + "] 作品发现 websearch 不可用，降级 LLM-only",
+                       exc_info=True)
+    return ""
+
+
+async def _discover_llm_draft(plugin, series: str, search_text: str) -> list:
+    """LLM 生成角色草稿（复用提示词 LLM 通道）；失败返回空表。"""
+    try:
+        cfg = plugin._draw_cfg()
+        provider = await prompt_gen._resolve_provider(
+            plugin.context, cfg.get("prompt_llm_provider", ""))
+        if provider is None:
+            return []
+        timeout = int(cfg.get("prompt_llm_timeout", 30) or 30)
+        if timeout <= 0:
+            timeout = 30
+        segs = ["作品：" + series + "。请给出该作品中适合抽取的女性角色草稿。"]
+        if search_text:
+            segs.append("网络检索摘要（仅供参考，可能截断或失效）：\n" + search_text)
+        resp = await asyncio.wait_for(
+            provider.text_chat(prompt="\n".join(segs), session_id=None,
+                               system_prompt=_DISCOVER_SYSTEM),
+            timeout=timeout + 30)
+        arr = _extract_json_array(getattr(resp, "completion_text", "") or "")
+        out = []
+        for it in arr if isinstance(arr, list) else []:
+            if not isinstance(it, dict):
+                continue
+            name = str(it.get("name") or "").strip()
+            tags = str(it.get("tags_en") or "").strip()
+            if not name or not tags:
+                continue
+            out.append({
+                "id": "disc_" + str(abs(hash((series, name))) % 10 ** 8),
+                "name": name[:40],
+                "series": str(it.get("series") or series).strip()[:60],
+                "category": str(it.get("category") or "anime").strip().lower(),
+                "tier": str(it.get("tier") or "C").strip().upper()[:2],
+                "tags_en": tags[:300],
+                "color": str(it.get("color") or "#E8B4C8").strip()[:9],
+            })
+        return out[:12]
+    except Exception:
+        logger.warning("[" + PLUGIN_NAME + "] 作品发现 LLM 草稿失败", exc_info=True)
+        return []
+
+
+async def h_works_discover(plugin) -> dict:
+    """作品发现：作品名 → 角色草稿（不入库）。source 标注 llm / websearch+llm。"""
+    body = await _body()
+    series = str(body.get("series") or "").strip()[:60]
+    if not series:
+        return err("请输入作品名")
+    search_text = await _discover_search_text(plugin, series)
+    candidates = await _discover_llm_draft(plugin, series, search_text)
+    if not candidates:
+        return err("没有生成候选：检查对话模型是否可用，或换一个作品名")
+    return ok({"series": series, "candidates": candidates,
+               "source": "websearch+llm" if search_text else "llm"})
+
+
+def _discover_add_core(plugin, pack_name: str, rows: list) -> dict:
+    """勾选草稿批量入库（同步 core，脱离 quart 可直测）。"""
+    loaded = _load_pack_file(plugin, pack_name)
+    if loaded is None:
+        return {"error": "卷不存在：" + pack_name}
+    path, data = loaded
+    entries = data.get("entries") if isinstance(data.get("entries"), list) else []
+    existing_ids = set()
+    for pack in pool.load_packs(_pools_dir(plugin), logger):
+        for raw in pack["entries"]:
+            other = pool.normalize_entry(raw, pack["pack"])
+            if other:
+                existing_ids.add(other["id"])
+    added, dup = 0, 0
+    for row in rows[:12]:
+        if not isinstance(row, dict):
+            continue
+        normalized = pool.normalize_entry(row, pack_name)
+        if normalized is None:
+            continue
+        if normalized["id"] in existing_ids:
+            dup += 1
+            continue
+        entries.append(normalized)
+        existing_ids.add(normalized["id"])
+        added += 1
+    if added:
+        data["entries"] = entries
+        _json_save(path, data)
+    return {"added": added, "dup": dup}
+
+
+async def h_works_discover_add(plugin) -> dict:
+    """勾选的草稿批量入库（unverified，入库后去试画验证）。"""
+    body = await _body()
+    pack_name = str(body.get("pack") or "").strip()
+    rows = body.get("entries")
+    if not pack_name or not isinstance(rows, list) or not rows:
+        return err("缺少 pack 或 entries")
+    result = _discover_add_core(plugin, pack_name, rows)
+    if "error" in result:
+        return err(result["error"])
+    return ok(result)
+
+
 # ---------- 批量补图队列（v0.16.0） ----------
 # 前提（用户口径）：① 角色有可用图生图源（strategy.ref / gen_refs 文件真实存在，
 # 「不存在则跳过」；batch_require_ref=false 可关）② 立绘数不足配额（缺几张补几张）。
@@ -2533,6 +2736,8 @@ def register(plugin) -> None:
         ("/themes", h_themes, ["GET"]),
         ("/prompt/preview", h_prompt_preview, ["POST"]),
         ("/prompt/pools", h_prompt_pools, ["GET"]),
+        ("/works/discover", h_works_discover, ["POST"]),
+        ("/works/discover_add", h_works_discover_add, ["POST"]),
         ("/batch/preview", h_batch_preview, ["POST"]),
         ("/batch/start", h_batch_start, ["POST"]),
         ("/batch/status", h_batch_status, ["GET", "POST"]),

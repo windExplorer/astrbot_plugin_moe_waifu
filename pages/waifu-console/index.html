@@ -469,6 +469,8 @@
                 <n-select v-model:value="workSort" :options="workSortOpts"
                           size="small" style="width: 160px;"></n-select>
                 <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
+                <!-- v0.18.0：作品发现（作品名 → websearch+LLM 草稿 → 勾选入库 unverified） -->
+                <n-button size="small" type="primary" secondary @click="openDiscover">＋ 作品发现</n-button>
                 <span class="bind-tip" style="margin-top: 0;">
                   {{ filteredWorks.length }} / {{ works.length }} 个作品
                 </span>
@@ -1994,6 +1996,54 @@
           <n-button size="small" :disabled="!batchRunning" @click="doBatchStop">停止</n-button>
           <span class="bind-tip" style="margin-top: 0;" v-if="batchRunning">
             队列在后端继续运行，可安全离开本页面
+          </span>
+        </div>
+      </div>
+    </n-modal>
+
+    <!-- ============ 作品发现弹窗（v0.18.0）：作品名 → websearch(可选)+LLM 草稿 →
+         勾选入库（unverified，入库后去试画验证）。⚠️ modal slot 纪律：
+         纯 div 布局 + 纯字段插值 + span v-if（见批量补图弹窗处的注释）。 ============ -->
+    <n-modal v-model:show="discOpen" preset="dialog" title="作品发现"
+             style="width: 640px;">
+      <div class="stack-v">
+        <div class="bind-tip" style="margin-top: 0;">
+          输入作品名，由对话模型（可选叠加网络检索）起草该作品的女性角色清单；
+          勾选后以<b>未验证</b>状态入库——tags 是 AI 草稿，<b>请先去试画台验证画得像不像</b>再启用抽卡。
+        </div>
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+          <n-input v-model:value="discSeries" size="small" clearable
+                   placeholder="作品名（如：原神 / 千恋万花）"
+                   style="width: 220px;"></n-input>
+          <span class="bind-tip" style="margin-top: 0;">入卷</span>
+          <n-select v-model:value="discPack" :options="packOpts" size="small"
+                    style="width: 150px;"></n-select>
+          <n-button size="small" type="primary" :loading="discLoading"
+                    :disabled="!discSeries" @click="doDiscover">开始发现</n-button>
+        </div>
+        <div class="bind-tip" style="margin-top: 0;" v-if="discSource">
+          生成来源：{{ discSource }} · 勾选后点底部入库
+        </div>
+        <div v-if="discError" class="bind-tip" style="color: #d63384; opacity: 1;">
+          {{ discError }}
+        </div>
+        <div v-if="discCandidates.length > 0"
+             style="max-height: 260px; overflow-y: auto; border: 1px solid rgba(128,128,128,.2);
+                    border-radius: 8px; padding: 6px 10px;">
+          <div v-for="c in discCandidates" :key="c.id" class="batch-row">
+            <n-checkbox v-model:checked="c.pick" size="small"></n-checkbox>
+            <b class="entry-name">{{ c.name }}</b>
+            <span class="bind-tip" style="margin-top: 0;">
+              {{ c.tier }} · {{ c.series }} · tags：{{ c.tags_en }}
+            </span>
+          </div>
+        </div>
+        <div style="display: flex; gap: 10px; align-items: center; margin-top: 6px;">
+          <n-button size="small" type="primary" :loading="discAdding"
+                    :disabled="discCandidates.length === 0 || !discPack"
+                    @click="doDiscoverAdd">入库所选（未验证）</n-button>
+          <span class="bind-tip" style="margin-top: 0;" v-if="discAdded">
+            已入库 {{ discAdded }} 个{{ discDup ? "（跳过重复 " + discDup + " 个）" : "" }}，去试画台验证
           </span>
         </div>
       </div>
@@ -3926,6 +3976,62 @@
       Vue.watch(batchOpen, function (open) {
         if (!open && batchTimer) { clearTimeout(batchTimer); batchTimer = null; }
       });
+      // ---- 作品发现（v0.18.0）：作品名 → LLM(+websearch) 草稿 → 勾选入库 unverified ----
+      var discOpen = Vue.ref(false);
+      var discSeries = Vue.ref("");
+      var discPack = Vue.ref("");
+      var discLoading = Vue.ref(false);
+      var discAdding = Vue.ref(false);
+      var discCandidates = Vue.ref([]);
+      var discSource = Vue.ref("");
+      var discError = Vue.ref("");
+      var discAdded = Vue.ref(0);
+      var discDup = Vue.ref(0);
+      function openDiscover() {
+        discOpen.value = true;
+        if (!discPack.value && (packOpts.value || []).length) {
+          discPack.value = packOpts.value[0].value;
+        }
+      }
+      async function doDiscover() {
+        var series = String(discSeries.value || "").trim();
+        if (!series) return;
+        discLoading.value = true;
+        discError.value = "";
+        discCandidates.value = [];
+        discSource.value = "";
+        discAdded.value = 0;
+        try {
+          var res = await apiPost("works/discover", { series: series });
+          discCandidates.value = ((res && res.candidates) || []).map(function (c) {
+            return Object.assign({}, c, { pick: false });
+          });
+          discSource.value = (res && res.source) || "";
+          if (!discCandidates.value.length) {
+            discError.value = "没有生成候选，换个作品名或检查对话模型";
+          }
+        } catch (e) { /* apiPost 已提示 */ } finally {
+          discLoading.value = false;
+        }
+      }
+      async function doDiscoverAdd() {
+        var picked = discCandidates.value.filter(function (c) { return c.pick; });
+        if (!picked.length) { message.error("先勾选要入库的角色"); return; }
+        discAdding.value = true;
+        try {
+          var res = await apiPost("works/discover_add",
+              { pack: discPack.value, entries: picked });
+          discAdded.value = (res && res.added) || 0;
+          discDup.value = (res && res.dup) || 0;
+          if (discAdded.value > 0) {
+            message.success("已入库 " + discAdded.value + " 个未验证角色");
+            discCandidates.value = discCandidates.value.filter(function (c) { return !c.pick; });
+            fetchPools();
+          }
+        } catch (e) { /* apiPost 已提示 */ } finally {
+          discAdding.value = false;
+        }
+      }
       // v0.14.0 维度级控制：单独重摇(attempts) / 锁定(fixed) / 移除(disabled) /
       // 启用(enabled)，随 preview 请求发往 prompt_gen.apply_dim_state
       var galDimAttempts = Vue.ref({});
@@ -5339,6 +5445,13 @@
         batchCharOpts: batchCharOpts, openBatchModal: openBatchModal,
         doBatchPreview: doBatchPreview, doBatchStart: doBatchStart,
         doBatchStop: doBatchStop,
+        // v0.18.0：作品发现
+        discOpen: discOpen, discSeries: discSeries, discPack: discPack,
+        discLoading: discLoading, discAdding: discAdding,
+        discCandidates: discCandidates, discSource: discSource,
+        discError: discError, discAdded: discAdded, discDup: discDup,
+        openDiscover: openDiscover, doDiscover: doDiscover,
+        doDiscoverAdd: doDiscoverAdd,
         bindText: bindText, parsedBind: parsedBind, bindSaving: bindSaving,
         bindRows: bindRows, bindPackOpts: bindPackOpts, bindRawOpen: bindRawOpen,
         bindLoading: bindLoading, loadBindPools: loadBindPools, onBindRawInput: onBindRawInput,

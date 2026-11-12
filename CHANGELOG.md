@@ -2,6 +2,35 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.18.0 (2026-11-13)
+
+作品发现：输入作品名 → websearch(可选增强) + 对话模型起草角色清单 → 勾选入库（待办清单最后一项主功能）（版本 v0.17.0 -> v0.18.0）。
+
+- **需求（用户）**：完成待办清单剩余项——作品发现（作品名 → 核心 websearch_provider → LLM 草稿 → 人工勾选入库）。
+- **实现（后端）**：
+  - `POST /works/discover {series}`：先探测内部 websearch 工具链（4.29.4 的
+    `astr_agent_runtime` 内置工具 `web_search_tavily/bocha/brave/baidu/exa/
+    anysearch/serpapi/deepseek`，经 `get_llm_tool_manager().get_tool(name)` 取
+    active 的第一个，`tool.call(run_ctx, query=...)` 的 ContextWrapper 用
+    SimpleNamespace 桩——工具内部只经 `_get_runtime` 读 event.unified_msg_origin
+    与 `get_config(umo)` 的 provider_settings）；websearch 未配置/失败/超时一律
+    **降级 LLM-only**（设计文档既定方案，发现功能不依赖它闭环）。随后经
+    `prompt_gen._resolve_provider`（提示词 LLM 通道复用）按 system prompt 产出
+    JSON 数组，`_extract_json_array` 平衡扫描解析（容错围栏/前后废话/转义引号/
+    嵌套数组，独立可测），候选上限 12 位、只收女性角色、tags_en 必填。
+  - `POST /works/discover_add {pack, entries}`：`_discover_add_core`（同步 core，
+    handler 薄、脱离 quart 可直测）逐条 `normalize_entry` + **跨卷 id 查重**
+    + 批量入库 **unverified**——tags 是 AI 草稿，UI 明示「先去试画验证画得像
+    不像，再启用抽卡」（未验证条目本就不参与抽卡）。
+- **实现（前端）**：作品库工具栏「＋ 作品发现」→ 弹窗（dialog 预设，遵守
+  modal slot 纪律：纯 div 布局 / 纯字段插值 / span v-if）：作品名 + 目标卷 →
+  「开始发现」→ 候选列表（勾选 + tier/series/tags 展示）→「入库所选（未验证）」
+  → 结果提示 + 自动刷新角色库。
+- **守卫**：`_extract_json_array`（围栏/转义引号/嵌套数组/无数组）与
+  `_discover_add_core`（入库计数/跨卷查重/unverified 落库/坏条目丢弃/卷不存在）
+  进 `test_records`；`test_webui_contract` 路由表补 `/works/discover(_add)`。
+  websearch 链路依赖真机 API key，真机联调时验证；LLM-only 兜底路径不依赖它。
+
 ## v0.17.0 (2026-11-13)
 
 帮助图：`/老婆帮助` 从纯文本升级为品牌粉竖版说明卡（版本 v0.16.0 -> v0.17.0）。

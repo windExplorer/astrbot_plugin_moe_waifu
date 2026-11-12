@@ -343,6 +343,26 @@ def test_cores(tmp: Path):
     st.close()
 
 
+def test_discover_add_core(tmp: Path):
+    """v0.18.0：作品发现入库 core——草稿 unverified、跨卷查重、坏条目丢弃。"""
+    st, plugin = fresh(tmp)
+    rows = [
+        {"id": "new1", "name": "草稿甲", "series": "新作", "category": "gal",
+         "tier": "A", "tags_en": "black hair, purple eyes, miko", "color": "#B28DCC"},
+        {"id": "a_char", "name": "重复", "series": "新作", "tier": "C", "tags_en": "dup"},
+        {"id": "bad", "name": "缺tags", "series": "新作"},
+    ]
+    r = api._discover_add_core(plugin, "anime", rows)
+    check("草稿入库计数（含跨卷查重）", r == {"added": 1, "dup": 1}, str(r))
+    loaded = api._load_pack_file(plugin, "anime")
+    data = json.loads(loaded[0].read_text(encoding="utf-8"))
+    new_row = [e for e in data["entries"] if e["id"] == "new1"]
+    check("入库条目存在且 unverified", new_row and new_row[0]["verified"] is False)
+    r2 = api._discover_add_core(plugin, "不存在卷", rows)
+    check("卷不存在报错", "error" in r2)
+    st.close()
+
+
 def main():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
@@ -355,6 +375,7 @@ def main():
                      ("stats", test_stats),
                      ("debug_history", test_debug_history),
                      ("portraits_seq_meta", test_portraits_seq_and_meta),
+                     ("discover_add", test_discover_add_core),
                      ("cores", test_cores)):
         with tempfile.TemporaryDirectory() as td:
             print(f"--- {name} ---")
