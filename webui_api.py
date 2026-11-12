@@ -1075,6 +1075,28 @@ async def h_works_set_cover(plugin) -> dict:
     return ok({"series": series, "cover": cover})
 
 
+async def h_works_add_character(plugin) -> dict:
+    """把角色库里的一条角色归入某个作品（改 entry.series）。
+
+    作品库是按 series 聚合的，「添加角色」本质就是改 series；已在别的作品
+    里的角色会被移过来（返回 from 便于前端提示）。
+    """
+    body = await _body()
+    series = str(body.get("series") or "").strip()
+    cid = str(body.get("id") or "").strip()
+    if not series or not cid:
+        return err("缺少 series 或 id")
+    old = {"series": ""}
+
+    def mutate(e, raw):
+        old["series"] = str(raw.get("series") or "")
+        raw["series"] = series
+
+    if _set_entry_field(plugin, cid, mutate) is None:
+        return err(f"角色库里找不到 {cid}")
+    return ok({"id": cid, "series": series, "from": old["series"]})
+
+
 async def h_refs_list(plugin) -> dict:
     """某角色的参考图库：strategy.refs 列表 + 主参考（strategy.ref）。"""
     body = await _body()
@@ -1097,9 +1119,19 @@ async def h_refs_list(plugin) -> dict:
             "path": p, "exists": fp is not None,
             "thumb": _thumb_cached(fp, 420) if fp is not None else None,
         })
+    # draw_ref 存的是归一后的相对路径；立绘卡用绝对路径比较，所以再给一份
+    # 绝对路径（v0.12.0：否则「设为出卡源」的立绘卡片不会高亮）。
+    draw_raw = str(st.get("draw_ref") or "")
+    draw_abs = ""
+    if draw_raw:
+        if re.match(r"^[a-zA-Z]+://", draw_raw):
+            draw_abs = draw_raw
+        else:
+            fp = _safe_data_file(plugin, draw_raw)
+            draw_abs = str(fp) if fp is not None else ""
     return ok({"id": cid, "items": items,
                "designated": str(st.get("ref") or ""),
-               "draw_ref": str(st.get("draw_ref") or "")})
+               "draw_ref": draw_raw, "draw_ref_abs": draw_abs})
 
 
 async def h_refs_set_draw_source(plugin) -> dict:
@@ -2279,6 +2311,7 @@ def register(plugin) -> None:
         ("/refs/unbind", h_refs_unbind, ["POST"]),
         ("/pools/set_cover", h_set_cover, ["POST"]),
         ("/works/set_cover", h_works_set_cover, ["POST"]),
+        ("/works/add_character", h_works_add_character, ["POST"]),
         ("/jobs/start", h_job_start, ["POST"]),
         ("/jobs/status", h_job_status, ["GET", "POST"]),
         ("/jobs/archive", h_job_archive, ["POST"]),

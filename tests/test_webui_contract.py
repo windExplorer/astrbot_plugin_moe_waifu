@@ -47,7 +47,10 @@ charNameOf decisionLabel barPct
 movePortraitToRef moveRefToPortrait doQuickAction
 galOrphans bindOrphan
 ov goMenu refreshing refreshAll
-galDrawRef galDrawOpts setDrawSource galRefsSel
+galDrawRef galDrawRefAbs setDrawSource galRefsSel
+workKeyword workFilterCat workFilterVerified workSort workCatOpts workVerifiedOpts
+workSortOpts filteredWorks workAddOpen workAddSel workAddSaving workAddOpts
+addWorkChars toggleWorkChar
 fmtTime cfgBoundGroups pickSimGroup simScopeText
 """.split()
 
@@ -55,7 +58,7 @@ ROUTES = """
 /records /records/detail /records/events /stats /users /user /filters
 /debug/state /debug/history /debug/simulate /debug/rerender
 /portraits/move_to_ref /refs/move_to_portrait /refs/orphans
-/refs/set_draw_source /overview
+/refs/set_draw_source /overview /works/add_character
 """.split()
 
 STORE_METHODS = """
@@ -152,6 +155,16 @@ def main():
     check("切页签补了 chars/works/try/bind/config 懒刷新",
           all(f'm === "{k}"' in page for k in
               ("chars", "works", "try", "bind", "config")))
+
+    # 10) 交互口径（v0.12.0）：列表最新在前；出卡源用卡片按钮指定（不再用路径下拉）
+    check("立绘/参考图列表默认最新在前",
+          page.count(".slice().reverse()") >= 2)
+    check("出卡源由卡片按钮指定",
+          'setDrawSource(it.abs)' in page and 'setDrawSource(r.path)' in page)
+    check("出卡源不再用路径下拉", "galDrawOpts" not in page)
+    check("作品库有筛选 / 排序 / 添加角色 / 启停",
+          all(k in page for k in ("filteredWorks", "workSort", "addWorkChars",
+                                  "toggleWorkChar")))
 
     if FAILURES:
         print(f"test_webui_contract: {len(FAILURES)} FAILED")

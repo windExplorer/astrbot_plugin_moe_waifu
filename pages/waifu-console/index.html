@@ -74,6 +74,7 @@
     padding: 12px; transition: background .15s ease, border-color .15s ease; }
   .dropzone.drag { background: rgba(214,51,132,.07); border-color: #d63384; }
   .ref-selected { outline: 3px solid #d63384; outline-offset: -1px; }
+  .draw-ref { outline: 3px solid #e0a23c; outline-offset: -1px; }
   .drag-overlay { position: fixed; inset: 0; background: rgba(214,51,132,.10);
     border: 2.5px dashed #d63384; z-index: 9999; display: flex;
     align-items: center; justify-content: center; pointer-events: none; }
@@ -385,8 +386,21 @@
               <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
             </div>
             <div v-if="!currentWork" class="stack">
+              <n-space align="center" :wrap="true">
+                <n-input v-model:value="workKeyword" placeholder="搜作品名 / 角色名 / id"
+                         size="small" clearable style="width: 200px;"></n-input>
+                <n-select v-model:value="workFilterCat" :options="workCatOpts"
+                          size="small" style="width: 130px;"></n-select>
+                <n-select v-model:value="workFilterVerified" :options="workVerifiedOpts"
+                          size="small" style="width: 140px;"></n-select>
+                <n-select v-model:value="workSort" :options="workSortOpts"
+                          size="small" style="width: 160px;"></n-select>
+                <span class="bind-tip" style="margin-top: 0;">
+                  {{ filteredWorks.length }} / {{ works.length }} 个作品
+                </span>
+              </n-space>
               <n-grid :cols="uiCols" :x-gap="12" :y-gap="12">
-                <n-gi v-for="w in works" :key="w.series">
+                <n-gi v-for="w in filteredWorks" :key="w.series">
                   <n-card size="small" :bordered="true" class="work-card" @click="openWork(w)">
                     <div class="work-cover" :style="{ background: 'linear-gradient(135deg,' + w.color + 'cc,' + w.color + '55)' }">
                       <img v-if="w.cover" :src="w.cover" class="work-cover-img">
@@ -401,8 +415,8 @@
                   </n-card>
                 </n-gi>
               </n-grid>
-              <n-empty v-if="!worksLoading && works.length === 0"
-                       description="还没有作品：给角色条目填上「作品名」，就会自动归入作品库"></n-empty>
+              <n-empty v-if="!worksLoading && filteredWorks.length === 0"
+                       :description="works.length ? '没有符合条件的作品，换个筛选试试' : '还没有作品：给角色条目填上「作品名」，就会自动归入作品库'"></n-empty>
             </div>
             <div v-if="currentWork" class="stack">
               <n-space align="center" style="margin-bottom: 12px;" :wrap="true">
@@ -410,6 +424,7 @@
                 <b style="font-size: 16px;">{{ currentWork.series }}</b>
                 <n-tag size="small" :bordered="false">{{ catLabel(currentWork.category) }}</n-tag>
                 <span class="bind-tip">{{ currentWork.total }} 个角色 · {{ currentWork.verified }} 已验证 · {{ currentWork.portrait_count }} 张立绘</span>
+                <n-button size="small" type="primary" secondary @click="workAddOpen = true">添加角色</n-button>
                 <n-button size="small" @click="openWorkCover">设置作品封面</n-button>
               </n-space>
               <n-grid :cols="uiCols" :x-gap="12" :y-gap="12">
@@ -425,13 +440,14 @@
                     <div class="card-title-row">
                       <b>{{ c.name }}</b>
                       <n-tag v-if="c.tier" size="tiny" :bordered="false">{{ c.tier }}</n-tag>
-                      <n-tag size="tiny" :bordered="false" :type="c.verified ? 'success' : 'warning'">
-                        {{ c.verified ? "已验证" : "未验证" }}
-                      </n-tag>
                     </div>
                     <div class="card-ops">
-                      <span class="card-meta" style="margin-top: 0;">{{ c.id }} · 立绘 {{ c.portraits }}</span>
-                      <div style="display: flex; gap: 4px; align-items: center;">
+                      <span class="card-meta" style="margin-top: 0;">
+                        {{ c.id }} · 立绘 {{ c.portraits }} · {{ c.verified ? "启用" : "停用" }}
+                      </span>
+                      <div style="display: flex; gap: 6px; align-items: center;" @click.stop="void 0">
+                        <n-switch size="small" :value="c.verified"
+                                  @update:value="toggleWorkChar(c, $event)"></n-switch>
                         <w-icon-btn icon="wand" mode="soft" type="primary" tip="去试画台"
                                     @click.stop="gotoTry(c)"></w-icon-btn>
                         <w-icon-btn icon="edit" tip="编辑条目"
@@ -441,8 +457,25 @@
                   </n-card>
                 </n-gi>
               </n-grid>
-              <n-empty v-if="currentWork.characters.length === 0" description="该作品暂无角色"></n-empty>
+              <n-empty v-if="currentWork.characters.length === 0"
+                       description="该作品暂无角色，点上方「添加角色」从角色库选"></n-empty>
             </div>
+            <n-modal v-model:show="workAddOpen" preset="card"
+                     :title="'添加角色到「' + (currentWork ? currentWork.series : '') + '」'"
+                     style="width: 560px;">
+              <div class="stack">
+                <div class="bind-tip" style="margin-top: 0;">
+                  从角色库选择要归入本作品的角色（可多选）；已在别的作品里的角色会直接移过来。
+                </div>
+                <n-select v-model:value="workAddSel" :options="workAddOpts" multiple filterable
+                          placeholder="搜索角色名 / id" :max-tag-count="6"></n-select>
+                <n-space justify="end">
+                  <n-button size="small" @click="workAddOpen = false">取消</n-button>
+                  <n-button size="small" type="primary" :loading="workAddSaving"
+                            :disabled="!workAddSel.length" @click="addWorkChars">加入</n-button>
+                </n-space>
+              </div>
+            </n-modal>
           </div>
 
           <!-- ============ 试画台（v0.5.9 三步流：选角色 → 确认提示词 → 生成） ============ -->
@@ -710,7 +743,7 @@
             <!-- 立绘区 -->
             <div>
               <div class="sec-title">立绘
-                <span class="cnt">{{ galItems.length }}/{{ meta.quota }} · 不足配额会按种子自动补生</span>
+                <span class="cnt">{{ galItems.length }}/{{ meta.quota }} · 不足配额会按种子自动补生{{ galDrawRef ? " · 出卡源已指定" : "" }}</span>
               </div>
               <n-grid :cols="uiCols" :x-gap="10" :y-gap="10" v-if="galItems.length > 0">
                 <n-gi v-for="it in galItems" :key="it.file">
@@ -724,8 +757,10 @@
                                   :type="isCover(it) ? 'warning' : 'default'"
                                   :tip="isCover(it) ? '当前封面' : '设为角色封面'"
                                   @click.stop="setPortraitCover(it)"></w-icon-btn>
-                      <w-icon-btn icon="target" size="tiny" type="info" tip="加入/移出本次生成源（可多选）"
-                                  @click.stop="useAsSource(it.abs, '立绘 #' + it.seq)"></w-icon-btn>
+                      <w-icon-btn icon="target" size="tiny"
+                                  :type="galDrawRefAbs === it.abs ? 'warning' : 'info'"
+                                  :tip="galDrawRefAbs === it.abs ? '当前出卡图生图源（再点取消）' : '设为出卡图生图源（/今日老婆 专用）'"
+                                  @click.stop="setDrawSource(it.abs)"></w-icon-btn>
                       <w-icon-btn icon="arrowRight" size="tiny" type="primary"
                                   tip="转移到参考图（从立绘库移走）"
                                   @click.stop="movePortraitToRef(it)"></w-icon-btn>
@@ -734,7 +769,7 @@
                                   :tip="delArm === it.file ? '再点一次确认删除' : '删除立绘'"
                                   @click.stop="doDeletePortrait(it)"></w-icon-btn>
                     </div>
-                    <div class="gal-meta">#{{ it.seq }} · {{ it.date }} · seed {{ it.seed }}{{ isCover(it) ? " · 封面" : "" }}</div>
+                    <div class="gal-meta">#{{ it.seq }} · {{ it.date }} · seed {{ it.seed }}{{ isCover(it) ? " · 封面" : "" }}{{ galDrawRefAbs === it.abs ? " · 出卡源" : "" }}</div>
                   </div>
                 </n-gi>
               </n-grid>
@@ -745,23 +780,18 @@
             <!-- 参考图区 -->
             <div>
               <div class="sec-title">参考图
-                <span class="cnt">{{ galRefs.length }} 张{{ galMainRef ? " · 主参考已指定" : " · 未指定主参考" }} · 与立绘库互斥，可双向转移</span>
+                <span class="cnt">{{ galRefs.length }} 张{{ galMainRef ? " · 主参考已指定" : "" }}{{ galDrawRef ? " · 出卡源已指定" : " · 未指定出卡源（抽卡不会走图生图）" }} · 与立绘库互斥，可双向转移</span>
                 <!-- v0.6.2：上传改弹窗（可拖拽可多选），不再是一颗孤零零的小按钮 -->
                 <n-button size="tiny" type="primary" secondary @click="galUploadOpen = true">上传</n-button>
               </div>
-              <!-- v0.10.0：出卡图生图源与参考图列表是两回事，必须显式指定 -->
-              <div style="margin: 6px 0 10px; padding: 10px 12px; border: 1px solid rgba(128,128,128,.22); border-radius: 10px;">
-                <div style="font-size: 12px; font-weight: 600; margin-bottom: 6px;">出卡图生图源（/今日老婆 专用）</div>
-                <n-select v-model:value="galDrawRef" :options="galDrawOpts" size="small"
-                          clearable placeholder="未指定（抽卡不使用图生图）"
-                          style="max-width: 420px;" @update:value="setDrawSource"></n-select>
-                <div style="font-size: 12px; opacity: .65; margin-top: 6px;">
-                  只有这里指定的一张会用于生成老婆的图生图；上列参考图只是资料库，不会被自动取用。
-                </div>
+              <div class="bind-tip" style="margin-top: 0; margin-bottom: 8px;">
+                卡片右上角的<b>靶心</b>按钮 = 设为「出卡图生图源」（单张，/今日老婆 专用，再点一次取消）；
+                「生成立绘 → 图生图重绘」面板里点图才是「本次生成源」（可多选，供 Qwen 2.1 等多图工作流）。
+                参考图列表只是资料库，没指定出卡源时抽卡不会取用。
               </div>
               <n-grid :cols="6" :x-gap="8" :y-gap="8" v-if="galRefs.length > 0">
                 <n-gi v-for="r in galRefs" :key="r.path">
-                  <div class="gal-item" :class="{ 'ref-selected': galMainRef === r.path }">
+                  <div class="gal-item" :class="{ 'ref-selected': galMainRef === r.path, 'draw-ref': galDrawRef === r.path }">
                     <img v-if="r.thumb" :src="r.thumb" class="clickable-img"
                          title="点击查看大图" alt="参考图"
                          @click.stop="openViewer(r.path, '参考图')">
@@ -771,8 +801,10 @@
                                   :type="galMainRef === r.path ? 'warning' : 'default'"
                                   :tip="galMainRef === r.path ? '当前主参考' : '设为主参考'"
                                   @click.stop="setMainRef(r.path)"></w-icon-btn>
-                      <w-icon-btn icon="target" size="tiny" type="info" tip="加入/移出本次生成源（可多选）"
-                                  @click.stop="useAsSource(r.path, '参考图')"></w-icon-btn>
+                      <w-icon-btn icon="target" size="tiny"
+                                  :type="galDrawRef === r.path ? 'warning' : 'info'"
+                                  :tip="galDrawRef === r.path ? '当前出卡图生图源（再点取消）' : '设为出卡图生图源（/今日老婆 专用）'"
+                                  @click.stop="setDrawSource(r.path)"></w-icon-btn>
                       <w-icon-btn icon="arrowLeft" size="tiny" type="primary" :disabled="!r.exists"
                                   tip="转回立绘（从参考图库移走）"
                                   @click.stop="moveRefToPortrait(r)"></w-icon-btn>
@@ -781,7 +813,9 @@
                                   :tip="delArm === 'galref:' + r.path ? '再点一次确认移除' : '移除绑定'"
                                   @click.stop="unbindGalRef(r)"></w-icon-btn>
                     </div>
-                    <div class="gal-meta">{{ galMainRef === r.path ? "主参考" : "备选" }}</div>
+                    <div class="gal-meta">
+                      {{ galMainRef === r.path ? "主参考" : "备选" }}{{ galDrawRef === r.path ? " · 出卡源" : "" }}
+                    </div>
                   </div>
                 </n-gi>
               </n-grid>
@@ -3233,7 +3267,8 @@
         if (!galCharId.value) { galItems.value = []; return; }
         try {
           var res = await apiGet("portraits/list", { char_id: galCharId.value });
-          galItems.value = (res && res.items) || [];
+          // v0.12.0：后生成的排最前（后端仍按 seq 升序，满库取图的确定性不能动）
+          galItems.value = ((res && res.items) || []).slice().reverse();
         } catch (e) { galItems.value = []; }
       }
 
@@ -3244,39 +3279,37 @@
       function loadGalRefs() {
         if (!galCharId.value) {
           galRefs.value = []; galMainRef.value = ""; galDrawRef.value = "";
-          galOrphans.value = []; return;
+          galDrawRefAbs.value = ""; galOrphans.value = []; return;
         }
         galRefsLoading.value = true;
         apiGet("refs/list", { id: galCharId.value }).then(function (res) {
-          galRefs.value = (res && res.items) || [];
+          // v0.12.0：后上传的排最前（strategy.refs 本身顺序不变，只影响展示）
+          galRefs.value = ((res && res.items) || []).slice().reverse();
           galMainRef.value = (res && res.designated) || "";
           galDrawRef.value = (res && res.draw_ref) || "";
+          galDrawRefAbs.value = (res && res.draw_ref_abs) || "";
         }).catch(function () {
           galRefs.value = []; galMainRef.value = ""; galDrawRef.value = "";
+          galDrawRefAbs.value = "";
         }).finally(function () { galRefsLoading.value = false; });
         loadGalOrphans();
       }
-      // 出卡图生图源（v0.10.0）：独立于参考图列表，不指定就不走图生图
-      var galDrawRef = Vue.ref("");
-      var galDrawOpts = Vue.computed(function () {
-        var seen = {}, opts = [{ label: "未指定（抽卡不使用图生图）", value: "" }];
-        var paths = (galRefs.value || []).map(function (r) { return r.path; });
-        if (galMainRef.value) paths.push(galMainRef.value);
-        if (galDrawRef.value) paths.push(galDrawRef.value);
-        paths.forEach(function (p) {
-          if (!p || seen[p]) return;
-          seen[p] = 1;
-          opts.push({ label: p, value: p });
-        });
-        return opts;
-      });
+      // 出卡图生图源（v0.10.0）：独立于参考图列表，不指定就不走图生图。
+      // v0.12.0：改由卡片上的靶心按钮直接指定/取消（下拉框全是路径，没法用）。
+      var galDrawRef = Vue.ref("");       // 归一后的相对路径（参考图卡比较用）
+      var galDrawRefAbs = Vue.ref("");    // 绝对路径（立绘卡比较用）
       async function setDrawSource(path) {
-        if (!galCharId.value) return;
+        if (!galCharId.value || !path) return;
+        var target = (galDrawRef.value === path || galDrawRefAbs.value === path)
+          ? "" : path;
         try {
           await apiPost("refs/set_draw_source",
-                        { id: galCharId.value, path: path || "" });
-          galDrawRef.value = path || "";
-          message.success(path ? "已指定出卡图生图源" : "已取消指定，抽卡不再使用图生图");
+                        { id: galCharId.value, path: target });
+          galDrawRef.value = target;
+          galDrawRefAbs.value = target;
+          message.success(target
+            ? "已设为出卡图生图源（/今日老婆 的图生图只用这一张）"
+            : "已取消出卡图生图源（抽卡不再走图生图）");
           await refreshAll();
         } catch (e) { /* 已提示 */ }
       }
@@ -4204,6 +4237,97 @@
           worksLoading.value = false;
         }
       }
+      // v0.12.0：作品列表筛选 / 排序（本地过滤，作品数量不大）
+      var workKeyword = Vue.ref("");
+      var workFilterCat = Vue.ref("");
+      var workFilterVerified = Vue.ref("");
+      var workSort = Vue.ref("total");
+      var workCatOpts = Vue.computed(function () {
+        var seen = {}, out = [{ label: "全部分类", value: "" }];
+        (works.value || []).forEach(function (w) {
+          var c = w.category || "other";
+          if (seen[c]) return;
+          seen[c] = 1;
+          out.push({ label: catLabel(c), value: c });
+        });
+        return out;
+      });
+      var workVerifiedOpts = [
+        { label: "全部", value: "" },
+        { label: "含已验证角色", value: "yes" },
+        { label: "全未验证", value: "no" }
+      ];
+      var workSortOpts = [
+        { label: "角色数（多→少）", value: "total" },
+        { label: "立绘数（多→少）", value: "portraits" },
+        { label: "作品名", value: "name" }
+      ];
+      var filteredWorks = Vue.computed(function () {
+        var kw = String(workKeyword.value || "").trim().toLowerCase();
+        var out = (works.value || []).filter(function (w) {
+          if (workFilterCat.value && (w.category || "other") !== workFilterCat.value) return false;
+          if (workFilterVerified.value === "yes" && !w.verified) return false;
+          if (workFilterVerified.value === "no" && w.verified) return false;
+          if (kw) {
+            var hay = [w.series, w.category || "", (w.characters || [])
+              .map(function (c) { return c.name + " " + c.id; }).join(" ")]
+              .join(" ").toLowerCase();
+            if (hay.indexOf(kw) < 0) return false;
+          }
+          return true;
+        });
+        out.sort(function (a, b) {
+          if (workSort.value === "name") {
+            return String(a.series).localeCompare(String(b.series), "zh");
+          }
+          if (workSort.value === "portraits") {
+            return (b.portrait_count || 0) - (a.portrait_count || 0);
+          }
+          return (b.total || 0) - (a.total || 0);
+        });
+        return out;
+      });
+      // 作品详情：添加角色（把角色 series 改成当前作品）
+      var workAddOpen = Vue.ref(false);
+      var workAddSel = Vue.ref([]);
+      var workAddSaving = Vue.ref(false);
+      var workAddOpts = Vue.computed(function () {
+        var series = currentWork.value ? currentWork.value.series : "";
+        return (allEntries.value || [])
+          .filter(function (e) { return e.series !== series; })
+          .map(function (e) {
+            return {
+              label: e.name + "（" + e.id + (e.series ? " · " + e.series : " · 无作品") + "）",
+              value: e.id
+            };
+          });
+      });
+      async function addWorkChars() {
+        if (!currentWork.value || !workAddSel.value.length) return;
+        var series = currentWork.value.series;
+        workAddSaving.value = true;
+        var okN = 0;
+        for (var i = 0; i < workAddSel.value.length; i++) {
+          try {
+            await apiPost("works/add_character",
+                          { series: series, id: workAddSel.value[i] });
+            okN += 1;
+          } catch (e) { /* 单条失败不挡后续 */ }
+        }
+        workAddSaving.value = false;
+        if (!okN) return;
+        message.success("已加入 " + okN + " 个角色到「" + series + "」");
+        workAddOpen.value = false;
+        workAddSel.value = [];
+        await refreshAll();
+      }
+      async function toggleWorkChar(c, val) {
+        try {
+          await apiPost("pools/set_verified", { id: c.id, verified: !!val });
+          message.success(c.name + (val ? " 已启用（参与抽卡）" : " 已停用（移出抽卡池）"));
+          await refreshAll();
+        } catch (e) { /* 已提示 */ }
+      }
       function openWork(w) { currentWork.value = w; }
       function backWorks() { currentWork.value = null; }
       // 作品封面（v0.5.0）：works_meta.json 指定，回退角色 cover/首张立绘
@@ -4433,6 +4557,12 @@
         openViewer: openViewer,
         trySrcPath: trySrcPath,
         works: works, worksLoading: worksLoading, currentWork: currentWork,
+        workKeyword: workKeyword, workFilterCat: workFilterCat,
+        workFilterVerified: workFilterVerified, workSort: workSort,
+        workCatOpts: workCatOpts, workVerifiedOpts: workVerifiedOpts,
+        workSortOpts: workSortOpts, filteredWorks: filteredWorks,
+        workAddOpen: workAddOpen, workAddSel: workAddSel, workAddSaving: workAddSaving,
+        workAddOpts: workAddOpts, addWorkChars: addWorkChars, toggleWorkChar: toggleWorkChar,
         openWork: openWork, backWorks: backWorks, gotoTry: gotoTry, openEditById: openEditById,
         workCoverModal: workCoverModal, workCoverSeries: workCoverSeries,
         workCoverCandidates: workCoverCandidates, openWorkCover: openWorkCover,
@@ -4483,7 +4613,7 @@
         gotoTryFromDetail: gotoTryFromDetail,
         galRefs: galRefs, galRefsLoading: galRefsLoading, galMainRef: galMainRef,
         galOrphans: galOrphans, bindOrphan: bindOrphan,
-        galDrawRef: galDrawRef, galDrawOpts: galDrawOpts, setDrawSource: setDrawSource,
+        galDrawRef: galDrawRef, galDrawRefAbs: galDrawRefAbs, setDrawSource: setDrawSource,
         setMainRef: setMainRef, unbindGalRef: unbindGalRef,
         galUploadOpen: galUploadOpen, galUpNote: galUpNote,
         onGalPanelFiles: onGalPanelFiles,
