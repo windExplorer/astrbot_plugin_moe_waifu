@@ -265,11 +265,15 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
     stype = str(entry.get("strategy_type") or "base")
     strategy = entry.get("strategy") or {}
     data_dir = cfg.get("data_dir") or None
-    # v0.10.0：图生图源必须**显式指定**（strategy.ref；抽卡时由 _produce 把
-    # strategy.draw_ref 注入到这里）。绝不再从参考图库 refs 按种子随机取图——
-    # 「没指定图生图参考图，就不能私自用参考图列表里面的」。
+    # v0.10.0：图生图源必须**显式指定**（strategy.ref / gen_refs；抽卡时由
+    # _produce 把 strategy.draw_ref 注入到这里）。绝不再从参考图库 refs 按
+    # 种子随机取图——「没指定图生图参考图，就不能私自用参考图列表里面的」。
+    # v0.11.0：gen_refs 支持多图（工作流支持多图参考时按选择顺序喂）。
     ref = explicit_ref(strategy, data_dir)
-    if stype == "img2img" and not ref:
+    refs = gen_refs(strategy, data_dir)
+    if ref and ref not in refs:
+        refs.insert(0, ref)
+    if stype == "img2img" and not refs:
         # 旧数据兜底：角色画法写着 img2img 却没指定源 → 按 tags 文生图，
         # 不中断出卡，也不会偷偷拿资料库里的图。
         stype = "base"
@@ -282,7 +286,7 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
         handler = _get_tool_handler(context, tool_name)
         if handler is None:
             return None, _STATUS_NO_ANIMA, "未安装萌绘（comfyui_img2img 工具不存在）", 0
-        image = ref   # 已解析成绝对路径 / URL，且必然非空
+        image = refs[0]   # 已解析成绝对路径 / URL，且必然非空
         if not re.match(r"^[a-zA-Z]+://", image) and not Path(image).is_file():
             return None, "error", f"图生图源文件不存在：{image}", 0
         # img2img 不带 workflow（那是文生图槽位）；图生图工作流三级解析：
@@ -296,6 +300,9 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
         if img_workflow:
             kwargs["img2img_workflow"] = img_workflow
         kwargs["image"] = image
+        if len(refs) > 1:
+            # 萌绘 v7.8.1+ 的 comfyui_img2img 支持多图；image 仍传第一张兼容旧版。
+            kwargs["images"] = refs
         # denoise：条目 strategy.denoise 优先（逐角色调重绘强度）→ 全局配置兜底
         try:
             kwargs["denoise"] = float(
@@ -333,6 +340,18 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
     t0 = time.monotonic()
     try:
         raw = await asyncio.wait_for(handler(event, **kwargs), timeout=timeout)
+    except TypeError as exc:
+        # 旧版萌绘（< v7.8.1）的 comfyui_img2img 没有 images 参数：去掉多图
+        # 重试一次单图，别让「多选参考图」直接把出图打挂。
+        if "images" not in kwargs:
+            return None, "error", f"TypeError: {exc}", int((time.monotonic() - t0) * 1000)
+        kwargs.pop("images", None)
+        try:
+            raw = await asyncio.wait_for(handler(event, **kwargs), timeout=timeout)
+        except asyncio.TimeoutError:
+            return None, "timeout", f"萌绘生图超时（>{timeout}s）", int((time.monotonic() - t0) * 1000)
+        except Exception as exc2:
+            return None, "error", f"{exc2.__class__.__name__}: {exc2}", int((time.monotonic() - t0) * 1000)
     except asyncio.TimeoutError:
         return None, "timeout", f"萌绘生图超时（>{timeout}s）", int((time.monotonic() - t0) * 1000)
     except Exception as exc:
@@ -365,12 +384,40 @@ def pick_ref(refs, seed_int: int, data_dir=None) -> str:
     return candidates[int(seed_int) % len(candidates)]
 
 
+def gen_refs(strategy: dict, data_dir=None) -> list:
+    """本次图生图的**多图源**（strategy.gen_refs，按用户选择顺序）。
+
+    与参考图库 `strategy.refs` 是两回事：后者只是资料库，这里只放用户在
+    工坊里显式勾选、本次要喂给工作流的图（Qwen 2.1 等多图工作流按
+    「图1/图2/图3」顺序注入）。失效文件自动跳过、去重。
+    """
+    if not isinstance(strategy, dict):
+        return []
+    raw = strategy.get("gen_refs")
+    out = []
+    for x in (raw if isinstance(raw, list) else []):
+        p = _ref_path(x, data_dir)
+        if p and p not in out:
+            out.append(p)
+    return out
+
+
+def has_gen_refs(entry: dict, data_dir=None) -> bool:
+    """是否有可用的图生图源（显式 gen_refs 多图，或旧的主参考 ref 单图）。"""
+    st = entry.get("strategy") or {}
+    if not isinstance(st, dict):
+        return False
+    return bool(gen_refs(st, data_dir) or explicit_ref(st, data_dir))
+
+
 def effective_entry(entry: dict, override: dict) -> dict:
     """试画台临时参数 → 生效条目（深拷贝，绝不改原条目）。
 
-    override: {strategy_type?: base|lora|img2img, ref?, denoise?, img2img_workflow?, loras?: [str]}
-    仅覆盖试画本次用到的字段；img2img 时清掉条目自带的 img2img_workflow（跟随本次输入/
-    全局配置），未传 denoise 则沿用条目/全局。
+    override: {strategy_type?: base|lora|img2img, ref?, refs?: [str], denoise?,
+               img2img_workflow?, loras?: [str]}
+    仅覆盖本次用到的字段；img2img 时清掉条目自带的 img2img_workflow（跟随本次输入/
+    全局配置），未传 denoise 则沿用条目/全局。`refs` 是**本次多图源**（写进
+    `strategy.gen_refs`，不碰资料库 `strategy.refs`）。
     """
     import json as _json
 
@@ -381,9 +428,15 @@ def effective_entry(entry: dict, override: dict) -> dict:
         st["type"] = t
         e["strategy_type"] = t
     if st.get("type") == "img2img":
+        refs_in = (override or {}).get("refs")
+        refs = ([str(x).strip() for x in refs_in if str(x or "").strip()]
+                if isinstance(refs_in, list) else [])
         ref = str((override or {}).get("ref") or "").strip()
-        if ref:
-            st["ref"] = ref
+        if ref and ref not in refs:
+            refs.insert(0, ref)
+        if refs:
+            st["gen_refs"] = refs
+            st["ref"] = refs[0]      # 兼容只认单张 ref 的旧链路
         dn = (override or {}).get("denoise")
         if dn is not None:
             try:

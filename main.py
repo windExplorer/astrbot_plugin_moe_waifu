@@ -454,7 +454,8 @@ class MoeWaifuPlugin(Star):
             # 不退回参考图库随机取图；条目本身是 img2img 也强制用这一张。
             # effective_entry 会按 override 重建 img2img 字段，条目级图生图
             # 工作流要一并带上，否则抽卡会静默丢掉用户选的工作流。
-            override = {"strategy_type": "img2img", "ref": draw_src}
+            # refs 显式只放这一张：出卡永远只认 draw_ref，不混入条目的多图源
+            override = {"strategy_type": "img2img", "ref": draw_src, "refs": [draw_src]}
             st_wf = str((entry.get("strategy") or {}).get("img2img_workflow")
                         or "").strip()
             if st_wf:

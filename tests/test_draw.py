@@ -241,4 +241,80 @@ check("resolve_negative 兼容旧签名", draw.resolve_negative(cfg_mv).startswi
 check("_snap16", draw._snap16(700) == 704 and draw._snap16(1200) == 1200
       and draw._snap16("bad") == 1024)
 
+# v0.11.0：多图参考（gen_refs / refs override / images 透传 + 旧版萌绘降级）
+with tempfile.TemporaryDirectory() as multi_td:
+    mdir = Path(multi_td)
+    for n in ("front.png", "side.png", "back.png"):
+        (mdir / n).write_bytes(b"PNG")
+    st_multi = {"refs": ["refs/library-only.png"],
+                "gen_refs": ["front.png", "side.png"]}
+    front_abs = str((mdir / "front.png").resolve())
+    side_abs = str((mdir / "side.png").resolve())
+    check("gen_refs 按顺序解析", draw.gen_refs(st_multi, mdir)
+          == [front_abs, side_abs])
+    check("资料库 refs 不算本次多图源", draw.gen_refs(
+        {"refs": ["front.png"]}, mdir) == [])
+    check("has_gen_refs 认多图源",
+          draw.has_gen_refs({"strategy": st_multi}, mdir) is True)
+    check("has_gen_refs 不认资料库", draw.has_gen_refs(
+        {"strategy": {"refs": ["front.png"]}}, mdir) is False)
+
+    eff = draw.effective_entry(
+        {"strategy": {"refs": ["refs/library.png"]}, "strategy_type": "base"},
+        {"strategy_type": "img2img", "refs": ["front.png", "side.png"]})
+    check("override refs 写入 gen_refs",
+          eff["strategy"]["gen_refs"] == ["front.png", "side.png"])
+    check("override refs 不碰资料库 refs",
+          eff["strategy"]["refs"] == ["refs/library.png"])
+    check("override refs 首张回填 ref", eff["strategy"]["ref"] == "front.png")
+
+    seen2 = {}
+
+    class _MultiTool:
+        async def handler(self, event, **kwargs):
+            seen2.clear()
+            seen2.update(kwargs)
+            return '{"image_paths": []}'
+
+    class _MultiManager:
+        def get_func(self, name):
+            return _MultiTool()
+
+    class _MultiCtx:
+        def get_llm_tool_manager(self):
+            return _MultiManager()
+
+    multi_entry = {"strategy_type": "img2img", "tags_en": "miku",
+                   "strategy": {"gen_refs": ["front.png", "side.png", "back.png"]}}
+    r_multi = asyncio.run(draw.generate_portrait(
+        _MultiCtx(), {"data_dir": mdir}, multi_entry, 1))
+    check("多图源返回 4 元组", isinstance(r_multi, tuple) and len(r_multi) == 4)
+    check("多图源传 images（3 张）", len(seen2.get("images") or []) == 3)
+    check("image 仍是第一张", seen2.get("image") == front_abs)
+
+    class _OldTool:
+        def __init__(self):
+            self.calls = []
+        async def handler(self, event, **kwargs):
+            self.calls.append(dict(kwargs))
+            if "images" in kwargs:
+                raise TypeError("unexpected keyword argument 'images'")
+            return '{"image_paths": []}'
+
+    old_tool = _OldTool()
+
+    class _OldManager:
+        def get_func(self, name):
+            return old_tool
+
+    class _OldCtx:
+        def get_llm_tool_manager(self):
+            return _OldManager()
+
+    r_old = asyncio.run(draw.generate_portrait(
+        _OldCtx(), {"data_dir": mdir}, multi_entry, 1))
+    check("旧版萌绘不认 images 时返回 4 元组", len(r_old) == 4)
+    check("旧版萌绘不认 images 时降级单图重试",
+          len(old_tool.calls) == 2 and "images" not in old_tool.calls[1])
+
 print("test_draw: ALL OK")

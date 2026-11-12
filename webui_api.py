@@ -816,8 +816,9 @@ async def h_job_start(plugin) -> dict:
             # override 的 img2img 条目走 refs[] 随机；v0.9.9：与出图同口径，
             # 相对 data 目录的路径/失效文件不能再混过这道检查）
             st_now = entry.get("strategy") or {}
-            if not draw.has_template_ref({"strategy": st_now}, plugin._data_dir):
-                return err("请先指定本次图生图源：选一张参考图/立绘，或填 URL / 本地路径（不会自动取参考图列表里的图）")
+            # v0.11.0：多图源（gen_refs / refs）与旧单图 ref 都算显式指定
+            if not draw.has_gen_refs({"strategy": st_now}, plugin._data_dir):
+                return err("请先指定本次图生图源：选一张或多张参考图/立绘，或填 URL / 本地路径（不会自动取参考图列表里的图）")
     # 预览确认过的提示词直通（v0.5.9）：非空时不再走 prompt_gen，按原文出图
     prompt_override = str(body.get("prompt") or "").strip()[:2000]
     job_id = f"{kind}:{cid}:{int(time.time() * 1000)}"

@@ -47,7 +47,7 @@ charNameOf decisionLabel barPct
 movePortraitToRef moveRefToPortrait doQuickAction
 galOrphans bindOrphan
 ov goMenu refreshing refreshAll
-galDrawRef galDrawOpts setDrawSource
+galDrawRef galDrawOpts setDrawSource galRefsSel
 fmtTime cfgBoundGroups pickSimGroup simScopeText
 """.split()
 
