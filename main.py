@@ -7,6 +7,7 @@
 """
 import asyncio
 import importlib
+import random
 import re
 import sys
 import time
@@ -31,6 +32,28 @@ _CARD_KEEP_DAYS = 90
 # 试画缓存保留天数（工坊试画成品拷贝，供大图查看；过期回收）
 _TRY_CACHE_KEEP_DAYS = 7
 
+# 召唤过程提示（v0.9.6：随机、有温度，不再干巴巴一句「正在召唤」）。
+# 萌绘单张 20~120s，图生图更慢；等就等得像回事。
+_SUMMON_LINES = [
+    "♥ 正在召唤你的今日老婆，画师大大正在赶稿……",
+    "♥ 正在为你的老婆梳妆打扮，请稍候～",
+    "♥ 正在调制颜料与光影，马上就好～",
+    "♥ 你的老婆正从二次元赶来，路途有点远，稍等一下下～",
+    "♥ 正在为你的老婆挑选最上镜的角度……",
+    "♥ 召唤阵已经点亮，正在描线与上色……",
+]
+# 图生图模板模式的过程提示
+_I2I_LINES = [
+    "♥ 正在照着官方图精心重绘你的老婆，细节控狂喜……",
+    "♥ 正在参考原作立绘为你的老婆描线与上色，稳得很～",
+    "♥ 正在把模板图变成你的专属老婆，稍等片刻～",
+]
+# 排队提示（萌绘生图串行，多人同时召唤时告知前面还有几位）
+_QUEUE_LINES = [
+    "♥ 前面还有 {n} 位召唤在排队，你的老婆正在候场～",
+    "♥ 画师大大手里还有 {n} 张约稿，排到你的就画～",
+]
+
 
 def _plugin_version() -> str:
     """@register 的版本取自 metadata.yaml（唯一版本来源，星语同款）。"""
@@ -53,6 +76,10 @@ class MoeWaifuPlugin(Star):
         self._data_dir = None
         # 同一 (uid,date) 只允许一条召唤流程在飞：防连点触发重复生图/重复计数
         self._inflight: set = set()
+        # 生图串行队列（v0.9.6）：萌绘一张 20~120s，多召唤并发时逐张画防打爆后端；
+        # _gen_queue 是正在排队/作画的任务数，用于「前面还有 N 位」友好提示
+        self._gen_lock = asyncio.Lock()
+        self._gen_queue = 0
         # 工坊后台试画/补图 job（webui_api 用）：job_id -> dict
         self._jobs: dict = {}
         self._reload_modules()
@@ -192,6 +219,15 @@ class MoeWaifuPlugin(Star):
             return (f"立绘生成超时了（>{int(self._cfg('draw_timeout', 120))}s），"
                     "萌绘可能正忙，稍后再试试吧")
         return f"立绘生成失败了：{err[:120]}。稍后再试一次吧"
+
+    @staticmethod
+    def _summon_line(decision: str, queued: int) -> str:
+        """召唤过程提示（随机、非平白直述）：排队时告知前面还有几位在画；
+        否则按画法随机一句（图生图模板有专属台词）。"""
+        if queued > 0:
+            return random.choice(_QUEUE_LINES).format(n=queued)
+        lines = _I2I_LINES if decision == "generate_i2i" else _SUMMON_LINES
+        return random.choice(lines)
 
     # ---------- 指令 ----------
 
@@ -384,7 +420,26 @@ class MoeWaifuPlugin(Star):
         quota = max(1, int(self._cfg("portraits_per_char", 5)))
         today_row = self._store.portrait_by_date(char_id, date)
         pool_size = self._store.count_portraits(char_id)
+        # v0.9.6：种子先派生（重置轮次 epoch 一并计入），出图方式按种子规划——
+        # 同一签恒定（ mix 模式下「取库存还是图生图」不随重试漂移）
+        seed_bytes = pool.derive_seed(date, uid, salt, nonce, self._store.get_epoch(uid))
+        mode = str(self._cfg("gen_source_mode", "mix") or "mix")
+        i2i_prob = self._cfg("img2img_prob", 50)
+        try:
+            i2i_prob = int(i2i_prob)
+        except (TypeError, ValueError):
+            i2i_prob = 50
         decision = draw.decision_of(char_id, date, today_row, pool_size, quota)
+        if decision == "generate":
+            decision = draw.plan_source(mode, pool_size, quota,
+                                        draw.has_template_ref(entry),
+                                        pool.sub_int(seed_bytes, "genmode", 100),
+                                        i2i_prob)
+        if decision == "generate_i2i" \
+                and str(entry.get("strategy_type") or "base") != "img2img":
+            # 该签决定走模板图生图：把 base/lora 条目临时转成 img2img 画法
+            # （沿用角色绑定的模板参考图 strategy.ref/refs，有效强度不变）
+            entry = draw.effective_entry(entry, {"strategy_type": "img2img"})
 
         src = None
         rel_path = ""
@@ -401,11 +456,11 @@ class MoeWaifuPlugin(Star):
                 src = None
                 decision = "generate"  # 记录真实发生的决策，别把它记成「库存复用」
 
-        if src is None:  # generate
+        if src is None:  # generate / generate_i2i
             seq = pool_size
             seed_int = pool.portrait_seed_int(char_id, date, seq, salt)
             if bool(self._cfg("announce_enabled", True)):
-                await self._send_plain(event, "♥ 正在召唤你的今日老婆，请稍候……")
+                await self._send_plain(event, self._summon_line(decision, self._gen_queue))
             # 提示词先产（v0.5.6）：img2img 由 LLM 生成 Qwen-Image-Edit 编辑指令
             # （失败自动回落本地模板），base/lora 为 tags + 变化维度
             draw_cfg = self._draw_cfg()
@@ -413,9 +468,16 @@ class MoeWaifuPlugin(Star):
                 self.context, draw_cfg, entry, seed_int
             )
             logger.info(f"[{PLUGIN_NAME}] 立绘提示词（{prompt_src}）：{prompt_text[:80]}")
-            raw_src, status, err, dur = await draw.generate_portrait(
-                self.context, draw_cfg, entry, seed_int, event, prompt=prompt_text
-            )
+            # 生图串行队列：萌绘一张 20~120s，多召唤并发时逐张画（提示词生成
+            # 不占槽——那是本地/LLM 的活，不该堵住后面人的提示词）
+            self._gen_queue += 1
+            try:
+                async with self._gen_lock:
+                    raw_src, status, err, dur = await draw.generate_portrait(
+                        self.context, draw_cfg, entry, seed_int, event, prompt=prompt_text
+                    )
+            finally:
+                self._gen_queue -= 1
             self._store.log_job(char_id, date, "generated", status, uid,
                                 entry["strategy_type"], seed_int, err, dur, raw_src or "")
             if raw_src is None:
@@ -429,7 +491,6 @@ class MoeWaifuPlugin(Star):
         # v0.9.0：角色名/作品/种子/立绘来源随签快照落库，历史记录不再依赖角色库反查；
         # upsert_draw 同时追加一条只写不改的抽签流水，换老婆前的角色也留得住。
         # v0.9.5：种子带重置轮次 epoch；卡片印象语按签从 quotes 池随机选一句
-        seed_bytes = pool.derive_seed(date, uid, salt, nonce, self._store.get_epoch(uid))
         entry = dict(entry)
         entry["quote"] = pool.pick_quote(entry, seed_bytes)
         self._store.upsert_draw(

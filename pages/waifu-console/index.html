@@ -3305,6 +3305,7 @@
       // 这样 SVG 的 viewBox 大小写不会被 in-DOM 模板的 HTML 解析器吃掉。
       var DECISION_LABELS = {
         generate: "生成新立绘", from_pool: "立绘库取图",
+        generate_i2i: "图生图模板生成",
         reuse_today: "当日复用立绘", "": "—"
       };
       function decisionLabel(d) { return DECISION_LABELS[d] || d || "—"; }
@@ -3951,9 +3952,9 @@
       var CONFIG_SECTIONS = [
         { title: "基础", keys: ["timezone", "salt", "reroll_daily_limit", "portraits_per_char",
                                 "allow_unverified", "ui_grid_cols", "disabled_groups"] },
-        { title: "萌绘生图", keys: ["draw_workflow", "img2img_workflow", "draw_width", "draw_height",
-                                    "draw_timeout", "img2img_denoise", "draw_negative_enabled",
-                                    "draw_negative_prompt", "announce_enabled"] },
+        { title: "萌绘生图", keys: ["gen_source_mode", "img2img_prob", "draw_workflow", "img2img_workflow",
+                                    "draw_width", "draw_height", "draw_timeout", "img2img_denoise",
+                                    "draw_negative_enabled", "draw_negative_prompt", "announce_enabled"] },
         { title: "提示词与变化", keys: ["prompt_llm_enabled", "prompt_llm_provider",
                                         "prompt_llm_timeout", "variations_enabled"] }
       ];

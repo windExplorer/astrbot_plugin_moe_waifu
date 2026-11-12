@@ -398,5 +398,41 @@ def decision_of(char_id: str, date_str: str, today_row: dict | None,
     return "from_pool"
 
 
+def has_template_ref(entry: dict) -> bool:
+    """角色是否绑定了可用的图生图模板图（strategy.ref 或 refs 任一非空）。"""
+    st = entry.get("strategy") or {}
+    if str(st.get("ref") or "").strip():
+        return True
+    refs = st.get("refs")
+    return isinstance(refs, list) and any(str(x).strip() for x in refs)
+
+
+def plan_source(mode: str, pool_size: int, quota: int, has_ref: bool,
+                roll: int, i2i_prob: int) -> str:
+    """出图方式规划（纯函数，可测，v0.9.6）：from_pool / generate_i2i / generate。
+
+    三种模式（配置 gen_source_mode）：
+    - mix：按 roll（种子派生 0~99）与 i2i_prob 在「库存取图」与「模板图生图」
+      间分配——概率命中图生图但没绑模板图 → 回退库存取图；
+    - pool：只从立绘库取图（库存空 → 按角色画法生成，老链路）；
+    - img2img：只用模板图生图（没绑模板图 → 回退库存取图，库存也空 → 老链路）。
+    满配额一律库存取图（不浪费算力）；generate_i2i 产出照常归档进立绘库。
+    """
+    if pool_size >= max(1, int(quota)):
+        return "from_pool"
+    if str(mode) == "img2img":
+        return "generate_i2i" if has_ref else ("from_pool" if pool_size > 0 else "generate")
+    if str(mode) == "pool":
+        return "from_pool" if pool_size > 0 else "generate"
+    # mix（非法 mode 也当 mix）
+    want_i2i = has_ref and (int(roll) % 100) < max(0, min(100, int(i2i_prob)))
+    if want_i2i:
+        return "generate_i2i"
+    if pool_size > 0:
+        return "from_pool"
+    # 库存空必须现画：绑了模板图就走图生图（稳），否则按角色画法（文生图/LoRA）
+    return "generate_i2i" if has_ref else "generate"
+
+
 def log_exception(prefix: str) -> str:
     return f"{prefix}\n{traceback.format_exc()}"

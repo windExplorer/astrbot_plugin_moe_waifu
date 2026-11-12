@@ -44,6 +44,35 @@ check("当日已有→复用", draw.decision_of("a", "d", {"file": "x"}, 3, 5) =
 check("未满配额→生成", draw.decision_of("a", "d", None, 3, 5) == "generate")
 check("满配额→取库", draw.decision_of("a", "d", None, 5, 5) == "from_pool")
 
+# has_template_ref（v0.9.6：图生图模板图绑定判定）
+check("ref 非空", draw.has_template_ref({"strategy": {"ref": "a.png"}}) is True)
+check("refs 任一非空", draw.has_template_ref({"strategy": {"refs": ["", "b.png"]}}) is True)
+check("refs 全空不算", draw.has_template_ref({"strategy": {"refs": ["", " "]}}) is False)
+check("无 strategy 不算", draw.has_template_ref({}) is False)
+
+# plan_source（v0.9.6 出图方式规划：mix/pool/img2img 三模式 + 回退链）
+# 满配额一律取库
+check("满配额→取库", draw.plan_source("img2img", 5, 5, True, 0, 100) == "from_pool")
+# mix
+check("mix 命中 i2i 概率", draw.plan_source("mix", 2, 5, True, 30, 50) == "generate_i2i")
+check("mix 未中→取库", draw.plan_source("mix", 2, 5, True, 80, 50) == "from_pool")
+check("mix 命中但没模板图→取库", draw.plan_source("mix", 2, 5, False, 30, 50) == "from_pool")
+check("mix 库空+有模板图→i2i", draw.plan_source("mix", 0, 5, True, 99, 0) == "generate_i2i")
+check("mix 库空+无模板图→老链路", draw.plan_source("mix", 0, 5, False, 30, 50) == "generate")
+# pool：只用库存
+check("pool 有库存→取库", draw.plan_source("pool", 1, 5, True, 0, 100) == "from_pool")
+check("pool 库空→老链路", draw.plan_source("pool", 0, 5, True, 0, 100) == "generate")
+# img2img：只用模板图生图
+check("img2img 有模板图→i2i", draw.plan_source("img2img", 2, 5, True, 99, 0) == "generate_i2i")
+check("img2img 无模板图→回退取库", draw.plan_source("img2img", 2, 5, False, 0, 0) == "from_pool")
+check("img2img 无模板图且库空→老链路",
+      draw.plan_source("img2img", 0, 5, False, 0, 0) == "generate")
+# 非法 mode 当 mix
+check("非法 mode→mix", draw.plan_source("what", 2, 5, True, 0, 100) == "generate_i2i")
+# 概率钳制
+check("i2i_prob=100 必中", draw.plan_source("mix", 2, 5, True, 99, 100) == "generate_i2i")
+check("i2i_prob=0 不中", draw.plan_source("mix", 2, 5, True, 0, 0) == "from_pool")
+
 # archive_portrait：拷贝进库并返回相对路径
 with tempfile.TemporaryDirectory() as td:
     td = Path(td)

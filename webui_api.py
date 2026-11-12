@@ -1799,6 +1799,15 @@ def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
     pool_size = s.count_portraits(entry["id"])
     quota = max(1, int(plugin._cfg("portraits_per_char", 5)))
     decision = draw.decision_of(entry["id"], date, today_row, pool_size, quota)
+    gen_mode = str(plugin._cfg("gen_source_mode", "mix") or "mix")
+    try:
+        i2i_prob = int(plugin._cfg("img2img_prob", 50))
+    except (TypeError, ValueError):
+        i2i_prob = 50
+    if decision == "generate":
+        decision = draw.plan_source(gen_mode, pool_size, quota,
+                                    draw.has_template_ref(entry),
+                                    pool.sub_int(seed, "genmode", 100), i2i_prob)
     pick = None
     if decision == "reuse_today":
         pick = {"file": today_row["file"] if today_row else "", "index": None}
@@ -1821,6 +1830,7 @@ def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
             "verified": bool(entry.get("verified")),
         },
         "decision": decision, "portrait_pool_size": pool_size, "quota": quota,
+        "gen_mode": gen_mode, "i2i_prob": i2i_prob,
         "portrait_pick": pick,
         "current": ({"char_id": current["char_id"],
                      "char_name": current.get("char_name") or current["char_id"],
