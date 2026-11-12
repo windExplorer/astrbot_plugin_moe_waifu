@@ -1127,8 +1127,10 @@ async def h_config_set(plugin) -> dict:
 # SecurityError），Dashboard 刷新时又按服务端 content_path 重建 iframe src，
 # 页内 hash 留不住——所以「刷新停在上次页签」只能落在服务端。
 
-# 页签白名单：与前端 menuOpts 的 key 一致，防越权写入
-_UI_MENUS = ("chars", "works", "try", "gallery", "bind", "config")
+# 页签白名单：与前端 menuOpts 的 key 一致，防越权写入。
+# v0.8.0：角色详情改为二级页面（不再是导航页签，旧记忆值自动回落 chars），
+# 新增「记录 · 调试」页签。
+_UI_MENUS = ("chars", "works", "try", "records", "bind", "config")
 
 
 def _ui_state_path(plugin) -> Path:
@@ -1161,6 +1163,156 @@ async def h_ui_state_set(plugin) -> dict:
     return ok({"menu": menu})
 
 
+# ---------- 记录 / 统计 / 调试（v0.8.0） ----------
+
+def _name_color_map(plugin) -> dict:
+    """角色 id → (名称, 颜色, 卷名)，统计榜显示用。"""
+    name_of: dict = {}
+    for pack in pool.load_packs(_pools_dir(plugin), logger):
+        for raw in pack["entries"]:
+            e = pool.normalize_entry(raw, pack["pack"])
+            if e:
+                name_of.setdefault(e["id"], (e["name"], e["color"], pack["pack"]))
+    return name_of
+
+
+def _delete_card_files(plugin, paths) -> int:
+    """删 data 目录内的卡图/立绘文件（越界或不存在则跳过）。返回实际删除数。"""
+    n = 0
+    for p in paths or []:
+        fp = _safe_data_file(plugin, str(p or ""))
+        if fp is None:
+            continue
+        try:
+            fp.unlink()
+            n += 1
+        except Exception:
+            logger.warning(f"[{PLUGIN_NAME}] 删除文件失败：{fp}")
+    return n
+
+
+async def h_records_draws(plugin) -> dict:
+    """抽取记录分页（draws 表，updated_at 倒序）。可按 user_id / date 过滤。"""
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    uid = str(body.get("user_id") or _q("user_id", "") or "").strip()
+    date = str(body.get("date") or _q("date", "") or "").strip()
+    try:
+        limit = max(1, min(500, int(body.get("limit") or _q("limit", 100) or 100)))
+        offset = max(0, int(body.get("offset") or _q("offset", 0) or 0))
+    except (TypeError, ValueError):
+        limit, offset = 100, 0
+    rows, total = plugin._store.list_draws(limit, offset, uid, date)
+    return ok({"items": rows, "total": total, "limit": limit, "offset": offset})
+
+
+async def h_records_jobs(plugin) -> dict:
+    """生图审计分页（draw_jobs 表）。可按 char_id / status / mode 过滤。"""
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    cid = str(body.get("char_id") or _q("char_id", "") or "").strip()
+    status = str(body.get("status") or _q("status", "") or "").strip()
+    mode = str(body.get("mode") or _q("mode", "") or "").strip()
+    try:
+        limit = max(1, min(500, int(body.get("limit") or _q("limit", 100) or 100)))
+        offset = max(0, int(body.get("offset") or _q("offset", 0) or 0))
+    except (TypeError, ValueError):
+        limit, offset = 100, 0
+    rows, total = plugin._store.list_jobs(limit, offset, cid, status, mode)
+    return ok({"items": rows, "total": total, "limit": limit, "offset": offset})
+
+
+async def h_records_stats(plugin) -> dict:
+    """总览统计：抽取侧 + 生成侧汇总 + 用户榜 / 角色热度榜。"""
+    if not plugin._store:
+        return err("插件未初始化完成")
+    today = plugin._today()
+    name_of = _name_color_map(plugin)
+
+    def with_name(rows):
+        out = []
+        for r in rows:
+            r = dict(r)
+            meta = name_of.get(str(r.get("char_id") or ""))
+            r["char_name"] = meta[0] if meta else (str(r.get("char_id") or ""))
+            r["color"] = meta[1] if meta else "#8A8A9A"
+            out.append(r)
+        return out
+
+    return ok({
+        "today": today,
+        "draw": plugin._store.draw_stats(today),
+        "job": plugin._store.job_stats(today),
+        "top_users": plugin._store.top_users(10),
+        "top_chars": with_name(plugin._store.top_chars(10)),
+    })
+
+
+async def h_debug_clear_draws(plugin) -> dict:
+    """清抽取签：可按 user_id / date 过滤（都空 = 全部），连带删除卡图文件。"""
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    uid = str(body.get("user_id") or "").strip()
+    date = str(body.get("date") or "").strip()
+    if not uid and not date:
+        return err("清空全部签属于高危操作：请明确指定 user_id 或 date")
+    rows = plugin._store.clear_draws(uid, date)
+    deleted = _delete_card_files(plugin, [r.get("card_path") for r in rows])
+    return ok({"cleared": len(rows), "cards_deleted": deleted})
+
+
+async def h_debug_force_reroll(plugin) -> dict:
+    """强制换签（调试版换老婆）：nonce+1 重派种子、清卡图，下次抽取出新角色。
+
+    直接改库，不受 reroll_daily_limit 限制。
+    """
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    uid = str(body.get("user_id") or "").strip()
+    if not uid:
+        return err("缺少 user_id")
+    date = str(body.get("date") or plugin._today()).strip()
+    old = plugin._store.get_draw(uid, date)
+    row = plugin._store.force_reroll(uid, date)
+    if row is None:
+        return err(f"{uid} 在 {date} 没有抽取记录")
+    deleted = _delete_card_files(plugin, [(old or {}).get("card_path")])
+    return ok({"row": row, "cards_deleted": deleted})
+
+
+async def h_debug_reset_char_day(plugin) -> dict:
+    """重试某角色当日生成：删当日立绘行与文件、清指向它的签卡路径，
+    下次有人抽到该角色即重新生成。"""
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    cid = str(body.get("char_id") or "").strip()
+    if not cid:
+        return err("缺少 char_id")
+    date = str(body.get("date") or plugin._today()).strip()
+    res = plugin._store.reset_char_day(cid, date)
+    deleted = _delete_card_files(plugin, res["removed_files"])
+    return ok({"char_id": cid, "date": date, "cleared_draws": res["cleared_draws"],
+               "files_deleted": deleted})
+
+
+async def h_debug_clear_portraits(plugin) -> dict:
+    """清空某角色全部立绘库存（文件 + 行），下次抽取从 0 开始重新生成。"""
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    cid = str(body.get("char_id") or "").strip()
+    if not cid:
+        return err("缺少 char_id")
+    files = plugin._store.clear_char_portraits(cid)
+    deleted = _delete_card_files(plugin, files)
+    return ok({"char_id": cid, "cleared": len(files), "files_deleted": deleted})
+
+
 # ---------- 注册 ----------
 
 def register(plugin) -> None:
@@ -1189,6 +1341,13 @@ def register(plugin) -> None:
         ("/jobs/status", h_job_status, ["GET", "POST"]),
         ("/jobs/archive", h_job_archive, ["POST"]),
         ("/jobs/to_ref", h_job_to_ref, ["POST"]),
+        ("/records/draws", h_records_draws, ["GET", "POST"]),
+        ("/records/jobs", h_records_jobs, ["GET", "POST"]),
+        ("/records/stats", h_records_stats, ["GET", "POST"]),
+        ("/debug/clear_draws", h_debug_clear_draws, ["POST"]),
+        ("/debug/force_reroll", h_debug_force_reroll, ["POST"]),
+        ("/debug/reset_char_day", h_debug_reset_char_day, ["POST"]),
+        ("/debug/clear_portraits", h_debug_clear_portraits, ["POST"]),
         ("/group_pools", h_group_pools_get, ["GET"]),
         ("/group_pools", h_group_pools_set, ["POST"]),
         ("/config", h_config_get, ["GET"]),

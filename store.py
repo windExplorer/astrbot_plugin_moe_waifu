@@ -237,3 +237,168 @@ class Store:
              image_path[:500], _now()),
         )
         self._conn.commit()
+
+    # ---------- 工坊「记录 · 调试」查询（v0.8.0） ----------
+
+    def list_draws(self, limit: int = 200, offset: int = 0,
+                   user_id: str = "", date: str = "") -> tuple[list, int]:
+        """抽取记录分页（updated_at 倒序）。返回 (rows, total)。"""
+        conds, args = [], []
+        if user_id:
+            conds.append("user_id=?")
+            args.append(user_id)
+        if date:
+            conds.append("date=?")
+            args.append(date)
+        where = (" WHERE " + " AND ".join(conds)) if conds else ""
+        total = int(self._conn.execute(
+            f"SELECT COUNT(*) AS n FROM draws{where}", args).fetchone()["n"])
+        rows = self._conn.execute(
+            f"SELECT * FROM draws{where} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            (*args, max(1, int(limit)), max(0, int(offset))),
+        ).fetchall()
+        return [dict(r) for r in rows], total
+
+    def draw_stats(self, today: str) -> dict:
+        """抽取侧汇总：总签数 / 今日签数 / 累计用户 / 重抽次数 / 打过照面的角色数。"""
+        def one(sql, args=()):
+            row = self._conn.execute(sql, args).fetchone()
+            return row[0] if row else 0
+        return {
+            "total_draws": int(one("SELECT COUNT(*) FROM draws")),
+            "today_draws": int(one("SELECT COUNT(*) FROM draws WHERE date=?", (today,))),
+            "users": int(one("SELECT COUNT(DISTINCT user_id) FROM draws")),
+            "rerolls": int(one("SELECT COALESCE(SUM(nonce),0) FROM draws")),
+            "today_rerolls": int(one(
+                "SELECT COALESCE(SUM(nonce),0) FROM draws WHERE date=?", (today,))),
+            "chars_seen": int(one("SELECT COUNT(*) FROM char_stats")),
+            "portraits_total": int(one("SELECT COUNT(*) FROM portraits")),
+        }
+
+    def top_users(self, limit: int = 10) -> list:
+        """按抽签次数排的用户榜（含重抽次数与抽过的不同角色数）。"""
+        rows = self._conn.execute(
+            """
+            SELECT user_id, MAX(nickname) AS nickname,
+                   COUNT(*) AS draws, COUNT(DISTINCT char_id) AS chars,
+                   COALESCE(SUM(nonce),0) AS rerolls, MAX(date) AS last_date
+            FROM draws GROUP BY user_id ORDER BY draws DESC, user_id LIMIT ?
+            """,
+            (max(1, int(limit)),),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def top_chars(self, limit: int = 10) -> list:
+        """全局热度榜（char_stats：total = 被抽中总次数）。"""
+        rows = self._conn.execute(
+            "SELECT char_id, total, last_date FROM char_stats"
+            " ORDER BY total DESC, char_id LIMIT ?",
+            (max(1, int(limit)),),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_jobs(self, limit: int = 200, offset: int = 0,
+                  char_id: str = "", status: str = "", mode: str = "") -> tuple[list, int]:
+        """生图审计分页（created_at 倒序）。mode/status 为空串 = 不过滤。"""
+        conds, args = [], []
+        if char_id:
+            conds.append("char_id=?")
+            args.append(char_id)
+        if status:
+            conds.append("status=?")
+            args.append(status)
+        if mode:
+            conds.append("mode=?")
+            args.append(mode)
+        where = (" WHERE " + " AND ".join(conds)) if conds else ""
+        total = int(self._conn.execute(
+            f"SELECT COUNT(*) AS n FROM draw_jobs{where}", args).fetchone()["n"])
+        rows = self._conn.execute(
+            f"SELECT * FROM draw_jobs{where} ORDER BY id DESC LIMIT ? OFFSET ?",
+            (*args, max(1, int(limit)), max(0, int(offset))),
+        ).fetchall()
+        return [dict(r) for r in rows], total
+
+    def job_stats(self, today: str) -> dict:
+        """生成侧汇总：总数 / 成功 / 失败 / 今日数 / 平均耗时（成功项）。"""
+        def one(sql, args=()):
+            row = self._conn.execute(sql, args).fetchone()
+            return row[0] if row is not None else 0
+        return {
+            "jobs_total": int(one("SELECT COUNT(*) FROM draw_jobs")),
+            "jobs_ok": int(one("SELECT COUNT(*) FROM draw_jobs WHERE status='ok'")),
+            "jobs_error": int(one(
+                "SELECT COUNT(*) FROM draw_jobs WHERE status IN ('error','timeout')")),
+            "jobs_today": int(one("SELECT COUNT(*) FROM draw_jobs WHERE date=?", (today,))),
+            "avg_ms": int(one(
+                "SELECT COALESCE(AVG(duration_ms),0) FROM draw_jobs WHERE status='ok'")),
+        }
+
+    # ---------- 调试 / 重置（v0.8.0） ----------
+    # 文件删除一律由调用方（webui 层）做：这里只动库并返回受影响路径清单。
+
+    def clear_draws(self, user_id: str = "", date: str = "") -> list[dict]:
+        """删签（可按 user/date 过滤，两者都空 = 全部）。返回被删行（含 card_path）。"""
+        conds, args = [], []
+        if user_id:
+            conds.append("user_id=?")
+            args.append(user_id)
+        if date:
+            conds.append("date=?")
+            args.append(date)
+        where = (" WHERE " + " AND ".join(conds)) if conds else ""
+        rows = self._conn.execute(f"SELECT * FROM draws{where}", args).fetchall()
+        out = [dict(r) for r in rows]
+        self._conn.execute(f"DELETE FROM draws{where}", args)
+        self._conn.commit()
+        return out
+
+    def force_reroll(self, user_id: str, date: str) -> dict | None:
+        """调试版「换老婆」：nonce+1 重派种子并清卡图，下次抽取即出新角色。
+
+        直接改库不走 reroll_daily_limit（调试语义）；无签返回 None。
+        """
+        row = self._conn.execute(
+            "SELECT * FROM draws WHERE user_id=? AND date=?", (user_id, date)
+        ).fetchone()
+        if row is None:
+            return None
+        nonce = int(row["nonce"]) + 1
+        self._conn.execute(
+            "UPDATE draws SET nonce=?, rerolled=1, card_path='', updated_at=?"
+            " WHERE user_id=? AND date=?",
+            (nonce, _now(), user_id, date),
+        )
+        self._conn.commit()
+        return dict(self._conn.execute(
+            "SELECT * FROM draws WHERE user_id=? AND date=?", (user_id, date)
+        ).fetchone())
+
+    def reset_char_day(self, char_id: str, date: str) -> dict:
+        """重试某角色当日生成：删当日立绘行 + 清指向它的签卡路径。
+
+        返回 {removed_files, cleared_draws}（文件由调用方删）。
+        """
+        rows = self._conn.execute(
+            "SELECT file FROM portraits WHERE char_id=? AND date=?", (char_id, date)
+        ).fetchall()
+        removed = [r["file"] for r in rows]
+        if removed:
+            self._conn.execute(
+                "DELETE FROM portraits WHERE char_id=? AND date=?", (char_id, date))
+        cur = self._conn.execute(
+            "UPDATE draws SET card_path='', updated_at=? WHERE char_id=? AND date=?",
+            (_now(), char_id, date),
+        )
+        self._conn.commit()
+        return {"removed_files": removed, "cleared_draws": int(cur.rowcount or 0)}
+
+    def clear_char_portraits(self, char_id: str) -> list[str]:
+        """清空某角色全部立绘行。返回被删文件相对路径清单（调用方删文件）。"""
+        rows = self._conn.execute(
+            "SELECT file FROM portraits WHERE char_id=?", (char_id,)
+        ).fetchall()
+        out = [r["file"] for r in rows]
+        self._conn.execute("DELETE FROM portraits WHERE char_id=?", (char_id,))
+        self._conn.commit()
+        return out
