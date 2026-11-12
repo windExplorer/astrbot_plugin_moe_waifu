@@ -37,10 +37,12 @@ p2 = prompt_gen.pick_variations(12345)
 check("同种子同选择", p1 == p2)
 check("六个维度齐全", set(p1.keys()) == {"compose", "outfit", "background",
                                      "pose", "expression", "body"})
-check("维度取自池内", p1["outfit"] in prompt_gen.OUTFITS
-      and p1["background"] in prompt_gen.BACKGROUNDS
+check("维度取自池内", p1["background"] in prompt_gen.BACKGROUNDS
       and p1["body"] in prompt_gen.BODY
-      and p1["compose"] in prompt_gen.COMPOSE)
+      and p1["compose"] in prompt_gen.COMPOSE
+      # 服装可能带「颜色前缀」（v0.13.1 独立配色维度），款式部分必须在池内
+      and any(it["zh"] and it["zh"] in p1["outfit"]["zh"]
+              for it in prompt_gen.OUTFITS))
 
 # 分布非退化：1000 个种子里服装至少出现 8 种（排除全撞同一项的退化）
 seen = set()
@@ -137,19 +139,38 @@ check("三套立绘模板主题存在", tpl3 is not None and tpl4 is not None an
 check("模板主题已不再置空服装", all("outfit" not in (t.get("plain_dims") or [])
                                   for t in prompt_gen.THEMES))
 pool_zh = {str(it.get("zh") or "") for it in prompt_gen.OUTFITS}
+
+
+def in_pool(zh: str) -> bool:
+    """服装条目可能带颜色前缀（v0.13.1），只要款式部分在池内即可。"""
+    return any(z and z in str(zh or "") for z in pool_zh)
+
+
 for seed in (1, 42, 777, 99999):
     p3 = prompt_gen.pick_variations(seed, tpl3)
     check(f"三视图模板强制三视图(seed={seed})", "三视图" in p3["compose"]["zh"])
     check(f"三视图模板强制标准站姿(seed={seed})", "标准站姿" in p3["pose"]["zh"])
     check(f"三视图模板强制微笑(seed={seed})", "微笑" in p3["expression"]["zh"])
-    check(f"三视图模板随机穿搭在池内(seed={seed})", p3["outfit"]["zh"] in pool_zh)
+    check(f"三视图模板随机穿搭在池内(seed={seed})", in_pool(p3["outfit"]["zh"]))
     check(f"三视图模板强制灰底(seed={seed})", "灰" in p3["background"]["zh"])
 p4 = prompt_gen.pick_variations(42, tpl4)
 check("四视图模板强制四视图", "四视图" in p4["compose"]["zh"])
-check("四视图模板随机穿搭在池内", p4["outfit"]["zh"] in pool_zh)
+check("四视图模板随机穿搭在池内", in_pool(p4["outfit"]["zh"]))
 ps = prompt_gen.pick_variations(42, tpl_s)
 check("站姿模板强制正常站姿构图", "正常站姿" in ps["compose"]["zh"])
-check("站姿模板随机穿搭在池内", ps["outfit"]["zh"] in pool_zh)
+check("站姿模板随机穿搭在池内", in_pool(ps["outfit"]["zh"]))
+
+# v0.13.1：服装配色独立抽取——旗袍/婚纱不再永远黑色
+colors = [c for c in prompt_gen.OUTFIT_COLORS if c.get("zh")]
+check("服装配色池 >= 10 色", len(colors) >= 10)
+party = prompt_gen.get_theme("party")
+party_zh = {prompt_gen.pick_variations(s, party)["outfit"]["zh"] for s in range(300)}
+check("旗袍主题配色/款式多样（>= 8 种）", len(party_zh) >= 8)
+black_n = sum(1 for s in range(300)
+              if prompt_gen.pick_variations(s, party)["outfit"]["zh"].startswith("黑色"))
+check("旗袍不再总是黑色（<40%）", black_n < 120)
+check("显式指定穿搭不叠颜色前缀",
+      prompt_gen.pick_variations(42, None, "白色婚纱")["outfit"]["zh"] == "白色婚纱")
 
 # v0.13.0：三视图文案（正/侧/背 + 灰底）、单图模板、JK 款式不再只有水手服
 check("三视图文案含正/侧/背与灰底",

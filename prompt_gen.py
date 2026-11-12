@@ -42,11 +42,17 @@ OUTFITS = [
     {"w": 4, "zh": "马甲衬衫JK制服", "en": "vest, shirt, school uniform"},
     {"w": 4, "zh": "长袖白衬衫与深色百褶裙（学院风）", "en": "white shirt, pleated skirt, school uniform"},
     {"w": 3, "zh": "冬季呢子校服大衣与围巾", "en": "duffle coat, school uniform, scarf"},
-    {"w": 7, "zh": "白色婚纱", "en": "white wedding dress, bridal veil"},
-    {"w": 4, "zh": "简约白色吊带礼服", "en": "white evening gown, sleeveless dress"},
-    {"w": 4, "zh": "秀禾服（中式红色婚服）", "en": "chinese wedding dress, red hanfu"},
-    {"w": 7, "zh": "黑色旗袍", "en": "black qipao, china dress"},
+    {"w": 7, "zh": "婚纱", "en": "wedding dress, bridal veil"},
+    {"w": 4, "zh": "吊带礼服", "en": "evening gown, sleeveless dress"},
+    {"w": 4, "zh": "秀禾服", "en": "chinese wedding dress, hanfu"},
+    # v0.13.1：旗袍不再写死黑色，颜色交给 OUTFIT_COLORS；款式按常见变体扩充
+    {"w": 6, "zh": "旗袍", "en": "qipao, china dress"},
     {"w": 4, "zh": "改良短款旗袍", "en": "short qipao, china dress"},
+    {"w": 4, "zh": "缎面提花旗袍", "en": "satin qipao, china dress"},
+    {"w": 4, "zh": "蕾丝无袖旗袍", "en": "lace qipao, sleeveless, china dress"},
+    {"w": 3, "zh": "长款修身旗袍（侧开叉）", "en": "long qipao, side slit, china dress"},
+    {"w": 3, "zh": "鱼尾摆改良旗袍", "en": "mermaid qipao, china dress"},
+    {"w": 3, "zh": "立领盘扣旗袍（双层袖口）", "en": "qipao, mandarin collar, china dress"},
     {"w": 3, "zh": "旗袍配毛披肩", "en": "qipao, fur shawl"},
     {"w": 6, "zh": "连体泳装", "en": "one-piece swimsuit"},
     {"w": 4, "zh": "分体泳装", "en": "bikini swimsuit"},
@@ -254,6 +260,27 @@ def _sub(seed_int: int, tag: str, modulus: int) -> int:
     return int.from_bytes(digest[:8], "big") % modulus
 
 
+# 服装配色（v0.13.1）：款式池里不再写死颜色，颜色按种子单独抽，再拼到款名前。
+# 大权重空项 = 保留款式本来配色；否则旗袍/婚纱这类经典色会永远压在同一色上
+# （用户反馈「旗袍每次都是黑色」）。
+OUTFIT_COLORS = [
+    {"w": 46, "zh": "", "en": ""},
+    {"w": 7, "zh": "白色", "en": "white"},
+    {"w": 6, "zh": "黑色", "en": "black"},
+    {"w": 5, "zh": "藏青色", "en": "navy blue"},
+    {"w": 5, "zh": "酒红色", "en": "wine red"},
+    {"w": 5, "zh": "墨绿色", "en": "dark green"},
+    {"w": 4, "zh": "浅蓝色", "en": "light blue"},
+    {"w": 4, "zh": "香槟金色", "en": "champagne gold"},
+    {"w": 4, "zh": "浅粉色", "en": "light pink"},
+    {"w": 4, "zh": "米白色", "en": "off-white"},
+    {"w": 3, "zh": "浅紫色", "en": "light purple"},
+    {"w": 3, "zh": "灰色", "en": "grey"},
+    {"w": 3, "zh": "棕色", "en": "brown"},
+    {"w": 2, "zh": "正红色", "en": "red"},
+]
+
+
 def _weighted_pick(items: list, r: int) -> dict:
     total = sum(int(it.get("w", 1)) for it in items) or 1
     x = int(r) % total
@@ -277,6 +304,16 @@ def pick_variations(seed_int: int, theme: dict | None = None,
     picks = {tag: _weighted_pick(items, _sub(seed_int, tag, 2 ** 30))
              for tag, items in DIMS.items()}
     picks = apply_theme(picks, seed_int, theme)
+    # v0.13.1：服装配色按种子独立抽（款式池已不含颜色），拼到款名前；
+    # 空项 = 保留款式本来配色。用户显式指定穿搭时不再叠颜色前缀。
+    color = _weighted_pick(OUTFIT_COLORS, _sub(seed_int, "outfit_color", 2 ** 30))
+    base = picks.get("outfit") or {}
+    if str(color.get("zh") or "") and str(base.get("zh") or ""):
+        picks["outfit"] = {
+            "w": base.get("w", 1),
+            "zh": f"{color['zh']}{base['zh']}",
+            "en": f"{color['en']}, {base['en']}",
+        }
     text = str(outfit_override or "").strip().strip("。，,")[:80]
     if text:
         picks["outfit"] = {"w": 0, "zh": text, "en": text}
