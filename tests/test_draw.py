@@ -44,10 +44,8 @@ check("当日已有→复用", draw.decision_of("a", "d", {"file": "x"}, 3, 5) =
 check("未满配额→生成", draw.decision_of("a", "d", None, 3, 5) == "generate")
 check("满配额→取库", draw.decision_of("a", "d", None, 5, 5) == "from_pool")
 
-# has_template_ref（v0.9.6 引入；v0.9.9 改为「文件真实可用」判定）
-# 事故背景：工坊把 `refs/xxx.png`（相对 data 目录）写进 refs，旧判定只看字符串
-# 非空 → 误规划 generate_i2i → 误发图生图台词 → 生图时按 CWD 找不到参考图 →
-# generate_portrait 少返回一个元素 → `not enough values to unpack (expected 4, got 3)`。
+# 图生图源判定（v0.10.0：与「参考图列表」彻底解耦）
+# 用户口径：没显式指定图生图参考图，就不能私自拿参考图列表里的图去生成老婆。
 import asyncio  # noqa: E402
 
 with tempfile.TemporaryDirectory() as ref_td:
@@ -57,48 +55,65 @@ with tempfile.TemporaryDirectory() as ref_td:
     (ref_dir / "refs" / "b.png").write_bytes(b"PNG")
     b_abs = str((ref_dir / "refs" / "b.png").resolve())
 
-    check("主参考绝对路径可用", draw.has_template_ref(
+    # has_template_ref：试画/补图守卫，只认显式 strategy.ref
+    check("显式主参考可用", draw.has_template_ref(
         {"strategy": {"ref": str(ref_dir / "a.png")}}) is True)
-    check("refs 相对 data 目录可用", draw.has_template_ref(
-        {"strategy": {"refs": ["", "refs/b.png"]}}, ref_dir) is True)
-    check("URL 可用", draw.has_template_ref(
+    check("只有参考图列表不算显式指定", draw.has_template_ref(
+        {"strategy": {"refs": ["", "refs/b.png"]}}, ref_dir) is False)
+    check("URL 主参考可用", draw.has_template_ref(
         {"strategy": {"ref": "https://example.com/a.png"}}) is True)
-    check("文件不存在不算有图", draw.has_template_ref(
+    check("主参考文件失效不算", draw.has_template_ref(
         {"strategy": {"ref": "a.png"}}) is False)
-    check("失效 refs 不算有图", draw.has_template_ref(
-        {"strategy": {"refs": ["", "refs/deleted.png"]}}, ref_dir) is False)
-    check("refs 全空不算", draw.has_template_ref(
-        {"strategy": {"refs": ["", " "]}}, ref_dir) is False)
     check("无 strategy 不算", draw.has_template_ref({}) is False)
-    check("pick_ref 相对路径解析", draw.pick_ref(["refs/b.png"], 0, ref_dir) == b_abs)
+    check("pick_ref 相对路径解析（仅资料库用）",
+          draw.pick_ref(["refs/b.png"], 0, ref_dir) == b_abs)
     check("pick_ref 失效路径跳过", draw.pick_ref(["nope.png"], 0, ref_dir) == "")
+
+    # 出卡源 strategy.draw_ref：独立于 ref / refs
+    check("出卡源相对路径解析", draw.draw_source(
+        {"strategy": {"draw_ref": "refs/b.png"}}, ref_dir) == b_abs)
+    check("有主参考/参考图但没指定出卡源→不规划图生图", draw.has_draw_source(
+        {"strategy": {"ref": str(ref_dir / "a.png"),
+                      "refs": ["refs/b.png"]}}, ref_dir) is False)
+    check("指定了出卡源→可用", draw.has_draw_source(
+        {"strategy": {"draw_ref": "refs/b.png"}}, ref_dir) is True)
+    check("失效出卡源不算", draw.has_draw_source(
+        {"strategy": {"draw_ref": "refs/gone.png"}}, ref_dir) is False)
 
     seen = {}
 
     class _FakeTool:
+        def __init__(self, name):
+            self.name = name
         async def handler(self, event, **kwargs):
+            seen.clear()
             seen.update(kwargs)
+            seen["tool"] = self.name
             return '{"image_paths": []}'
 
     class _FakeManager:
         def get_func(self, name):
-            return _FakeTool()
+            return _FakeTool(name)
 
     class _FakeContext:
         def get_llm_tool_manager(self):
             return _FakeManager()
 
     cfg_ref = {"data_dir": ref_dir}
-    bad = {"strategy_type": "img2img", "tags_en": "miku",
-           "strategy": {"refs": ["refs/deleted.png"]}}
-    r1 = asyncio.run(draw.generate_portrait(_FakeContext(), cfg_ref, bad, 1))
-    check("img2img 无可用参考图返回 4 元组", isinstance(r1, tuple) and len(r1) == 4)
-    check("img2img 无可用参考图 status=error", r1[0] is None and r1[1] == "error")
-    good = {"strategy_type": "img2img", "tags_en": "miku",
-            "strategy": {"ref": "refs/b.png"}}
-    r2 = asyncio.run(draw.generate_portrait(_FakeContext(), cfg_ref, good, 1))
-    check("img2img 有参考图也返回 4 元组", len(r2) == 4)
-    check("相对参考图解析成绝对路径再交给萌绘", seen.get("image") == b_abs)
+    # 只有参考图列表、没有显式源 → 回退文生图，绝不私自取列表里的图
+    only_refs = {"strategy_type": "img2img", "tags_en": "miku",
+                 "strategy": {"refs": ["refs/b.png"]}}
+    r1 = asyncio.run(draw.generate_portrait(_FakeContext(), cfg_ref, only_refs, 1))
+    check("没指定源时返回 4 元组", isinstance(r1, tuple) and len(r1) == 4)
+    check("没指定源回退文生图（comfyui_draw）", seen.get("tool") == "comfyui_draw")
+    check("没指定源不传 image", "image" not in seen)
+    # 显式指定 → 只用这一张
+    explicit = {"strategy_type": "img2img", "tags_en": "miku",
+                "strategy": {"ref": "refs/b.png", "refs": ["refs/a.png"]}}
+    r2 = asyncio.run(draw.generate_portrait(_FakeContext(), cfg_ref, explicit, 1))
+    check("显式指定也返回 4 元组", len(r2) == 4)
+    check("显式指定用 img2img 工具", seen.get("tool") == "comfyui_img2img")
+    check("显式指定的图解析成绝对路径交给萌绘", seen.get("image") == b_abs)
 
 # plan_source（v0.9.6 出图方式规划：mix/pool/img2img 三模式 + 回退链）
 # 满配额一律取库

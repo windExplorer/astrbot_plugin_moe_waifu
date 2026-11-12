@@ -532,6 +532,10 @@ def _rewrite_path_refs(plugin, old: str, new: str) -> int:
             if _norm_ref(plugin, st.get("ref")) == target:
                 st["ref"] = new
                 hit = True
+            # 出卡图生图源跟着改指新文件（v0.10.0）
+            if _norm_ref(plugin, st.get("draw_ref")) == target:
+                st["draw_ref"] = new
+                hit = True
             refs = st.get("refs")
             if isinstance(refs, list):
                 replaced = []
@@ -571,7 +575,7 @@ def _path_is_referenced(plugin, rel: str) -> bool:
     def probe(raw):
         nonlocal found
         st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
-        vals = [st.get("ref"), raw.get("cover")]
+        vals = [st.get("ref"), st.get("draw_ref"), raw.get("cover")]
         vals += list(st.get("refs") or []) if isinstance(st.get("refs"), list) else []
         if any(_norm_ref(plugin, v) == target for v in vals):
             found = True
@@ -671,6 +675,9 @@ def _move_ref_to_portrait(plugin, cid: str, path: str) -> dict:
             if _norm_ref(plugin, st.get("ref")) == norm:
                 st["ref"] = ""   # 主参考跟着解绑，避免指向已搬走的文件
                 main_ref_cleared = True
+                hit = True
+            if _norm_ref(plugin, st.get("draw_ref")) == norm:
+                st["draw_ref"] = ""   # 出卡源同理，不能指向已搬走的文件
                 hit = True
         if _norm_ref(plugin, raw.get("cover")) == norm:
             raw["cover"] = new_rel  # 封面只是展示，图还在，改指新立绘
@@ -804,7 +811,7 @@ async def h_job_start(plugin) -> dict:
             # 相对 data 目录的路径/失效文件不能再混过这道检查）
             st_now = entry.get("strategy") or {}
             if not draw.has_template_ref({"strategy": st_now}, plugin._data_dir):
-                return err("图生图重绘需要参考图：先上传图片或填 URL / 本地路径")
+                return err("请先指定本次图生图源：选一张参考图/立绘，或填 URL / 本地路径（不会自动取参考图列表里的图）")
     # 预览确认过的提示词直通（v0.5.9）：非空时不再走 prompt_gen，按原文出图
     prompt_override = str(body.get("prompt") or "").strip()[:2000]
     job_id = f"{kind}:{cid}:{int(time.time() * 1000)}"
@@ -1082,24 +1089,57 @@ async def h_refs_list(plugin) -> dict:
             "path": p, "exists": fp is not None,
             "thumb": _thumb_cached(fp, 420) if fp is not None else None,
         })
-    return ok({"id": cid, "items": items, "designated": str(st.get("ref") or "")})
+    return ok({"id": cid, "items": items,
+               "designated": str(st.get("ref") or ""),
+               "draw_ref": str(st.get("draw_ref") or "")})
 
 
-async def h_refs_orphans(plugin) -> dict:
-    """列出 data/refs/ 下没被任何角色 / 作品封面引用的图片（找回用）。
+async def h_refs_set_draw_source(plugin) -> dict:
+    """设置 / 清空角色的「出卡图生图源」（strategy.draw_ref）。
+
+    与参考图库、主参考完全独立：只有这里指定的一张能用于 `/今日老婆`
+    的图生图；path 传空串 = 取消指定（之后抽卡不再走图生图）。
+    """
+    body = await _body()
+    cid = str(body.get("id") or "").strip()
+    path = str(body.get("path") or "").strip()
+    if not cid:
+        return err("缺少 id")
+    norm = ""
+    if path:
+        if re.match(r"^[a-zA-Z]+://", path):
+            norm = path
+        else:
+            if _safe_data_file(plugin, path) is None:
+                return err("出卡图生图源文件不存在或不在数据目录内")
+            norm = _norm_ref(plugin, path)
+            if not norm:
+                return err("路径无法归一化")
+
+    def mutate(e, raw):
+        st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
+        st["draw_ref"] = norm
+        raw["strategy"] = st
+
+    if _set_entry_field(plugin, cid, mutate) is None:
+        return err(f"角色库里找不到 {cid}")
+    return ok({"id": cid, "draw_ref": norm})
+
+
+def _orphan_items(plugin) -> list:
+    """data/refs/ 下没被任何角色 / 作品封面 / 出卡源引用的图片（找回用）。
 
     v0.9.10 之前「编辑角色点保存」会静默清空 strategy.refs，文件其实还在
-    磁盘上，只是没有任何列表能找到它们。这里把它们列出来，工坊可一键
-    重新绑定到当前角色；不扫描 data 目录以外的路径，不改任何文件。
+    磁盘上，只是没有任何列表能找到它们。不扫描 data 目录以外，不改任何文件。
     """
     refs_dir = Path(plugin._data_dir) / "refs"
     if not refs_dir.is_dir():
-        return ok({"items": []})
+        return []
     used = set()
 
     def probe(raw):
         st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
-        vals = [st.get("ref"), raw.get("cover")]
+        vals = [st.get("ref"), st.get("draw_ref"), raw.get("cover")]
         vals += list(st.get("refs") or []) if isinstance(st.get("refs"), list) else []
         for v in vals:
             n = _norm_ref(plugin, v)
@@ -1126,7 +1166,12 @@ async def h_refs_orphans(plugin) -> dict:
                           "size": f.stat().st_size})
         except Exception:
             items.append({"path": rel, "thumb": None, "size": 0})
-    return ok({"items": items})
+    return items
+
+
+async def h_refs_orphans(plugin) -> dict:
+    """列出未绑定图片，工坊可一键重新绑定到当前角色。"""
+    return ok({"items": await asyncio.to_thread(_orphan_items, plugin)})
 
 
 async def h_refs_bind(plugin) -> dict:
@@ -1171,6 +1216,8 @@ async def h_refs_unbind(plugin) -> dict:
         st["refs"] = refs
         if _norm_ref(plugin, st.get("ref")) == norm:
             st["ref"] = ""
+        if _norm_ref(plugin, st.get("draw_ref")) == norm:
+            st["draw_ref"] = ""   # 出卡源指向这张图时一并取消，避免死链
         raw["strategy"] = st
 
     pack_name = _set_entry_field(plugin, cid, mutate)
@@ -1450,8 +1497,9 @@ async def h_config_set(plugin) -> dict:
 # v0.8.0：角色详情改为二级页面（不再是导航页签，旧记忆值自动回落 chars）。
 # v0.9.0：原「记录 · 调试」拆成 抽签记录 / 数据统计 / 用户查询 / 调试工具 四页，
 # 旧键 records 保留（老记忆值仍落在抽签记录页，不会跳回角色库）。
-_UI_MENUS = ("chars", "works", "try", "records", "stats", "users",
-             "debug", "bind", "config")
+# v0.10.0：新增「总览」并放到第一栏，同时成为无记忆时的默认页签。
+_UI_MENUS = ("overview", "chars", "works", "try", "records", "stats",
+             "users", "debug", "bind", "config")
 
 
 def _ui_state_path(plugin) -> Path:
@@ -1459,7 +1507,7 @@ def _ui_state_path(plugin) -> Path:
 
 
 async def h_ui_state_get(plugin) -> dict:
-    menu = "chars"
+    menu = "overview"
     try:
         data = _json_load(_ui_state_path(plugin))
         if isinstance(data, dict) and data.get("menu") in _UI_MENUS:
@@ -1482,6 +1530,63 @@ async def h_ui_state_set(plugin) -> dict:
         logger.warning(f"[{PLUGIN_NAME}] ui_state 写盘失败\n{traceback.format_exc()}")
         return err("页签记忆写盘失败")
     return ok({"menu": menu})
+
+
+async def h_overview(plugin) -> dict:
+    """总览页聚合（只读）：库存规模 / 出卡源配置 / 抽卡概况 / 最近记录。"""
+    def build():
+        packs = pool.load_packs(_pools_dir(plugin), logger)
+        entries = []
+        for p in packs:
+            for raw in p["entries"]:
+                e = pool.normalize_entry(raw, p["pack"])
+                if e:
+                    entries.append(e)
+        quota = max(1, int(plugin._cfg("portraits_per_char", 5) or 5))
+        portraits = plugin._store.list_portraits_all() if plugin._store else []
+        by_char = {}
+        for row in portraits:
+            by_char[row["char_id"]] = by_char.get(row["char_id"], 0) + 1
+
+        refs_bound = 0
+        draw_sources = 0
+        no_source = []
+        for e in entries:
+            st = e.get("strategy") or {}
+            refs = st.get("refs") if isinstance(st.get("refs"), list) else []
+            refs_bound += sum(1 for x in refs if str(x or "").strip())
+            has_draw = bool(draw.draw_source(e, plugin._data_dir))
+            if has_draw:
+                draw_sources += 1
+            if str(e.get("strategy_type") or "") == "img2img" \
+                    and not has_draw and not draw.explicit_ref(st, plugin._data_dir):
+                no_source.append({"id": e["id"], "name": e["name"]})
+
+        today = plugin._today()
+        recent, today_draws, total_draws = [], 0, 0
+        if plugin._store:
+            recent = plugin._store.list_records(1, 5)["rows"]
+            today_draws = plugin._store.list_records(1, 1, today, today)["total"]
+            total_draws = plugin._store.list_records(1, 1)["total"]
+        try:
+            anima_ready = draw._get_tool_handler(plugin.context, "comfyui_draw") is not None
+        except Exception:
+            anima_ready = False
+        return {
+            "version": _version_of(), "anima_ready": anima_ready,
+            "quota": quota,
+            "gen_source_mode": str(plugin._cfg("gen_source_mode", "mix") or "mix"),
+            "img2img_prob": _int_clamp(plugin._cfg("img2img_prob", 50), 50, 0, 100),
+            "packs": len(packs), "chars": len(entries),
+            "verified": sum(1 for e in entries if e["verified"]),
+            "portraits": len(portraits),
+            "chars_full": sum(1 for n in by_char.values() if n >= quota),
+            "refs_bound": refs_bound, "orphans": len(_orphan_items(plugin)),
+            "draw_sources": draw_sources, "no_source": no_source[:6],
+            "today_draws": today_draws, "total_draws": total_draws,
+            "recent": recent,
+        }
+    return ok(await asyncio.to_thread(build))
 
 
 # ---------- 记录 / 统计 / 调试（v0.8.0） ----------
@@ -1855,9 +1960,9 @@ def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
     except (TypeError, ValueError):
         i2i_prob = 50
     if decision == "generate":
-        # 与真实出卡同口径：按「文件真实存在」判定模板图（v0.9.9）
+        # 与真实出卡同口径：只认显式指定的出卡图生图源（v0.10.0）
         decision = draw.plan_source(gen_mode, pool_size, quota,
-                                    draw.has_template_ref(entry, plugin._data_dir),
+                                    draw.has_draw_source(entry, plugin._data_dir),
                                     pool.sub_int(seed, "genmode", 100), i2i_prob)
     pick = None
     if decision == "reuse_today":
@@ -2160,6 +2265,7 @@ def register(plugin) -> None:
         ("/refs/upload", h_refs_upload, ["POST"]),
         ("/refs/list", h_refs_list, ["GET", "POST"]),
         ("/refs/orphans", h_refs_orphans, ["GET", "POST"]),
+        ("/refs/set_draw_source", h_refs_set_draw_source, ["POST"]),
         ("/image/data", h_image_data, ["GET", "POST"]),
         ("/refs/bind", h_refs_bind, ["POST"]),
         ("/refs/unbind", h_refs_unbind, ["POST"]),
@@ -2195,6 +2301,7 @@ def register(plugin) -> None:
         ("/quote_gen", h_quote_gen, ["POST"]),
         ("/ui_state", h_ui_state_get, ["GET"]),
         ("/ui_state", h_ui_state_set, ["POST"]),
+        ("/overview", h_overview, ["GET", "POST"]),
     ]
     for path, fn, methods in routes:
         plugin.context.register_web_api(

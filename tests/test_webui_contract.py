@@ -46,6 +46,8 @@ doForceReroll doClearDraws doResetCharDay doClearCharPortraits
 charNameOf decisionLabel barPct
 movePortraitToRef moveRefToPortrait doQuickAction
 galOrphans bindOrphan
+ov ovLoading loadOverview goMenu
+galDrawRef galDrawOpts setDrawSource
 fmtTime cfgBoundGroups pickSimGroup simScopeText
 """.split()
 
@@ -53,6 +55,7 @@ ROUTES = """
 /records /records/detail /records/events /stats /users /user /filters
 /debug/state /debug/history /debug/simulate /debug/rerender
 /portraits/move_to_ref /refs/move_to_portrait /refs/orphans
+/refs/set_draw_source /overview
 """.split()
 
 STORE_METHODS = """
@@ -75,7 +78,8 @@ def main():
     check("后端存在 _UI_MENUS", ui_block is not None)
     back_keys = re.findall(r'"(\w+)"', ui_block.group(1)) if ui_block else []
     check("页签前后一致（页签记忆不会写入被拒）",
-          front_keys == back_keys and len(front_keys) == 9,
+          front_keys == back_keys and len(front_keys) == 10
+          and front_keys[0] == "overview",
           f"front={front_keys} back={back_keys}")
     check("四个新页签齐全",
           {"records", "stats", "users", "debug"} <= set(front_keys))

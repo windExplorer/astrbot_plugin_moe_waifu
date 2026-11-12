@@ -436,21 +436,30 @@ class MoeWaifuPlugin(Star):
         # 让「没绑图生图源」的签被规划成 generate_i2i，先发图生图台词、
         # 再在 generate_portrait 里找不到参考图直接抛异常。
         data_dir = str(self._data_dir) if self._data_dir else ""
+        # v0.10.0：出卡图生图源是**独立且必须显式指定**的 strategy.draw_ref，
+        # 与「参考图列表」strategy.refs 无关——没指定就不规划图生图、
+        # 不播图生图台词，更不会从列表里私自挑一张。
+        draw_src = draw.draw_source(entry, data_dir)
         decision = draw.decision_of(char_id, date, today_row, pool_size, quota)
         if decision == "generate":
             decision = draw.plan_source(mode, pool_size, quota,
-                                        draw.has_template_ref(entry, data_dir),
+                                        bool(draw_src),
                                         pool.sub_int(seed_bytes, "genmode", 100),
                                         i2i_prob)
-        # 二次确认（文件可能在规划后被清理）：没有可用模板图就不发图生图提示、
-        # 不临时转画法，回退按角色原画法生成。
-        if decision == "generate_i2i" and not draw.has_template_ref(entry, data_dir):
+        # 二次确认（文件可能在规划后被清理）
+        if decision == "generate_i2i" and not draw_src:
             decision = "generate"
-        if decision == "generate_i2i" \
-                and str(entry.get("strategy_type") or "base") != "img2img":
-            # 该签决定走模板图生图：把 base/lora 条目临时转成 img2img 画法
-            # （沿用角色绑定的模板参考图 strategy.ref/refs，有效强度不变）
-            entry = draw.effective_entry(entry, {"strategy_type": "img2img"})
+        if decision == "generate_i2i":
+            # 把指定的出卡源注入 ref：generate_portrait 只认显式 ref，
+            # 不退回参考图库随机取图；条目本身是 img2img 也强制用这一张。
+            # effective_entry 会按 override 重建 img2img 字段，条目级图生图
+            # 工作流要一并带上，否则抽卡会静默丢掉用户选的工作流。
+            override = {"strategy_type": "img2img", "ref": draw_src}
+            st_wf = str((entry.get("strategy") or {}).get("img2img_workflow")
+                        or "").strip()
+            if st_wf:
+                override["img2img_workflow"] = st_wf
+            entry = draw.effective_entry(entry, override)
 
         src = None
         rel_path = ""

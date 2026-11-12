@@ -16,6 +16,8 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+import draw  # noqa: E402
+import pool  # noqa: E402
 import store  # noqa: E402
 import webui_api as api  # noqa: E402
 
@@ -289,6 +291,37 @@ def test_orphans_recovery(root: Path):
     st.close()
 
 
+def test_draw_source(root: Path):
+    """v0.10.0：出卡图生图源独立字段的设置、取消、解绑清理。"""
+    plugin, st = make_plugin(root)
+    refs_dir = root / "refs"
+    refs_dir.mkdir(parents=True, exist_ok=True)
+    (refs_dir / "a.png").write_bytes(b"A")
+    data = read_pack(root)
+    data["entries"][0]["strategy"]["refs"] = ["refs/a.png"]
+    write_pack(root, data)
+
+    r1 = asyncio.run(call_handler(plugin, api.h_refs_set_draw_source,
+                                  {"id": "c1", "path": "refs/a.png"}))
+    check("可指定出卡源", r1["status"] == "ok"
+          and char_of(root, "c1")["strategy"]["draw_ref"] == "refs/a.png", str(r1))
+    check("出卡源被识别为可用", draw.draw_source(
+        pool.normalize_entry(char_of(root, "c1"), "anime"), root) != "")
+    check("孤儿扫描不把出卡源算孤儿",
+          all(i["path"] != "refs/a.png"
+              for i in asyncio.run(api.h_refs_orphans(plugin))["data"]["items"]))
+    r2 = asyncio.run(call_handler(plugin, api.h_refs_unbind,
+                                  {"id": "c1", "path": "refs/a.png"}))
+    check("解绑成功", r2["status"] == "ok", str(r2))
+    check("解绑后出卡源被清空",
+          char_of(root, "c1")["strategy"]["draw_ref"] == "")
+    r3 = asyncio.run(call_handler(plugin, api.h_refs_set_draw_source,
+                                  {"id": "c1", "path": ""}))
+    check("可显式取消出卡源", r3["status"] == "ok"
+          and r3["data"]["draw_ref"] == "", str(r3))
+    st.close()
+
+
 def main():
     jobs = [("move_to_ref", test_move_to_ref), ("roundtrip", test_roundtrip),
             ("delete_legacy", test_delete_legacy_dirty_data),
@@ -297,7 +330,8 @@ def main():
             ("validation", test_validation),
             ("save_keeps_refs", test_save_entry_keeps_refs),
             ("unbind_shared", test_unbind_shared_ref),
-            ("orphans", test_orphans_recovery)]
+            ("orphans", test_orphans_recovery),
+            ("draw_source", test_draw_source)]
     for name, fn in jobs:
         with tempfile.TemporaryDirectory() as td:
             print(f"--- {name} ---")

@@ -222,6 +222,32 @@ def usable_refs(strategy: dict, data_dir=None) -> list:
     return out
 
 
+def explicit_ref(strategy: dict, data_dir=None) -> str:
+    """**显式指定**的图生图源（strategy.ref）；未指定或文件失效返回空串。
+
+    v0.10.0 起这是唯一能进入图生图的入口：参考图库 `refs` 只作资料库
+    （试画时由用户手动选图再经 override 写进 ref），不参与自动选取。
+    """
+    if not isinstance(strategy, dict):
+        return ""
+    return _ref_path(strategy.get("ref"), data_dir)
+
+
+def draw_source(entry: dict, data_dir=None) -> str:
+    """出卡（/今日老婆）专用图生图源（strategy.draw_ref）。
+
+    与「参考图库 / 主参考」是两回事（用户口径 v0.10.0）：只有管理员在工坊
+    显式指定的这一张能用于生成老婆的图生图；没指定就不规划图生图、
+    不发图生图台词、更不会去参考图列表里随便挑一张。
+    """
+    st = entry.get("strategy") or {}
+    return _ref_path(st.get("draw_ref"), data_dir) if isinstance(st, dict) else ""
+
+
+def has_draw_source(entry: dict, data_dir=None) -> bool:
+    return bool(draw_source(entry, data_dir))
+
+
 async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
                             event=None, prompt: str | None = None):
     """按角色策略生成立绘。返回 (本地路径|None, status, error, duration_ms)。
@@ -238,6 +264,15 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
     prompt = str(prompt or "").strip() or build_prompt(entry)
     stype = str(entry.get("strategy_type") or "base")
     strategy = entry.get("strategy") or {}
+    data_dir = cfg.get("data_dir") or None
+    # v0.10.0：图生图源必须**显式指定**（strategy.ref；抽卡时由 _produce 把
+    # strategy.draw_ref 注入到这里）。绝不再从参考图库 refs 按种子随机取图——
+    # 「没指定图生图参考图，就不能私自用参考图列表里面的」。
+    ref = explicit_ref(strategy, data_dir)
+    if stype == "img2img" and not ref:
+        # 旧数据兜底：角色画法写着 img2img 却没指定源 → 按 tags 文生图，
+        # 不中断出卡，也不会偷偷拿资料库里的图。
+        stype = "base"
     timeout = int(cfg.get("draw_timeout", 120))
     if timeout <= 0:
         timeout = 120
@@ -247,20 +282,9 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
         handler = _get_tool_handler(context, tool_name)
         if handler is None:
             return None, _STATUS_NO_ANIMA, "未安装萌绘（comfyui_img2img 工具不存在）", 0
-        # 参考图解析（v0.9.9）：主参考 strategy.ref 优先 → refs 按种子确定性选；
-        # 统一经 usable_refs 解析成绝对路径 / URL（相对路径按 cfg["data_dir"] 找），
-        # 与 has_template_ref 的规划判定完全同口径，杜绝「说有图、画时找不到」。
-        data_dir = cfg.get("data_dir") or None
-        main_ref = _ref_path(strategy.get("ref"), data_dir)
-        refs = usable_refs(strategy, data_dir)
-        ref = main_ref or (refs[int(seed_int) % len(refs)] if refs else "")
-        if not ref:
-            return None, "error", (
-                "图生图没有可用参考图（文件不存在或已被清理）：请在工坊重新上传，"
-                "或把该角色的画法改回文生图"), 0
-        image = ref
+        image = ref   # 已解析成绝对路径 / URL，且必然非空
         if not re.match(r"^[a-zA-Z]+://", image) and not Path(image).is_file():
-            return None, "error", f"参考图文件不存在：{image}", 0
+            return None, "error", f"图生图源文件不存在：{image}", 0
         # img2img 不带 workflow（那是文生图槽位）；图生图工作流三级解析：
         # 条目 strategy.img2img_workflow → 全局配置 img2img_workflow → 留空（萌绘默认）
         kwargs = _base_kwargs(cfg, prompt, seed_int,
@@ -332,6 +356,8 @@ def pick_ref(refs, seed_int: int, data_dir=None) -> str:
     """从参考图列表按种子选一张（确定性随机：同种子同图；失效的自动跳过）。
 
     refs 元素允许绝对路径、相对 data 目录路径或 URL；只回传真实可用的条目。
+    ⚠️ v0.10.0 起**出图不再调用它**：参考图列表只是资料库，图生图源必须由
+    用户显式指定（explicit_ref / draw_source），不能自动替用户挑一张。
     """
     candidates = usable_refs({"refs": refs}, data_dir)
     if not candidates:
@@ -450,15 +476,13 @@ def decision_of(char_id: str, date_str: str, today_row: dict | None,
 
 
 def has_template_ref(entry: dict, data_dir=None) -> bool:
-    """角色是否绑定了**真实可用**的图生图模板图（文件存在 / URL）。
+    """是否有**显式指定**的图生图源（strategy.ref，供试画 / 补图守卫用）。
 
-    v0.9.9 前只查「字符串非空」：工坊把相对路径 `refs/xxx.png` 或已被清掉的
-    图留在 refs 里时，规划器会误以为有模板图 → 决策 generate_i2i → 误发
-    「照着官方图精心重绘」提示 → 生图时找不到参考图。判定必须和真正出图时
-    的 usable_refs 同口径，相对路径按 data_dir 解析。
+    v0.10.0：参考图库 `strategy.refs` 只是资料库，不再算作「有模板图」。
+    抽卡出图的专用源另见 `has_draw_source`（strategy.draw_ref）。
     """
     st = entry.get("strategy") or {}
-    return bool(usable_refs(st, data_dir))
+    return bool(explicit_ref(st, data_dir))
 
 
 def plan_source(mode: str, pool_size: int, quota: int, has_ref: bool,

@@ -217,6 +217,85 @@
                （v0.2.1 坑的真面目，div v-if 也躲不过）。普通 div + .stack 间距工具类。 -->
           <div class="stack">
 
+          <!-- ============ 总览（v0.10.0，第一栏） ============ -->
+          <div v-if="menu === 'overview'" class="stack">
+            <div class="sec-title">总览
+              <span class="cnt">{{ ov.version }} · {{ ov.anima_ready ? "萌绘已就绪" : "萌绘未就绪" }} · 出图方式 {{ ov.gen_source_mode }}</span>
+              <n-button size="tiny" secondary :loading="ovLoading" @click="loadOverview">刷新</n-button>
+            </div>
+            <div v-if="!ov.anima_ready"
+                 style="padding: 8px 12px; border-radius: 8px; background: rgba(230,162,60,.12); color: #c47f17; font-size: 13px;">
+              萌绘（astrbot_plugin_comfyui_anima）未就绪：需要现画立绘时会失败，已有立绘库的角色不受影响。
+            </div>
+            <n-grid :cols="4" :x-gap="12" :y-gap="12">
+              <n-gi>
+                <div style="border:1px solid rgba(128,128,128,.22); border-radius:12px; padding:14px; height:100%;">
+                  <div style="font-size:12px; opacity:.65;">角色</div>
+                  <div style="font-size:30px; font-weight:700; line-height:1.3;">{{ ov.chars }}</div>
+                  <div style="font-size:12px; opacity:.65;">{{ ov.verified }} 个已验证 · {{ ov.packs }} 卷</div>
+                </div>
+              </n-gi>
+              <n-gi>
+                <div style="border:1px solid rgba(128,128,128,.22); border-radius:12px; padding:14px; height:100%;">
+                  <div style="font-size:12px; opacity:.65;">立绘</div>
+                  <div style="font-size:30px; font-weight:700; line-height:1.3;">{{ ov.portraits }}</div>
+                  <div style="font-size:12px; opacity:.65;">{{ ov.chars_full }} 个角色已满 {{ ov.quota }} 张配额</div>
+                </div>
+              </n-gi>
+              <n-gi>
+                <div style="border:1px solid rgba(128,128,128,.22); border-radius:12px; padding:14px; height:100%;">
+                  <div style="font-size:12px; opacity:.65;">今日抽卡</div>
+                  <div style="font-size:30px; font-weight:700; line-height:1.3;">{{ ov.today_draws }}</div>
+                  <div style="font-size:12px; opacity:.65;">累计 {{ ov.total_draws }} 人次</div>
+                </div>
+              </n-gi>
+              <n-gi>
+                <div style="border:1px solid rgba(128,128,128,.22); border-radius:12px; padding:14px; height:100%;">
+                  <div style="font-size:12px; opacity:.65;">参考图</div>
+                  <div style="font-size:30px; font-weight:700; line-height:1.3;">{{ ov.refs_bound }}</div>
+                  <div style="font-size:12px; opacity:.65;">{{ ov.orphans }} 张未绑定待找回</div>
+                </div>
+              </n-gi>
+            </n-grid>
+            <n-grid :cols="2" :x-gap="12" :y-gap="12">
+              <n-gi>
+                <div style="border:1px solid rgba(128,128,128,.22); border-radius:12px; padding:14px; height:100%;">
+                  <div style="font-size:13px; font-weight:600; margin-bottom:6px;">出卡图生图源</div>
+                  <div style="font-size:12px; opacity:.75; line-height:1.7;">
+                    {{ ov.draw_sources }} 个角色已指定。未指定时抽卡不会走图生图，
+                    也不会私自取参考图列表里的图；混合模式命中概率 {{ ov.img2img_prob }}%。
+                  </div>
+                  <div v-if="ov.no_source.length" style="font-size:12px; opacity:.75; margin-top:8px;">
+                    画法为图生图但没指定出卡源（将回退文生图）：
+                    <span v-for="c in ov.no_source" :key="c.id">{{ c.name }} </span>
+                  </div>
+                  <div v-else style="font-size:12px; opacity:.6; margin-top:8px;">没有待补配置的角色</div>
+                </div>
+              </n-gi>
+              <n-gi>
+                <div style="border:1px solid rgba(128,128,128,.22); border-radius:12px; padding:14px; height:100%;">
+                  <div style="font-size:13px; font-weight:600; margin-bottom:6px;">最近抽签</div>
+                  <div v-if="!ov.recent.length" style="font-size:12px; opacity:.6;">还没有抽签记录</div>
+                  <div v-for="r in ov.recent" :key="r.user_id + r.date"
+                       style="font-size:12px; opacity:.75; margin-top:6px;">
+                    {{ r.char_name || r.char_id }} · {{ r.user_id }} · {{ r.date }}
+                  </div>
+                </div>
+              </n-gi>
+            </n-grid>
+            <div>
+              <n-space :wrap="true" size="small">
+                <n-button size="small" type="primary" @click="goMenu('chars')">角色库</n-button>
+                <n-button size="small" @click="goMenu('try')">试画台</n-button>
+                <n-button size="small" @click="goMenu('records')">抽签记录</n-button>
+                <n-button size="small" @click="goMenu('config')">配置</n-button>
+              </n-space>
+            </div>
+            <div v-if="ov.orphans > 0" class="bind-tip">
+              有 {{ ov.orphans }} 张图片未绑定任何角色：进「角色库 → 角色详情 → 参考图」可一键找回。
+            </div>
+          </div>
+
           <!-- ============ 角色库 ============ -->
           <div v-if="menu === 'chars'">
             <n-space align="center" :wrap="true">
@@ -641,9 +720,19 @@
             <!-- 参考图区 -->
             <div>
               <div class="sec-title">参考图
-                <span class="cnt">{{ galRefs.length }} 张{{ galMainRef ? " · 主参考已指定" : " · 未指定主参考（图生图随机选）" }} · 与立绘库互斥，可双向转移</span>
+                <span class="cnt">{{ galRefs.length }} 张{{ galMainRef ? " · 主参考已指定" : " · 未指定主参考" }} · 与立绘库互斥，可双向转移</span>
                 <!-- v0.6.2：上传改弹窗（可拖拽可多选），不再是一颗孤零零的小按钮 -->
                 <n-button size="tiny" type="primary" secondary @click="galUploadOpen = true">上传</n-button>
+              </div>
+              <!-- v0.10.0：出卡图生图源与参考图列表是两回事，必须显式指定 -->
+              <div style="margin: 6px 0 10px; padding: 10px 12px; border: 1px solid rgba(128,128,128,.22); border-radius: 10px;">
+                <div style="font-size: 12px; font-weight: 600; margin-bottom: 6px;">出卡图生图源（/今日老婆 专用）</div>
+                <n-select v-model:value="galDrawRef" :options="galDrawOpts" size="small"
+                          clearable placeholder="未指定（抽卡不使用图生图）"
+                          style="max-width: 420px;" @update:value="setDrawSource"></n-select>
+                <div style="font-size: 12px; opacity: .65; margin-top: 6px;">
+                  只有这里指定的一张会用于生成老婆的图生图；上列参考图只是资料库，不会被自动取用。
+                </div>
               </div>
               <n-grid :cols="6" :x-gap="8" :y-gap="8" v-if="galRefs.length > 0">
                 <n-gi v-for="r in galRefs" :key="r.path">
@@ -2204,14 +2293,16 @@
       });
 
       // ---- 全局 ----
-      var menu = Vue.ref("chars");
+      var menu = Vue.ref("overview");
       var loadingAll = Vue.ref(false);
       var meta = Vue.ref({ packs: [], counts: {}, version: "", anima_ready: false, quota: 5 });
       function rowKey(row) { return row.id; }
 
       // v0.9.0：原「记录 · 调试」拆成四个独立页签；key 必须与后端
       // webui_api._UI_MENUS 白名单一致，否则页签记忆会被拒绝写入。
+      // v0.10.0：新增「总览」放第一栏，也是默认页签。
       var menuOpts = [
+        { label: "总览", key: "overview" },
         { label: "角色库", key: "chars" },
         { label: "作品库", key: "works" },
         { label: "试画台", key: "try" },
@@ -2240,6 +2331,7 @@
         menu.value = key;
         menuTouched = true;
         saveUiMenu(key);
+        if (key === "overview") loadOverview();
       }
       (function restoreUiMenu() {
         try {
@@ -2247,13 +2339,37 @@
           if (p && typeof p.then === "function") {
             p.then(function (res) {
               if (menuTouched) return;  // 恢复返回前用户已手点，别覆盖
-              var m = res && res.data && res.data.menu;
-              if (uiMenuKeys.indexOf(m) >= 0) { menu.value = m; menuTouched = true; }
+              // 桥 SDK 已把 {status,data} 信封解包，返回的就是 data 本身。
+              // 旧代码多取一层 .data 恒为 undefined → 刷新总是落回第一页。
+              var m = res && (res.menu || (res.data && res.data.menu));
+              if (uiMenuKeys.indexOf(m) >= 0) {
+                menu.value = m;
+                menuTouched = true;
+                if (m === "overview") loadOverview();
+              }
             }).catch(function () { /* 静默 */ });
           }
         } catch (e) { /* 静默 */ }
       })();
       function onMenu(key) { setMenu(key); }
+
+      // ---- 总览（v0.10.0，第一栏）----
+      var ov = Vue.ref({
+        version: "", anima_ready: false, quota: 5, gen_source_mode: "mix",
+        img2img_prob: 50, packs: 0, chars: 0, verified: 0, portraits: 0,
+        chars_full: 0, refs_bound: 0, orphans: 0, draw_sources: 0,
+        no_source: [], today_draws: 0, total_draws: 0, recent: []
+      });
+      var ovLoading = Vue.ref(false);
+      async function loadOverview() {
+        ovLoading.value = true;
+        try {
+          var res = await apiGet("overview", {});
+          if (res) ov.value = Object.assign({}, ov.value, res);
+        } catch (e) { /* 已提示 */ } finally { ovLoading.value = false; }
+      }
+      function goMenu(key) { setMenu(key); }
+      loadOverview();  // 首屏（含服务端恢复到总览）就有数据
 
       // ---- 角色库 ----
       var filterPack = Vue.ref("");
@@ -3050,15 +3166,42 @@
       var galMainRef = Vue.ref("");
       function loadGalRefs() {
         if (!galCharId.value) {
-          galRefs.value = []; galMainRef.value = ""; galOrphans.value = []; return;
+          galRefs.value = []; galMainRef.value = ""; galDrawRef.value = "";
+          galOrphans.value = []; return;
         }
         galRefsLoading.value = true;
         apiGet("refs/list", { id: galCharId.value }).then(function (res) {
           galRefs.value = (res && res.items) || [];
           galMainRef.value = (res && res.designated) || "";
-        }).catch(function () { galRefs.value = []; galMainRef.value = ""; })
-          .finally(function () { galRefsLoading.value = false; });
+          galDrawRef.value = (res && res.draw_ref) || "";
+        }).catch(function () {
+          galRefs.value = []; galMainRef.value = ""; galDrawRef.value = "";
+        }).finally(function () { galRefsLoading.value = false; });
         loadGalOrphans();
+      }
+      // 出卡图生图源（v0.10.0）：独立于参考图列表，不指定就不走图生图
+      var galDrawRef = Vue.ref("");
+      var galDrawOpts = Vue.computed(function () {
+        var seen = {}, opts = [{ label: "未指定（抽卡不使用图生图）", value: "" }];
+        var paths = (galRefs.value || []).map(function (r) { return r.path; });
+        if (galMainRef.value) paths.push(galMainRef.value);
+        if (galDrawRef.value) paths.push(galDrawRef.value);
+        paths.forEach(function (p) {
+          if (!p || seen[p]) return;
+          seen[p] = 1;
+          opts.push({ label: p, value: p });
+        });
+        return opts;
+      });
+      async function setDrawSource(path) {
+        if (!galCharId.value) return;
+        try {
+          await apiPost("refs/set_draw_source",
+                        { id: galCharId.value, path: path || "" });
+          galDrawRef.value = path || "";
+          message.success(path ? "已指定出卡图生图源" : "已取消指定，抽卡不再使用图生图");
+          await loadAll();
+        } catch (e) { /* 已提示 */ }
       }
       // 找回未绑定图片（v0.9.10：编辑保存曾清空 refs，文件其实还在磁盘）
       var galOrphans = Vue.ref([]);
@@ -4115,6 +4258,7 @@
         theme: theme, themeOverrides: themeOverrides,
         dragOverlay: dragOverlay, dragOverlayText: dragOverlayText,
         menu: menu, menuOpts: menuOpts, onMenu: onMenu,
+        ov: ov, ovLoading: ovLoading, loadOverview: loadOverview, goMenu: goMenu,
         meta: meta, loadingAll: loadingAll, loadAll: loadAll, rowKey: rowKey,
         charsMode: charsMode, cardPage: cardPage, cardPageSize: cardPageSize,
         pagedEntries: pagedEntries, gotoTryFromChars: gotoTryFromChars,
@@ -4202,6 +4346,7 @@
         gotoTryFromDetail: gotoTryFromDetail,
         galRefs: galRefs, galRefsLoading: galRefsLoading, galMainRef: galMainRef,
         galOrphans: galOrphans, bindOrphan: bindOrphan,
+        galDrawRef: galDrawRef, galDrawOpts: galDrawOpts, setDrawSource: setDrawSource,
         setMainRef: setMainRef, unbindGalRef: unbindGalRef,
         galUploadOpen: galUploadOpen, galUpNote: galUpNote,
         onGalPanelFiles: onGalPanelFiles,
