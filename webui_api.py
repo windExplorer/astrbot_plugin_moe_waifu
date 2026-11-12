@@ -2117,6 +2117,59 @@ async def h_user(plugin) -> dict:
         _user_core, plugin, uid, body.get("months") or _q("months", 3)))
 
 
+# ---------- 用户头像（v0.13.2） ----------
+# 前端在记录表 / 用户卡 / 总览批量展示头像，逐个直连 QQ 图床既慢又不稳，
+# 统一走本代理：q4.qlogo.cn/headimg_dl（q1 g?qq= 端点已死，星语同款通道）
+# 拉 spec=100 小图转 data URL；进程内缓存 + TTL，失败返回 err（前端静默回落色块）。
+
+_AVATAR_TTL = 6 * 3600
+_AVATAR_CACHE_MAX = 500
+_avatar_cache: dict[str, tuple[float, str]] = {}
+
+
+async def _fetch_avatar_data_url(uid: str) -> str | None:
+    try:
+        import aiohttp  # AstrBot 运行期依赖；缺席时返回 None 走降级
+    except Exception:
+        return None
+
+    url = f"https://q4.qlogo.cn/headimg_dl?qq={uid}&spec=100"
+    try:
+        timeout = aiohttp.ClientTimeout(total=6)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    return None
+                raw = await resp.read()
+    except Exception:
+        return None
+    if not raw:
+        return None
+    return "data:image/jpeg;base64," + base64.b64encode(raw).decode("ascii")
+
+
+async def h_user_avatar(plugin) -> dict:
+    body = await _body()
+    uid = str(body.get("uid") or _q("uid", "") or "").strip()
+    if not uid or not uid.isdigit():
+        return err("缺少合法 uid")
+    now = time.time()
+    hit = _avatar_cache.get(uid)
+    if hit and now - hit[0] < _AVATAR_TTL:
+        return ok({"data_url": hit[1], "cached": True})
+    data_url = await _fetch_avatar_data_url(uid)
+    if not data_url:
+        return err("头像获取失败")
+    if len(_avatar_cache) >= _AVATAR_CACHE_MAX:
+        # 简单淘汰：丢掉最旧的一半，避免无限增长
+        for k in sorted(_avatar_cache, key=lambda k: _avatar_cache[k][0])[
+            : _AVATAR_CACHE_MAX // 2
+        ]:
+            _avatar_cache.pop(k, None)
+    _avatar_cache[uid] = (now, data_url)
+    return ok({"data_url": data_url, "cached": False})
+
+
 async def h_filter_options(plugin) -> dict:
     """记录筛选下拉：群 / 平台 / 角色（一次取齐，避免每开一页发三个请求）。"""
     if not plugin._store:
@@ -2329,6 +2382,7 @@ def register(plugin) -> None:
         ("/stats", h_stats, ["GET", "POST"]),
         ("/users", h_users, ["GET", "POST"]),
         ("/user", h_user, ["GET", "POST"]),
+        ("/user/avatar", h_user_avatar, ["GET", "POST"]),
         ("/filters", h_filter_options, ["GET"]),
         ("/debug/state", h_debug_state, ["GET", "POST"]),
         ("/debug/history", h_debug_history, ["GET", "POST"]),

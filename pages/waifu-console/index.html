@@ -132,8 +132,9 @@
   .gen-strip .gal-item { flex: 0 0 84px; }
   .gen-strip .gal-item img { aspect-ratio: 7 / 12; }
   /* 记录 · 调试页（v0.8.0） */
-  .stat-card { border: 1px solid rgba(128,128,128,.25); border-radius: 6px;
-               padding: 10px 12px; text-align: center; }
+  /* v0.13.2：卡片语言全站统一（radius 10 / 同一灰阶描边），总览卡同款 */
+  .stat-card { border: 1px solid rgba(128,128,128,.22); border-radius: 10px;
+               padding: 12px; text-align: center; background: rgba(255,255,255,.6); }
   .stat-num { font-size: 20px; font-weight: 700; line-height: 1.3; }
   .stat-label { font-size: 12px; opacity: .6; margin-top: 2px; }
   .rec-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -142,8 +143,8 @@
   .rec-table th { opacity: .55; font-weight: 600; }
   .rec-table td { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
   .rec-err { color: #d03050; }
-  .debug-card { border: 1px solid rgba(128,128,128,.25); border-radius: 6px;
-               padding: 10px 12px; }
+  .debug-card { border: 1px solid rgba(128,128,128,.22); border-radius: 10px;
+               padding: 12px; }
   .debug-card > b { font-size: 13px; }
   .debug-card .bind-tip { margin: 6px 0 10px; }
   /* ---- v0.9.0：抽签记录 / 数据统计 / 用户查询 / 调试工具四页 ----
@@ -153,8 +154,8 @@
   .link-btn:hover { text-decoration: underline; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
          margin-right: 6px; vertical-align: middle; }
-  .chart-card { border: 1px solid rgba(128,128,128,.22); border-radius: 8px;
-                padding: 12px 14px; }
+  .chart-card { border: 1px solid rgba(128,128,128,.22); border-radius: 10px;
+                padding: 12px 14px; background: rgba(255,255,255,.6); }
   .chart-title { font-weight: 600; font-size: 13px; display: flex; align-items: center;
                  justify-content: space-between; gap: 8px; margin-bottom: 8px; }
   .chart-svg { width: 100%; display: block; }
@@ -173,14 +174,34 @@
   .kv-table { width: 100%; border-collapse: collapse; font-size: 12px; }
   .kv-table td { padding: 4px 6px; border-bottom: 1px solid rgba(128,128,128,.14); }
   .kv-table td:first-child { width: 130px; opacity: .6; }
-  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-  .cal-cell { aspect-ratio: 1; border-radius: 5px; background: rgba(128,128,128,.10);
+  /* v0.13.2：日历改 GitHub 风格小格子——旧版 7 列 1fr 撑满容器，每格 ~150px，
+     3 个月要滚 ~3000px；固定 30px 格子后一个月只占 ~200px 高 */
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 30px);
+              grid-auto-rows: 30px; gap: 4px; }
+  .cal-cell { border-radius: 6px; background: rgba(128,128,128,.10);
               display: flex; align-items: center; justify-content: center;
               font-size: 10px; opacity: .7; }
   .cal-cell.has { color: #fff; font-weight: 600; opacity: 1; }
   .cal-cell.empty { background: transparent; }
-  .cal-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px;
+  .cal-week { display: grid; grid-template-columns: repeat(7, 30px); gap: 4px;
               font-size: 10px; opacity: .5; text-align: center; margin-bottom: 3px; }
+  /* ---- v0.13.2：总览统计卡（与 stat-card/chart-card 同一卡片语言） ---- */
+  .ov-card { border: 1px solid rgba(128,128,128,.22); border-radius: 10px;
+             padding: 14px; height: 100%; background: rgba(255,255,255,.6); }
+  .ov-label { font-size: 12px; opacity: .65; }
+  .ov-num { font-size: 30px; font-weight: 700; line-height: 1.3; }
+  /* ---- v0.13.2：用户头像（后端代理 data URL；缺失回落首字母色块） ---- */
+  .avatar { border-radius: 50%; object-fit: cover; flex: none;
+            background: rgba(214,51,132,.12); display: inline-flex;
+            align-items: center; justify-content: center;
+            color: #fff; font-weight: 600; user-select: none; }
+  .avatar-fallback { border-radius: 50%; flex: none; display: inline-flex;
+                     align-items: center; justify-content: center;
+                     color: #fff; font-weight: 600; user-select: none; }
+  /* ---- v0.13.2：试画台角色小封面 ---- */
+  .try-char-thumb { width: 52px; height: 89px; object-fit: cover; border-radius: 8px;
+                    flex: none; box-shadow: 0 2px 8px rgba(120,60,110,.16);
+                    cursor: zoom-in; display: block; }
   .sim-hero { display: flex; align-items: center; gap: 14px; padding: 12px;
               border-radius: 8px; background: rgba(214,51,132,.06);
               border: 1px solid rgba(214,51,132,.18); }
@@ -191,7 +212,7 @@
 </head>
 <body>
 <div id="app" v-cloak>
-  <n-config-provider :theme="theme" :theme-overrides="themeOverrides">
+  <n-config-provider :theme="theme" :theme-overrides="themeOverrides" :locale="zhLocale">
     <n-layout has-sider style="height: 100vh;">
       <n-layout-sider bordered :width="176">
         <div class="waifu-logo"><img src="assets/logo.png" alt="萌萌今日老婆">萌萌今日老婆</div>
@@ -221,10 +242,11 @@
                （v0.2.1 坑的真面目，div v-if 也躲不过）。普通 div + .stack 间距工具类。 -->
           <div class="stack">
 
-          <!-- ============ 总览（v0.10.0，第一栏） ============ -->
+          <!-- ============ 总览（v0.10.0，第一栏；v0.13.2 去重信息 + 角色缩略 + 头像） ============ -->
           <div v-if="menu === 'overview'" class="stack">
             <div class="sec-title">总览
-              <span class="cnt">{{ ov.version }} · {{ ov.anima_ready ? "萌绘已就绪" : "萌绘未就绪" }} · 出图方式 {{ ov.gen_source_mode }}</span>
+              <!-- v0.13.2：版本/萌绘状态与顶部状态栏重复，只留出图方式（一信息一显示） -->
+              <span class="cnt">出图方式 {{ ov.gen_source_mode }} · 图生图命中 {{ ov.img2img_prob }}%</span>
               <n-button size="tiny" secondary :loading="refreshing" @click="refreshAll">刷新</n-button>
             </div>
             <div v-if="!ov.anima_ready"
@@ -233,37 +255,37 @@
             </div>
             <n-grid :cols="4" :x-gap="12" :y-gap="12">
               <n-gi>
-                <div style="border:1px solid rgba(128,128,128,.22); border-radius:12px; padding:14px; height:100%;">
-                  <div style="font-size:12px; opacity:.65;">角色</div>
-                  <div style="font-size:30px; font-weight:700; line-height:1.3;">{{ ov.chars }}</div>
-                  <div style="font-size:12px; opacity:.65;">{{ ov.verified }} 个已验证 · {{ ov.packs }} 卷</div>
+                <div class="ov-card">
+                  <div class="ov-label">角色</div>
+                  <div class="ov-num" :style="{ color: brandColor }">{{ ov.chars }}</div>
+                  <div class="ov-label">{{ ov.verified }} 个已验证 · {{ ov.packs }} 卷</div>
                 </div>
               </n-gi>
               <n-gi>
-                <div style="border:1px solid rgba(128,128,128,.22); border-radius:12px; padding:14px; height:100%;">
-                  <div style="font-size:12px; opacity:.65;">立绘</div>
-                  <div style="font-size:30px; font-weight:700; line-height:1.3;">{{ ov.portraits }}</div>
-                  <div style="font-size:12px; opacity:.65;">{{ ov.chars_full }} 个角色已满 {{ ov.quota }} 张配额</div>
+                <div class="ov-card">
+                  <div class="ov-label">立绘</div>
+                  <div class="ov-num" :style="{ color: brandColor }">{{ ov.portraits }}</div>
+                  <div class="ov-label">{{ ov.chars_full }} 个角色已满 {{ ov.quota }} 张配额</div>
                 </div>
               </n-gi>
               <n-gi>
-                <div style="border:1px solid rgba(128,128,128,.22); border-radius:12px; padding:14px; height:100%;">
-                  <div style="font-size:12px; opacity:.65;">今日抽卡</div>
-                  <div style="font-size:30px; font-weight:700; line-height:1.3;">{{ ov.today_draws }}</div>
-                  <div style="font-size:12px; opacity:.65;">累计 {{ ov.total_draws }} 人次</div>
+                <div class="ov-card">
+                  <div class="ov-label">今日抽卡</div>
+                  <div class="ov-num" :style="{ color: brandColor }">{{ ov.today_draws }}</div>
+                  <div class="ov-label">累计 {{ ov.total_draws }} 人次</div>
                 </div>
               </n-gi>
               <n-gi>
-                <div style="border:1px solid rgba(128,128,128,.22); border-radius:12px; padding:14px; height:100%;">
-                  <div style="font-size:12px; opacity:.65;">参考图</div>
-                  <div style="font-size:30px; font-weight:700; line-height:1.3;">{{ ov.refs_bound }}</div>
-                  <div style="font-size:12px; opacity:.65;">{{ ov.orphans }} 张未绑定待找回</div>
+                <div class="ov-card">
+                  <div class="ov-label">参考图</div>
+                  <div class="ov-num" :style="{ color: brandColor }">{{ ov.refs_bound }}</div>
+                  <div class="ov-label">{{ ov.orphans }} 张未绑定待找回</div>
                 </div>
               </n-gi>
             </n-grid>
             <n-grid :cols="2" :x-gap="12" :y-gap="12">
               <n-gi>
-                <div style="border:1px solid rgba(128,128,128,.22); border-radius:12px; padding:14px; height:100%;">
+                <div class="ov-card">
                   <div style="font-size:13px; font-weight:600; margin-bottom:6px;">出卡图生图源</div>
                   <div style="font-size:12px; opacity:.75; line-height:1.7;">
                     {{ ov.draw_sources }} 个角色已指定。未指定时抽卡不会走图生图，
@@ -277,12 +299,24 @@
                 </div>
               </n-gi>
               <n-gi>
-                <div style="border:1px solid rgba(128,128,128,.22); border-radius:12px; padding:14px; height:100%;">
-                  <div style="font-size:13px; font-weight:600; margin-bottom:6px;">最近抽签</div>
+                <div class="ov-card">
+                  <div style="font-size:13px; font-weight:600; margin-bottom:8px;">最近抽签</div>
                   <div v-if="!ov.recent.length" style="font-size:12px; opacity:.6;">还没有抽签记录</div>
+                  <!-- v0.13.2：头像 + 昵称 + 角色色点/缩略，替代裸 QQ 文本行 -->
                   <div v-for="r in ov.recent" :key="r.user_id + r.date"
-                       style="font-size:12px; opacity:.75; margin-top:6px;">
-                    {{ r.char_name || r.char_id }} · {{ r.user_id }} · {{ r.date }}
+                       style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12px;">
+                    <img v-if="avatarOf(r.user_id)" class="avatar" :src="avatarOf(r.user_id)"
+                         style="width:26px; height:26px;" alt="">
+                    <span v-else class="avatar-fallback" :style="{ width: '26px', height: '26px',
+                          fontSize: '12px', background: hashColor(r.user_id) }">{{ (r.nickname || r.user_id).slice(0, 1) }}</span>
+                    <span style="flex:none; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+                          :title="r.user_id">{{ r.nickname || r.user_id }}</span>
+                    <img v-if="thumbOf(r.char_id)" :src="thumbOf(r.char_id)"
+                         style="width:20px; height:34px; object-fit:cover; border-radius:4px; flex:none;" alt="">
+                    <span class="dot" :style="{ background: r.char_color || colorOf(r.char_id) }"></span>
+                    <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                      {{ r.char_name || r.char_id }}</span>
+                    <span class="bind-tip" style="margin-top:0; flex:none;">{{ r.date }}</span>
                   </div>
                 </div>
               </n-gi>
@@ -382,10 +416,8 @@
 
           <!-- ============ 作品库 ============ -->
           <div v-if="menu === 'works'">
-            <div style="margin-bottom: 10px;">
-              <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
-            </div>
             <div v-if="!currentWork" class="stack">
+              <!-- v0.13.2：刷新并入筛选行（旧版孤零零占一行） -->
               <n-space align="center" :wrap="true">
                 <n-input v-model:value="workKeyword" placeholder="搜作品名 / 角色名 / id"
                          size="small" clearable style="width: 200px;"></n-input>
@@ -395,6 +427,7 @@
                           size="small" style="width: 140px;"></n-select>
                 <n-select v-model:value="workSort" :options="workSortOpts"
                           size="small" style="width: 160px;"></n-select>
+                <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
                 <span class="bind-tip" style="margin-top: 0;">
                   {{ filteredWorks.length }} / {{ works.length }} 个作品
                 </span>
@@ -427,6 +460,7 @@
                 <n-button size="small" type="primary" secondary
                           @click="openNewForWork(currentWork.series)">添加角色</n-button>
                 <n-button size="small" @click="openWorkCover">设置作品封面</n-button>
+                <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
               </n-space>
               <n-grid :cols="uiCols" :x-gap="12" :y-gap="12">
                 <n-gi v-for="c in currentWork.characters" :key="c.id">
@@ -496,6 +530,10 @@
                     <n-button type="primary" :disabled="!tryCharId"
                               @click="gotoStep2">下一步：确认提示词 →</n-button>
                   </n-space>
+                  <div class="bind-tip" style="margin-top: 12px;" v-if="!tryCharId">
+                    先在上框选择要试画的角色（可按名字 / 作品搜索）；未验证角色同样可以试，
+                    画对了在第 3 步点「标记 verified」即可参与群内抽卡。
+                  </div>
                   <div v-if="tryMode === 'img2img'" style="margin-top: 10px;">
                     <n-space :wrap="true" size="small" align="center">
                       <n-input v-model:value="tryOverride.ref"
@@ -547,17 +585,22 @@
                     <n-input v-model:value="tryOverride.loras" type="textarea" :rows="2"
                              placeholder="LoRA 名:权重，每行一个，如 miku_char_v2:0.8"></n-input>
                   </div>
-                  <div v-if="tryEntry" style="margin-top: 10px;">
-                    <n-space size="small" :wrap="true">
-                      <n-tag size="small" :bordered="false">{{ catLabel(tryEntry.category) }}</n-tag>
-                      <n-tag v-if="tryEntry.tier" size="small" :bordered="false">{{ tryEntry.tier }}</n-tag>
-                      <n-tag size="small" :bordered="false" :type="tryEntry.verified ? 'success' : 'warning'">
-                        {{ tryEntry.verified ? "已验证" : "未验证" }}
-                      </n-tag>
-                      <n-tag size="small" :bordered="false">条目画法 {{ stratLabel(tryEntry) }}</n-tag>
-                      <n-tag size="small" :bordered="false">立绘 {{ portraitCount(tryEntry.id) }}/{{ meta.quota }}</n-tag>
-                    </n-space>
-                    <div class="bind-tip" style="margin-top: 4px;">tags：{{ tryEntry.tags_en }}</div>
+                  <div v-if="tryEntry" style="margin-top: 10px; display: flex; gap: 10px; align-items: flex-start;">
+                    <img v-if="tryEntry.thumb" :src="tryEntry.thumb" class="try-char-thumb"
+                         title="点击查看大图" alt="角色封面"
+                         @click="openViewer(tryEntry.cover_path, tryEntry.name)">
+                    <div style="flex: 1; min-width: 0;">
+                      <n-space size="small" :wrap="true">
+                        <n-tag size="small" :bordered="false">{{ catLabel(tryEntry.category) }}</n-tag>
+                        <n-tag v-if="tryEntry.tier" size="small" :bordered="false">{{ tryEntry.tier }}</n-tag>
+                        <n-tag size="small" :bordered="false" :type="tryEntry.verified ? 'success' : 'warning'">
+                          {{ tryEntry.verified ? "已验证" : "未验证" }}
+                        </n-tag>
+                        <n-tag size="small" :bordered="false">条目画法 {{ stratLabel(tryEntry) }}</n-tag>
+                        <n-tag size="small" :bordered="false">立绘 {{ portraitCount(tryEntry.id) }}/{{ meta.quota }}</n-tag>
+                      </n-space>
+                      <div class="bind-tip" style="margin-top: 4px;">tags：{{ tryEntry.tags_en }}</div>
+                    </div>
                   </div>
                 </div>
 
@@ -612,6 +655,11 @@
                               @click="discardTry">✗ 舍弃本次结果</n-button>
                     <n-button v-if="tryOk" size="small" type="info" secondary
                               @click="adoptTryParams">按本次参数保存到角色</n-button>
+                  </n-space>
+                  <n-space size="small" :wrap="true" style="margin-top: 10px;" v-if="tryOk">
+                    <n-tag size="small" :bordered="false">画法 {{ tryModeLabel }}</n-tag>
+                    <n-tag size="small" :bordered="false">耗时 {{ tryElapsed }}s</n-tag>
+                    <n-tag size="small" :bordered="false" v-if="tryAttempt > 0">提示词版本 attempt {{ tryAttempt }}</n-tag>
                   </n-space>
                   <n-alert v-if="tryError" type="error" :bordered="false">{{ tryError }}</n-alert>
                   <n-spin v-if="tryRunning" size="small">
@@ -757,11 +805,14 @@
                                   :tip="delArm === it.file ? '再点一次确认删除' : '删除立绘'"
                                   @click.stop="doDeletePortrait(it)"></w-icon-btn>
                     </div>
-                    <div class="gal-meta">#{{ it.seq }} · {{ it.date }} · seed {{ it.seed }}{{ isCover(it) ? " · 封面" : "" }}{{ galDrawRefAbs === it.abs ? " · 出卡源" : "" }}</div>
+                    <!-- v0.13.2：seed 32 位 hex 只显前 8 位（全文挪 tooltip），meta 回到单行 -->
+                    <div class="gal-meta" :title="it.seed ? 'seed ' + it.seed : ''">
+                      #{{ it.seq }} · {{ it.date }} · seed {{ (it.seed || "").slice(0, 8) }}{{ (it.seed || "").length > 8 ? "…" : "" }}{{ isCover(it) ? " · 封面" : "" }}{{ galDrawRefAbs === it.abs ? " · 出卡源" : "" }}
+                    </div>
                   </div>
                 </n-gi>
               </n-grid>
-              <n-empty v-else-if="!galLoading"
+              <n-empty v-else-if="!loadingGal"
                        description="还没有立绘：上方「开始补图」，或去试画台试一张"></n-empty>
             </div>
 
@@ -902,12 +953,16 @@
                     <tbody>
                       <tr v-for="d in recRows" :key="d.user_id + '|' + d.date">
                         <td>{{ d.date }}</td>
-                        <td><a class="link-btn" :title="d.user_id" @click="gotoUser(d.user_id)">{{ d.user_id }}</a></td>
+                        <td><a class="link-btn" :title="d.user_id" @click="gotoUser(d.user_id)"
+                               style="display:inline-flex; align-items:center; gap:6px;">
+                          <img v-if="avatarOf(d.user_id)" class="avatar" :src="avatarOf(d.user_id)"
+                               style="width:20px; height:20px;" alt="">
+                          {{ d.user_id }}</a></td>
                         <td>{{ d.nickname || "—" }}</td>
                         <td><span class="dot" :style="{ background: d.char_color }"></span>{{ d.char_name || d.char_id }}</td>
                         <td>{{ d.series || "—" }}</td>
                         <td>{{ d.group_name || "私聊" }}</td>
-                        <td>{{ d.nonce }}</td>
+                        <td>{{ rerollLabel(d.nonce) }}</td>
                         <td>{{ d.platform || "—" }}</td>
                         <td>{{ decisionLabel(d.decision) }}</td>
                         <td><a v-if="d.card_path" class="link-btn" @click="openViewer(d.card_path, d.date + ' 卡片')">查看</a><span v-else>—</span></td>
@@ -1075,11 +1130,12 @@
                   <n-gi>
                     <table class="kv-table">
                       <tbody>
-                        <tr><td>出图任务</td><td>{{ statsData.totals ? statsData.totals.jobs_total : "—" }}</td></tr>
-                        <tr><td>成功 / 失败</td><td>{{ statsData.totals ? statsData.totals.jobs_ok + " / " + statsData.totals.jobs_fail : "—" }}</td></tr>
-                        <tr><td>成功率</td><td>{{ statsData.totals ? statsData.totals.success_rate + "%" : "—" }}</td></tr>
-                        <tr><td>平均生成耗时</td><td>{{ statsData.totals ? (statsData.totals.avg_ms / 1000).toFixed(1) + "s" : "—" }}</td></tr>
-                        <tr><td>新增立绘</td><td>{{ statsData.totals ? statsData.totals.portraits_added : "—" }}</td></tr>
+                        <!-- v0.13.2：字段缺失兜底 "—"（旧版直接渲染 undefined/NaNs） -->
+                        <tr><td>出图任务</td><td>{{ tv(statsData.totals ? statsData.totals.jobs_total : null) }}</td></tr>
+                        <tr><td>成功 / 失败</td><td>{{ statsData.totals ? tv(statsData.totals.jobs_ok) + " / " + tv(statsData.totals.jobs_fail) : "—" }}</td></tr>
+                        <tr><td>成功率</td><td>{{ statsData.totals && statsData.totals.success_rate !== undefined ? statsData.totals.success_rate + "%" : "—" }}</td></tr>
+                        <tr><td>平均生成耗时</td><td>{{ statsData.totals && isFinite(statsData.totals.avg_ms) ? (statsData.totals.avg_ms / 1000).toFixed(1) + "s" : "—" }}</td></tr>
+                        <tr><td>新增立绘</td><td>{{ tv(statsData.totals ? statsData.totals.portraits_added : null) }}</td></tr>
                       </tbody>
                     </table>
                   </n-gi>
@@ -1115,14 +1171,24 @@
                   <n-card size="small" :bordered="true" class="work-card"
                           :class="{ 'user-active': userSelected === u.user_id }"
                           @click="openUser(u.user_id)">
-                    <div class="card-title-row"><b>{{ u.nickname || u.user_id }}</b>
-                      <n-tag size="tiny" :bordered="false">连签 {{ u.streak }} 天</n-tag>
+                    <!-- v0.13.2：头像（后端代理，缺失回落首字母色块） -->
+                    <div style="display: flex; gap: 10px; align-items: flex-start;">
+                      <img v-if="avatarOf(u.user_id)" class="avatar" :src="avatarOf(u.user_id)"
+                           style="width: 44px; height: 44px;" alt="">
+                      <span v-else class="avatar-fallback"
+                            :style="{ width: '44px', height: '44px', fontSize: '18px',
+                                      background: hashColor(u.user_id) }">{{ (u.nickname || u.user_id).slice(0, 1) }}</span>
+                      <div style="flex: 1; min-width: 0;">
+                        <div class="card-title-row" style="margin-top: 0;"><b>{{ u.nickname || u.user_id }}</b>
+                          <n-tag size="tiny" :bordered="false">连签 {{ u.streak }} 天</n-tag>
+                        </div>
+                        <div class="card-meta" :title="u.user_id">{{ u.user_id }}</div>
+                        <div class="bind-tip" style="margin-top: 8px;">
+                          抽签 {{ u.draws }} 次 · {{ u.chars }} 位老婆 · 重抽 {{ u.rerolls }} 次
+                        </div>
+                        <div class="bind-tip" style="margin-top: 2px;">最近 {{ u.last_date }}</div>
+                      </div>
                     </div>
-                    <div class="card-meta" :title="u.user_id">{{ u.user_id }}</div>
-                    <div class="bind-tip" style="margin-top: 8px;">
-                      抽签 {{ u.draws }} 次 · {{ u.chars }} 位老婆 · 重抽 {{ u.rerolls }} 次
-                    </div>
-                    <div class="bind-tip" style="margin-top: 2px;">最近 {{ u.last_date }}</div>
                   </n-card>
                 </n-gi>
               </n-grid>
@@ -1134,7 +1200,13 @@
 
               <n-card size="small" :bordered="true" v-if="userDetail && userDetail.found">
                 <template #header>
-                  <div class="sec-title" style="margin: 0;">{{ userDetail.nickname || userDetail.user_id }} 的档案
+                  <div class="sec-title" style="margin: 0;">
+                    <img v-if="avatarOf(userDetail.user_id)" class="avatar" :src="avatarOf(userDetail.user_id)"
+                         style="width: 40px; height: 40px;" alt="">
+                    <span v-else class="avatar-fallback"
+                          :style="{ width: '40px', height: '40px', fontSize: '16px',
+                                    background: hashColor(userDetail.user_id) }">{{ (userDetail.nickname || userDetail.user_id).slice(0, 1) }}</span>
+                    {{ userDetail.nickname || userDetail.user_id }} 的档案
                     <span class="cnt">{{ userDetail.user_id }}</span>
                     <span class="cnt" v-if="userDetailLoading">载入中…</span>
                   </div>
@@ -1209,7 +1281,7 @@
                           <td>{{ h.char_name || h.char_id }}</td>
                           <td>{{ h.series || "—" }}</td>
                           <td>{{ h.group_name || "私聊" }}</td>
-                          <td>{{ h.nonce }}</td>
+                          <td>{{ rerollLabel(h.nonce) }}</td>
                           <td>{{ decisionLabel(h.decision) }}</td>
                           <td><a v-if="h.card_path" class="link-btn"
                                  @click="openViewer(h.card_path, h.date + ' 卡片')">查看</a><span v-else>—</span></td>
@@ -1492,7 +1564,7 @@
                     <tr><td>老婆</td><td>{{ recDetail.draw.char_name || recDetail.draw.char_id }}（{{ recDetail.draw.char_id }}）</td></tr>
                     <tr><td>作品 / 卷</td><td>{{ recDetail.draw.series || "—" }} · {{ recDetail.draw.pack || "—" }}</td></tr>
                     <tr><td>群 / 平台</td><td>{{ recDetail.draw.group_name || "私聊" }} · {{ recDetail.draw.platform || "—" }}</td></tr>
-                    <tr><td>nonce / 重抽</td><td>{{ recDetail.draw.nonce }} · {{ recDetail.draw.rerolled ? "是" : "否" }}</td></tr>
+                    <tr><td>nonce / 重抽</td><td>{{ recDetail.draw.nonce }} · {{ rerollLabel(recDetail.draw.nonce) }}</td></tr>
                     <tr><td>抽签种子</td><td :title="recDetail.draw.seed_hex">{{ recDetail.draw.seed_hex || "—" }}</td></tr>
                     <tr><td>立绘来源</td><td>{{ decisionLabel(recDetail.draw.decision) }}</td></tr>
                     <tr><td>立绘文件</td><td>{{ recDetail.draw.portrait_file || "—" }}</td></tr>
@@ -1531,26 +1603,58 @@
             </n-drawer-content>
           </n-drawer>
 
-          <!-- ============ 分群绑定 ============ -->
+          <!-- ============ 分群绑定 ============
+               v0.13.2：结构化编辑（群号 + 卷多选），进入页签自动拉当前绑定——
+               旧版文本框永远空开（后端 GET /group_pools 没人调），空文本「保存」
+               会静默清光全部绑定，是本次审查发现的最重问题 -->
           <div v-if="menu === 'bind'">
             <n-card size="small" :bordered="true">
-              <n-space vertical size="medium">
-                <n-input v-model:value="bindText" type="textarea" :rows="8"
-                         placeholder="每行一条：群号=卷名,卷名&#10;例如：123456=anime,game"></n-input>
+              <div class="stack">
+                <div class="bind-tip" style="margin-top: 0;">
+                  只在「该群绑定卷 ∩ verified」里抽；未列出的群 / 私聊用全部启用卷。
+                  卷名对应 pools/ 下的 pack 字段。保存即时生效（写插件配置）。
+                </div>
+                <div v-for="(row, idx) in bindRows" :key="idx"
+                     style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                  <n-input :value="row.gid" placeholder="群号（QQ 群 ID）"
+                           style="width: 200px;"
+                           @update:value="function (v) { setRowGid(idx, v) }"></n-input>
+                  <span class="bind-tip" style="margin-top: 0; flex: none;">绑定卷：</span>
+                  <n-select :value="row.packs" multiple :options="bindPackOpts"
+                            :consistent-menu-width="false"
+                            style="min-width: 260px; flex: 1;"
+                            placeholder="选择该群参与抽选的卷（可多选）"
+                            @update:value="function (v) { setRowPacks(idx, v) }"></n-select>
+                  <w-icon-btn icon="trash" type="error" tip="移除这一行（未保存前可用「重置」恢复）"
+                              @click="removeBindRow(idx)"></w-icon-btn>
+                </div>
+                <n-empty v-if="bindRows.length === 0" size="small"
+                         description="还没有分群绑定：点「添加群绑定」新建一行；不绑定的群用全部启用卷"></n-empty>
+                <n-space size="small" :wrap="true">
+                  <n-button size="small" @click="addBindRow">+ 添加群绑定</n-button>
+                  <n-button size="small" @click="bindRawOpen = !bindRawOpen">
+                    {{ bindRawOpen ? "收起文本编辑" : "高级：直接编辑文本" }}
+                  </n-button>
+                  <n-button size="small" :loading="bindLoading"
+                            @click="loadBindPools(true)">重置（重新读取当前绑定）</n-button>
+                </n-space>
+                <div v-if="bindRawOpen">
+                  <n-input :value="bindText" type="textarea" :rows="6"
+                           placeholder="每行一条：群号=卷名,卷名&#10;例如：123456=anime,game"
+                           @update:value="onBindRawInput"></n-input>
+                  <div class="bind-tip" style="margin-top: 6px;">
+                    文本与上方列表是同一份数据（列表就是文本的解析结果），改哪边都行。
+                  </div>
+                </div>
                 <n-space size="small" :wrap="true" v-if="parsedBind.length > 0">
                   <n-tag v-for="g in parsedBind" :key="g.gid" size="small" :bordered="false">
                     {{ g.gid }} ← {{ g.packs.join(", ") }}
                   </n-tag>
                 </n-space>
-                <div class="bind-tip">
-                  只在「该群绑定卷 ∩ verified」里抽；未列出的群用全部启用卷。
-                  卷名对应 pools/ 下的 pack 字段。保存即时生效（写插件配置）。
-                </div>
                 <n-space>
                   <n-button type="primary" :loading="bindSaving" @click="doSaveBind">保存</n-button>
-                  <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
                 </n-space>
-              </n-space>
+              </div>
             </n-card>
           </div>
 
@@ -1564,8 +1668,10 @@
                             @click="refreshAll({ config: true })">刷新（丢弃未保存修改）</n-button>
                   <span class="bind-tip">保存后即时生效；改「种子盐值」会洗牌所有人当天的抽卡结果</span>
                 </n-space>
-                <div v-for="sec in configSections" :key="sec.title">
-                  <div style="font-weight:600; margin: 4px 0 10px;">{{ sec.title }}</div>
+                <!-- v0.13.2：分区卡片化 + 控件宽度统一（选择器 420 与输入框对齐） -->
+                <div v-for="sec in configSections" :key="sec.title" class="chart-card"
+                     style="margin-bottom: 14px;">
+                  <div style="font-weight:600; font-size:14px; margin: 0 0 12px;">{{ sec.title }}</div>
                   <div v-for="it in sec.items" :key="it.key" style="margin-bottom: 14px;">
                     <div style="font-size:13px; margin-bottom: 4px;">{{ it.description }}</div>
                     <n-switch v-if="it.type === 'bool'" v-model:value="configModel[it.key]"></n-switch>
@@ -1574,16 +1680,16 @@
                     <n-input-number v-else-if="it.type === 'float'" v-model:value="configModel[it.key]"
                                     :step="0.05" style="width: 220px;"></n-input-number>
                     <n-select v-else-if="it.options" v-model:value="configModel[it.key]"
-                              :options="optOpts(it)" style="width: 280px;"></n-select>
+                              :options="optOpts(it)" style="width: 420px;"></n-select>
                     <n-select v-else-if="isWorkflowKey(it.key)" v-model:value="configModel[it.key]"
                               :options="wfOpts(it.key === 'img2img_workflow' ? 'img' : 'txt')" filterable tag clearable
-                              placeholder="留空用萌绘默认" style="width: 340px;"></n-select>
+                              placeholder="留空用萌绘默认" style="width: 420px;"></n-select>
                     <n-select v-else-if="isLlmKey(it.key)" v-model:value="configModel[it.key]"
                               :options="llmOpts" filterable tag clearable
                               placeholder="留空 = AstrBot 当前默认对话模型"
-                              style="width: 340px;"></n-select>
+                              style="width: 420px;"></n-select>
                     <n-input v-else-if="isMulti(it)" v-model:value="configModel[it.key]"
-                             type="textarea" :rows="4"></n-input>
+                             type="textarea" :rows="4" style="max-width: 560px;"></n-input>
                     <n-input v-else v-model:value="configModel[it.key]" style="width: 420px;"></n-input>
                     <div class="bind-tip" style="margin-top:4px; max-width: 560px;">{{ it.hint }}</div>
                   </div>
@@ -2218,11 +2324,13 @@
 
   var app = Vue.createApp({
     setup: function () {
-      var theme = bridgeCtx().isDark ? NS.darkTheme : null;
-
       // 全局主题（品牌色萌萌粉 + 圆角；暗色跟随 Dashboard）
+      // v0.13.2：zhCN locale——vendored naive 不配 locale 会显示英文
+      // 「Please Select / Please Input」；去掉了此前重复声明的 theme。
       var isDark = !!bridgeCtx().isDark;
       var theme = isDark ? NS.darkTheme : null;
+      var zhLocale = NS.zhCN || null;
+      var brandColor = isDark ? "#e879b5" : "#d63384";
       var themeOverrides = (function (dark) {
         var o = {
           common: {
@@ -2426,13 +2534,14 @@
         chars_full: 0, refs_bound: 0, orphans: 0, draw_sources: 0,
         no_source: [], today_draws: 0, total_draws: 0, recent: []
       });
-      var ovLoading = Vue.ref(false);
       async function loadOverview() {
-        ovLoading.value = true;
         try {
           var res = await apiGet("overview", {});
-          if (res) ov.value = Object.assign({}, ov.value, res);
-        } catch (e) { /* 已提示 */ } finally { ovLoading.value = false; }
+          if (res) {
+            ov.value = Object.assign({}, ov.value, res);
+            ensureAvatars(ov.value.recent);
+          }
+        } catch (e) { /* 已提示 */ }
       }
       function goMenu(key) { setMenu(key); }
       loadOverview();  // 首屏（含服务端恢复到总览）就有数据
@@ -2816,6 +2925,26 @@
       // ---- 角色表格 ----
       var entryCols = Vue.computed(function () {
         return [
+          // v0.13.2：封面缩略列——列表视图此前纯文字，与「集合页要真缩略图」口径不符
+          {
+            title: "封面", key: "cover", width: 64,
+            render: function (row) {
+              if (row.thumb) {
+                return h("img", {
+                  src: row.thumb, alt: "封面",
+                  style: "width:36px;height:62px;object-fit:cover;object-position:50% 12%;" +
+                         "border-radius:6px;display:block;cursor:zoom-in;" +
+                         "box-shadow:0 1px 4px rgba(120,60,110,.15);",
+                  onClick: function () { openViewer(row.cover_path, row.name); }
+                });
+              }
+              return h("div", {
+                style: "width:36px;height:62px;border-radius:6px;display:flex;" +
+                       "align-items:center;justify-content:center;color:#fff;font-weight:700;" +
+                       "background:linear-gradient(135deg," + row.color + "cc," + row.color + "55);"
+              }, String(row.name || "").slice(0, 1));
+            }
+          },
           {
             title: "角色", key: "name", width: 190,
             render: function (row) {
@@ -2893,7 +3022,9 @@
         await refreshAll();
         await loadTryRefs();
       }
-      var tryCharId = Vue.ref("");
+      // v0.13.2：select 的空值用 null——naive 只对 null/undefined 显示 placeholder，
+      // 初始 "" 会让「选择要试画的角色」等提示语消失（试画台/记录筛选/调试全中招）
+      var tryCharId = Vue.ref(null);
       var tryRunning = Vue.ref(false);
       var tryError = Vue.ref("");
       var tryPreview = Vue.ref("");
@@ -3238,7 +3369,7 @@
 
       // ---- 角色详情（v0.6.0：原「立绘库」升级——立绘 + 参考图 + 生成立绘） ----
       var galChars = Vue.ref([]);
-      var galCharId = Vue.ref("");
+      var galCharId = Vue.ref(null);   // v0.13.2：null 才显示「选择角色」placeholder
       var galItems = Vue.ref([]);
       var loadingGal = Vue.ref(false);
       var refillRunning = Vue.ref(false);
@@ -3432,21 +3563,8 @@
         if (i >= 0) { arr.splice(i, 1); } else { arr.push(g.path); }
         galRefsSel.value = arr;
       }
-      function useAsSource(path, label) {
-        if (!path) { message.error("该图缺可用路径（可能文件丢失）"); return; }
-        var arr = galRefsSel.value.slice();
-        var i = arr.indexOf(path);
-        if (i >= 0) {
-          arr.splice(i, 1);
-          galRefsSel.value = arr;
-          message.info("已移出" + label + "（本次还剩 " + arr.length + " 张）");
-          return;
-        }
-        arr.push(path);
-        galRefsSel.value = arr;
-        galMode.value = "img2img";
-        message.success("已加入" + label + "（本次共 " + arr.length + " 张）");
-      }
+      // v0.13.2：删除 useAsSource 死代码——模板自 v0.7.0 起只用 selectGenSource，
+      // 它一直只是暴露在 return 里没人引用
 
       // 主题 + 提示词（v0.6.2）：与试画台同款主题库/预览管线；
       // 确认后的提示词经 jobs/start 的 prompt 字段直通出图
@@ -3682,9 +3800,67 @@
         return e ? e.name : (cid || "—");
       }
 
+      // ---- 用户头像（v0.13.2）：后端 /user/avatar 代理 q4.qlogo.cn 出 data URL，前端按 uid 缓存 ----
+      // 刻意直走 bridge.apiGet（不经 apiGet 包装）：批量拉头像失败要静默，
+      // 回落首字母色块，绝不为头像弹错误 toast。
+      var avatarMap = Vue.ref({});
+      var avatarPending = {};
+      function avatarOf(uid) { return avatarMap.value[String(uid)] || ""; }
+      function fetchAvatar(uid) {
+        uid = String(uid || "");
+        if (!uid || avatarMap.value[uid] || avatarPending[uid]) return;
+        var p;
+        try { p = bridge.apiGet("user/avatar", { uid: uid }); }
+        catch (e) { return; }
+        if (!p || typeof p.then !== "function") return;
+        avatarPending[uid] = true;
+        p.then(function (res) {
+          var url = res && res.data_url;
+          if (url) {
+            var m = Object.assign({}, avatarMap.value);
+            m[uid] = url;
+            avatarMap.value = m;
+          }
+        }).catch(function () { /* 静默回落 */ }).then(function () {
+          delete avatarPending[uid];
+        });
+      }
+      function ensureAvatars(rows) {
+        (rows || []).slice(0, 50).forEach(function (r) {
+          if (r && r.user_id) { fetchAvatar(r.user_id); }
+        });
+      }
+      // 首字母色块底色：uid 稳定散列到萌系色板
+      var AVATAR_COLORS = ["#d63384", "#9b72c9", "#39c5bb", "#f0a04b",
+                           "#5b8def", "#77b255", "#e879b5", "#c94f6a"];
+      function hashColor(uid) {
+        var s = String(uid || "?"), acc = 0;
+        for (var i = 0; i < s.length; i++) { acc = (acc * 31 + s.charCodeAt(i)) >>> 0; }
+        return AVATAR_COLORS[acc % AVATAR_COLORS.length];
+      }
+      // 总览「最近抽签」的角色缩略/颜色：后端 recent 行只有 char_id，从 allEntries 反查
+      function colorOf(charId) {
+        var e = allEntries.value.find(function (x) { return x.id === charId; });
+        return (e && e.color) || "#d63384";
+      }
+      function thumbOf(charId) {
+        var e = allEntries.value.find(function (x) { return x.id === charId; });
+        return (e && e.thumb) || "";
+      }
+      // 重抽列文案（nonce 0 = 首抽，N = 换过 N 次；裸数字不直观）
+      function rerollLabel(n) {
+        var v = Number(n || 0);
+        return v > 0 ? "换 " + v + " 次" : "首抽";
+      }
+      // 缺字段兜底（统计 kv 表等）：undefined / null / 空串一律显示 —
+      function tv(v) {
+        return (v === undefined || v === null || v === "") ? "—" : v;
+      }
+
       // ---- 抽签记录 ----
-      var recF = Vue.ref({ q: "", date_from: "", date_to: "", char_id: "",
-                           group_id: "", platform: "", rerolled: "" });
+      // v0.13.2：四个筛选 select 的空值改 null（见 tryCharId 注释——placeholder 才会显示）
+      var recF = Vue.ref({ q: "", date_from: "", date_to: "", char_id: null,
+                           group_id: null, platform: null, rerolled: null });
       var recRows = Vue.ref([]);
       var recTotal = Vue.ref(0);
       var recPage = Vue.ref(1);
@@ -3749,6 +3925,7 @@
           });
           recRows.value = (res && res.rows) || [];
           recTotal.value = (res && res.total) || 0;
+          ensureAvatars(recRows.value);
         } catch (e) { /* 已提示 */ } finally {
           recLoading.value = false;
         }
@@ -3767,8 +3944,8 @@
         loadRecords();
       }
       function resetRecFilters() {
-        recF.value = { q: "", date_from: "", date_to: "", char_id: "",
-                       group_id: "", platform: "", rerolled: "" };
+        recF.value = { q: "", date_from: "", date_to: "", char_id: null,
+                       group_id: null, platform: null, rerolled: null };
         recPage.value = 1;
         loadRecords();
       }
@@ -3784,6 +3961,7 @@
         try {
           var res = await apiGet("records/events", { limit: 50, kind: recEventKind.value || "" });
           recEvents.value = (res && res.rows) || [];
+          ensureAvatars(recEvents.value);
         } catch (e) { /* 已提示 */ }
       }
       async function loadRecJobs() {
@@ -3811,14 +3989,14 @@
         var t = statsData.value.totals || {};
         var has = Object.keys(t).length > 0;
         return [
-          { label: "区间抽签", value: has ? t.draws : "—" },
-          { label: "独立用户", value: has ? t.users : "—" },
-          { label: "其中新用户", value: has ? t.new_users : "—" },
-          { label: "人均抽签", value: has ? t.avg_per_user : "—" },
-          { label: "重抽次数", value: has ? t.rerolls : "—" },
-          { label: "重抽率", value: has ? t.reroll_rate + "%" : "—" },
-          { label: "打过照面的老婆", value: has ? t.chars : "—" },
-          { label: "出图成功率", value: has ? t.success_rate + "%" : "—" }
+          { label: "区间抽签", value: has ? tv(t.draws) : "—" },
+          { label: "独立用户", value: has ? tv(t.users) : "—" },
+          { label: "其中新用户", value: has ? tv(t.new_users) : "—" },
+          { label: "人均抽签", value: has ? tv(t.avg_per_user) : "—" },
+          { label: "重抽次数", value: has ? tv(t.rerolls) : "—" },
+          { label: "重抽率", value: has && t.reroll_rate !== undefined ? t.reroll_rate + "%" : "—" },
+          { label: "打过照面的老婆", value: has ? tv(t.chars) : "—" },
+          { label: "出图成功率", value: has && t.success_rate !== undefined ? t.success_rate + "%" : "—" }
         ];
       });
       var statsMaxChar = Vue.computed(function () {
@@ -3979,6 +4157,7 @@
           });
           userRows.value = (res && res.rows) || [];
           userTotal.value = (res && res.total) || 0;
+          ensureAvatars(userRows.value);
         } catch (e) { /* 已提示 */ } finally {
           usersLoading.value = false;
         }
@@ -3987,6 +4166,7 @@
       async function openUser(uid) {
         userSelected.value = uid;
         userDetailLoading.value = true;
+        fetchAvatar(uid);
         try {
           var res = await apiGet("user", { uid: uid, months: 3 });
           userDetail.value = res || null;
@@ -4038,8 +4218,8 @@
       var dbgDate = Vue.ref("");
       var dbgUid2 = Vue.ref("");
       var dbgDate2 = Vue.ref("");
-      var dbgChar = Vue.ref("");
-      var dbgChar2 = Vue.ref("");
+      var dbgChar = Vue.ref(null);
+      var dbgChar2 = Vue.ref(null);
       var dbgBusy = Vue.ref(false);
       async function loadDebugHistory() {
         try {
@@ -4055,6 +4235,7 @@
         try {
           var res = await apiGet("debug/state", { uid: dbgStateUid.value });
           dbgState.value = res || null;
+          if (res) { fetchAvatar(dbgStateUid.value); }
           // 星语式上下文：查到谁，下面所有面板就默认对谁操作，不用重复填 QQ / 角色。
           // 用户仍可手动改输入框去操作别的目标。
           if (res) {
@@ -4244,7 +4425,8 @@
         else if (m === "works") { loadWorks().then(resyncCurrentWork); }
         else if (m === "try") { loadTryRefs(); }
         else if (m === "gallery") { loadGallery(); loadGalRefs(); }
-        else if (m === "bind" || m === "config") { loadConfig(); }
+        else if (m === "bind") { loadBindPools(); loadConfig(); }
+        else if (m === "config") { loadConfig(); }
       });
 
       // ---- 作品库 ----
@@ -4428,27 +4610,102 @@
         }
       }
 
-      // ---- 分群绑定 ----
+      // ---- 分群绑定（v0.13.2 结构化编辑）----
+      // bindRows 是编辑器唯一数据源；bindText 只是它的文本投影（高级文本编辑
+      // 直改文本 → 解析回 rows）。进页签自动 GET /group_pools 预填——旧版文本框
+      // 永远空开，空文本「保存」会静默清光全部分群绑定（本次审查实锤的 P1）。
       var bindText = Vue.ref("");      var bindSaving = Vue.ref(false);
-      var parsedBind = Vue.computed(function () {
+      var bindLoading = Vue.ref(false);
+      var bindRawOpen = Vue.ref(false);
+      var bindLoadedOnce = false;
+      var bindRows = Vue.ref([]);
+      function parseBindRows(text) {
         var out = [];
-        String(bindText.value || "").split(/\n+/).forEach(function (line) {
+        String(text || "").split(/\n+/).forEach(function (line) {
           var idx = line.indexOf("=");
           if (idx <= 0) return;
           var gid = line.slice(0, idx).trim();
           var packs = line.slice(idx + 1).replace(/，/g, ",").split(",")
             .map(function (s) { return s.trim(); }).filter(Boolean);
-          if (gid && packs.length) out.push({ gid: gid, packs: packs });
+          if (gid) out.push({ gid: gid, packs: packs });
         });
         return out;
+      }
+      var parsedBind = Vue.computed(function () {
+        // 完整行（群号 + 至少一卷）才用于 chips 展示与保存口径
+        return bindRows.value.filter(function (r) {
+          return String(r.gid || "").trim() && (r.packs || []).length;
+        });
       });
+      var bindPackOpts = Vue.computed(function () {
+        return (meta.value.packs || []).map(function (p) {
+          return { label: p.title || p.pack, value: p.pack };
+        });
+      });
+      function syncBindText() {
+        bindText.value = bindRows.value
+          .filter(function (r) { return String(r.gid || "").trim() || (r.packs || []).length; })
+          .map(function (r) {
+            return String(r.gid || "").trim() + "=" + (r.packs || []).join(",");
+          }).join("\n");
+      }
+      function setRowGid(idx, v) {
+        var rows = bindRows.value.slice();
+        if (!rows[idx]) return;
+        rows[idx] = Object.assign({}, rows[idx], { gid: String(v || "").trim() });
+        bindRows.value = rows;
+        syncBindText();
+      }
+      function setRowPacks(idx, v) {
+        var rows = bindRows.value.slice();
+        if (!rows[idx]) return;
+        rows[idx] = Object.assign({}, rows[idx], { packs: (v || []).slice() });
+        bindRows.value = rows;
+        syncBindText();
+      }
+      function addBindRow() { bindRows.value = bindRows.value.concat([{ gid: "", packs: [] }]); }
+      function removeBindRow(idx) {
+        bindRows.value = bindRows.value.filter(function (_, i) { return i !== idx; });
+        syncBindText();
+      }
+      function onBindRawInput(v) {
+        bindText.value = String(v || "");
+        bindRows.value = parseBindRows(bindText.value);
+      }
+      async function loadBindPools(force) {
+        if (bindLoadedOnce && !force) return;
+        bindLoading.value = true;
+        try {
+          var res = await apiGet("group_pools");
+          bindText.value = String((res && res.text) || "");
+          bindRows.value = parseBindRows(bindText.value);
+          bindLoadedOnce = true;
+        } catch (e) { /* 已提示 */ } finally {
+          bindLoading.value = false;
+        }
+      }
       async function doSaveBind() {
+        // 只保存完整行；保存「空」= 清空全部分群绑定，属破坏性操作 → 两段确认
+        var complete = parsedBind.value;
+        var dropped = bindRows.value.length - complete.length;
+        if (dropped > 0) {
+          message.warning("有 " + dropped + " 行不完整（缺群号或没选卷），保存时忽略");
+        }
+        if (!complete.length && !armDelete("bind:save")) {
+          message.warning("保存空内容会清空全部分群绑定：确认无误请再点一次「保存」");
+          return;
+        }
         bindSaving.value = true;
         try {
-          await apiPost("group_pools", { text: bindText.value });
+          var text = complete.map(function (r) {
+            return String(r.gid || "").trim() + "=" + (r.packs || []).join(",");
+          }).join("\n");
+          await apiPost("group_pools", { text: text });
+          bindText.value = text;
+          bindRows.value = parseBindRows(text);
           await loadConfig();  // 刷新其它页的「已绑定群」一键填入标签
           await refreshAll();  // 候选集变了，总览/角色库/统计一起拉齐
-          message.success("分群绑定已保存并即时生效");
+          message.success("分群绑定已保存并即时生效（" + complete.length + " 组）");
         } catch (e) { /* 已提示 */ } finally {
           bindSaving.value = false;
         }
@@ -4480,10 +4737,12 @@
         var o = opts || {};
         refreshing.value = true;
         try {
-          await fetchPools();
+          // v0.13.2：全并行——旧版先串行等 fetchPools 再并行其余，每次写操作
+          // 至少两个串行往返；各 loader 互不依赖（allEntries 是 computed，meta
+          // 到位自动重算），一层 Promise.all 就够
           await Promise.all([
-            loadWorks(), loadGallery(), loadGalRefs(), loadTryRefs(),
-            loadDrawerRefs(), loadOverview()
+            fetchPools(), loadWorks(), loadGallery(), loadGalRefs(),
+            loadTryRefs(), loadDrawerRefs(), loadOverview()
           ]);
           resyncCurrentWork();
           // 配置页点「刷新」才重置表单；其它场景绝不动用户正在编辑的输入
@@ -4505,10 +4764,14 @@
 
       return {
         theme: theme, themeOverrides: themeOverrides,
+        zhLocale: zhLocale, brandColor: brandColor,
+        avatarOf: avatarOf, hashColor: hashColor,
+        thumbOf: thumbOf, colorOf: colorOf,
+        rerollLabel: rerollLabel, tv: tv,
         dragOverlay: dragOverlay, dragOverlayText: dragOverlayText,
         menu: menu, menuOpts: menuOpts, onMenu: onMenu,
         refreshing: refreshing, refreshAll: refreshAll,
-        ov: ov, ovLoading: ovLoading, loadOverview: loadOverview, goMenu: goMenu,
+        ov: ov, loadOverview: loadOverview, goMenu: goMenu,
         meta: meta, loadingAll: loadingAll, loadAll: loadAll, rowKey: rowKey,
         charsMode: charsMode, cardPage: cardPage, cardPageSize: cardPageSize,
         pagedEntries: pagedEntries, gotoTryFromChars: gotoTryFromChars,
@@ -4610,7 +4873,7 @@
         galAsRef: galAsRef,
         galWfAny: galWfAny, wfAllOpts: wfAllOpts,
         genSources: genSources, selectGenSource: selectGenSource,
-        useAsSource: useAsSource, doDetailGenerate: doDetailGenerate,
+        doDetailGenerate: doDetailGenerate,
         galTheme: galTheme, galOutfit: galOutfit, galCustom: galCustom, galAttempt: galAttempt,
         galPrompt: galPrompt, galPromptSource: galPromptSource,
         galDims: galDims, galPromptLoading: galPromptLoading,
@@ -4618,6 +4881,10 @@
         openPromptModal: openPromptModal, generateFromModal: generateFromModal,
         genPromptPreview: genPromptPreview,
         bindText: bindText, parsedBind: parsedBind, bindSaving: bindSaving,
+        bindRows: bindRows, bindPackOpts: bindPackOpts, bindRawOpen: bindRawOpen,
+        bindLoading: bindLoading, loadBindPools: loadBindPools, onBindRawInput: onBindRawInput,
+        addBindRow: addBindRow, setRowGid: setRowGid, setRowPacks: setRowPacks,
+        removeBindRow: removeBindRow,
         doSaveBind: doSaveBind,
         configSections: configSections, configModel: configModel, configSaving: configSaving,
         uiCols: uiCols, colOpts: colOpts, uiColsSel: uiColsSel,

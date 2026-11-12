@@ -51,10 +51,13 @@ galDrawRef galDrawRefAbs setDrawSource galRefsSel
 workKeyword workFilterCat workFilterVerified workSort workCatOpts workVerifiedOpts
 workSortOpts filteredWorks toggleWorkChar openNewForWork
 fmtTime cfgBoundGroups pickSimGroup simScopeText
+avatarOf hashColor thumbOf colorOf rerollLabel tv brandColor zhLocale
+bindRows bindPackOpts bindRawOpen bindLoading loadBindPools onBindRawInput
+addBindRow setRowGid setRowPacks removeBindRow
 """.split()
 
 ROUTES = """
-/records /records/detail /records/events /stats /users /user /filters
+/records /records/detail /records/events /stats /users /user /user/avatar /filters
 /debug/state /debug/history /debug/simulate /debug/rerender
 /portraits/move_to_ref /refs/move_to_portrait /refs/orphans
 /refs/orphan_delete
