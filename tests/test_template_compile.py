@@ -4,6 +4,8 @@
 `node --check` 只看 JS；`test_template_structure.py` 只看标签配对。两者都抓不到
 「{{ }} 里写了非法表达式 / 指令参数写错」——Vue.compile 才会当场抛错。
 不联网、不装依赖：编译器就来自 pages/waifu-console/assets/vue.global.prod.js。
+顺带把主脚本里的 fmtTime 原样抠出来真跑一遍，确认 UTC ISO 时间戳确实被转成
+配置时区的「YYYY-MM-DD HH:mm:ss」，而不是只靠肉眼检查模板。
 """
 import subprocess
 import sys
@@ -76,6 +78,37 @@ try {
   });
   process.exit(1);
 }
+
+// 把主脚本里的 fmtTime 原样抠出来真跑：库里是 UTC ISO，UI 必须显示成
+// 配置时区的 YYYY-MM-DD HH:mm:ss（Asia/Shanghai 恰好 +8）。
+const begin = html.indexOf('var cfgTimezone = Vue.ref(');
+const stop = html.indexOf('function barPct(');
+if (begin < 0 || stop < 0 || stop <= begin) {
+  console.log('FAIL: cannot locate fmtTime block');
+  process.exit(1);
+}
+const VueStub = { ref: function (v) { return { value: v }; } };
+let fmt;
+try {
+  fmt = (new Function('Vue', html.slice(begin, stop) + '\nreturn fmtTime;'))(VueStub);
+} catch (e2) {
+  console.log('FAIL: fmtTime eval: ' + e2.message);
+  process.exit(1);
+}
+const cases = [
+  ['2026-11-12T04:36:28Z', '2026-11-12 12:36:28'],
+  ['', '\u2014'],
+  ['not-a-date', 'not-a-date']
+];
+for (const c of cases) {
+  const got = fmt(c[0]);
+  if (got !== c[1]) {
+    console.log('FAIL: fmtTime(' + JSON.stringify(c[0]) + ') = ' +
+                JSON.stringify(got) + ', want ' + JSON.stringify(c[1]));
+    process.exit(1);
+  }
+}
+console.log('ok: fmtTime 把 UTC 时间戳转为本地 YYYY-MM-DD HH:mm:ss');
 """
 
 

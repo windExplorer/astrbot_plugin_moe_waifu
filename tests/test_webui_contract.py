@@ -44,7 +44,8 @@ doSimulate simulateNext dbgRenderUid dbgRenderDate doRerender
 dbgUid dbgDate dbgUid2 dbgDate2 dbgChar dbgChar2 dbgBusy
 doForceReroll doClearDraws doResetCharDay doClearCharPortraits
 charNameOf decisionLabel barPct
-movePortraitToRef moveRefToPortrait
+movePortraitToRef moveRefToPortrait doQuickAction
+fmtTime cfgBoundGroups pickSimGroup simScopeText
 """.split()
 
 ROUTES = """
@@ -103,6 +104,28 @@ def main():
     # 5) 老库可升级：迁移必须靠 ALTER，不能重建表
     check("迁移用 PRAGMA 探测 + ALTER（不重建表）",
           "PRAGMA table_info" in store and "ALTER TABLE" in store)
+
+    # 6) 星语式调试交互：重置类按钮只在「查到状态」之后出现，且高级区不再常驻
+    gate = page.count('v-if="dbgState"')
+    check("重置 / 重绘 / 高级区都受 dbgState 约束", gate >= 4, f"实际 {gate} 处")
+    check("旧常驻危险操作区已改为上下文式",
+          'title="高级 · 指定任意目标（两段确认）"' in page
+          and 'title="危险操作 · 重置（两段确认）"' not in page)
+    check("快捷操作卡带两段确认", "quick:clear_today" in page and "quick:reroll" in page)
+
+    # 7) 时间显示：库里是 UTC ISO，UI 必须按配置时区格式化，不能裸显 ...Z
+    raw_ts = re.findall(r"\{\{[^}]*?\b(?:created_at|updated_at)\s*\}\}", template)
+    check("时间字段全部经 fmtTime 格式化", not raw_ts, str(raw_ts[:3]))
+    check("时区来自插件配置", '"timezone": str(plugin._cfg' in api
+          and "cfgTimezone.value" in page)
+
+    # 8) 群号：规则统一说明 + 查状态自动带出 + 模拟结果说清实际抽取范围
+    check("群号抽取规则在多个页面统一提示",
+          page.count("该群绑定卷") >= 3, f"实际 {page.count('该群绑定卷')} 处")
+    check("已绑定群来自配置、可一键填入", '"bound_groups"' in api
+          and "cfgBoundGroups" in page and "pickSimGroup" in page)
+    check("查状态自动带出群号", "simF.value.group_id = res.draw.group_id" in page)
+    check("模拟抽签返回抽取范围", '"scope": scope' in api and "simScopeText" in page)
 
     if FAILURES:
         print(f"test_webui_contract: {len(FAILURES)} FAILED")

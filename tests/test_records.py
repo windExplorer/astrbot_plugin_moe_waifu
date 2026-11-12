@@ -298,6 +298,16 @@ def test_cores(tmp: Path):
     (empty_root / "pools" / "anime.json").unlink()
     empty = api._debug_simulate_core(empty_plugin, "u1", TODAY, 0, "test-salt", "")
     check("空角色库安全降级", empty["ok"] is False and empty["candidates"] == 0)
+    check("模拟结果给出抽取范围（该群绑定卷 ∩ verified）",
+          "scope" in sim0 and sim0["scope"]["group_packs"] is None
+          and sim0["scope"]["allow_unverified"] is False
+          and "anime" in sim0["scope"]["enabled_packs"])
+    plugin.config["group_pools"] = "123456=anime"
+    bound_sim = api._debug_simulate_core(plugin, "u1", TODAY, 0, "test-salt", "123456")
+    check("绑定群限定到指定卷",
+          bound_sim["scope"]["group_packs"] == ["anime"] and bound_sim["candidates"] == 2)
+    unbound_sim = api._debug_simulate_core(plugin, "u1", TODAY, 0, "test-salt", "999999")
+    check("未列出的群回落全部启用卷", unbound_sim["scope"]["group_packs"] is None)
     st.close()
 
 

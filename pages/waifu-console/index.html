@@ -710,6 +710,10 @@
                               @click="loadRecords">查询</n-button>
                     <n-button size="small" @click="resetRecFilters">重置</n-button>
                   </n-space>
+                  <div class="rec-note">
+                    「群」按签的归属群筛选；实际抽签范围始终<b>只在「该群绑定卷 ∩ verified」里抽</b>，
+                    未列出的群 / 私聊用全部启用卷；绑定关系在「分群绑定」页维护。
+                  </div>
                 </n-space>
               </n-card>
 
@@ -762,7 +766,7 @@
                       <thead><tr><th>时间</th><th>用户</th><th>类型</th><th>角色</th><th>nonce</th><th>种子</th></tr></thead>
                       <tbody>
                         <tr v-for="e in recEvents" :key="e.id">
-                          <td>{{ e.created_at }}</td>
+                          <td>{{ fmtTime(e.created_at) }}</td>
                           <td><a class="link-btn" @click="gotoUser(e.user_id)">{{ e.user_id }}</a></td>
                           <td>{{ e.kind === "reroll" ? "重抽" : "首抽" }}</td>
                           <td>{{ e.char_name || e.char_id }}</td>
@@ -789,7 +793,7 @@
                       <thead><tr><th>时间</th><th>角色</th><th>模式</th><th>状态</th><th>种子</th><th>耗时</th><th>错误</th></tr></thead>
                       <tbody>
                         <tr v-for="j in recJobs" :key="j.id">
-                          <td>{{ j.created_at }}</td>
+                          <td>{{ fmtTime(j.created_at) }}</td>
                           <td>{{ charNameOf(j.char_id) }}</td>
                           <td>{{ j.mode }}</td>
                           <td><n-tag size="tiny" :bordered="false"
@@ -1013,7 +1017,7 @@
                           <thead><tr><th>时间</th><th>日期</th><th>类型</th><th>角色</th></tr></thead>
                           <tbody>
                             <tr v-for="e in userDetail.events" :key="e.id">
-                              <td>{{ e.created_at }}</td><td>{{ e.date }}</td>
+                              <td>{{ fmtTime(e.created_at) }}</td><td>{{ e.date }}</td>
                               <td>{{ e.kind === "reroll" ? "重抽" : "首抽" }}</td>
                               <td>{{ e.char_name || e.char_id }}</td>
                             </tr>
@@ -1068,6 +1072,7 @@
                         <tbody>
                           <tr><td>今日老婆</td><td>{{ dbgState.draw ? (dbgState.draw.char_name || dbgState.draw.char_id) : "今天还没抽" }}</td></tr>
                           <tr><td>角色 ID</td><td>{{ dbgState.draw ? dbgState.draw.char_id : "—" }}</td></tr>
+                          <tr><td>群 / 平台</td><td>{{ dbgState.draw ? (dbgState.draw.group_name || dbgState.draw.group_id || "私聊") : "—" }} · {{ dbgState.draw ? (dbgState.draw.platform || "—") : "—" }}</td></tr>
                           <tr><td>nonce / 上限</td><td>{{ dbgState.nonce }} / {{ dbgState.reroll_limit }}</td></tr>
                           <tr><td>卡图文件</td><td>{{ dbgState.card_exists ? "存在" : "缺失或没有" }}</td></tr>
                           <tr><td>该角色立绘</td><td>{{ dbgState.portraits_of_current }} 张</td></tr>
@@ -1086,7 +1091,7 @@
                       <table class="rec-table" v-if="dbgState.events.length">
                         <thead><tr><th>时间</th><th>类型</th><th>角色</th><th>nonce</th></tr></thead>
                         <tbody><tr v-for="e in dbgState.events" :key="e.id">
-                          <td>{{ e.created_at }}</td><td>{{ e.kind === "reroll" ? "重抽" : "首抽" }}</td>
+                          <td>{{ fmtTime(e.created_at) }}</td><td>{{ e.kind === "reroll" ? "重抽" : "首抽" }}</td>
                           <td>{{ e.char_name || e.char_id }}</td><td>{{ e.nonce }}</td>
                         </tr></tbody>
                       </table>
@@ -1095,7 +1100,7 @@
                       <table class="rec-table" v-if="dbgState.jobs.length">
                         <thead><tr><th>时间</th><th>状态</th><th>耗时</th><th>错误</th></tr></thead>
                         <tbody><tr v-for="j in dbgState.jobs" :key="j.id">
-                          <td>{{ j.created_at }}</td><td>{{ j.status }}</td>
+                          <td>{{ fmtTime(j.created_at) }}</td><td>{{ j.status }}</td>
                           <td>{{ j.duration_ms ? j.duration_ms + "ms" : "—" }}</td>
                           <td class="rec-err">{{ j.error || "" }}</td>
                         </tr></tbody>
@@ -1103,6 +1108,50 @@
                       <n-empty v-else description="暂无任务" size="small"></n-empty>
                     </n-gi>
                   </n-grid>
+                </n-space>
+              </n-card>
+
+              <!-- 星语式：查到状态后才出现，按钮自动带上当前 QQ 与今天，不用重复填参数 -->
+              <n-card size="small" :bordered="true" v-if="dbgState">
+                <template #header>
+                  <div class="sec-title" style="margin: 0;">今日签操作 · {{ dbgStateUid }}
+                    <span class="cnt">查到状态才出现 · 已带好 QQ 号与 {{ dbgState.today }} · 均需两段确认</span>
+                  </div>
+                </template>
+                <n-space vertical size="small">
+                  <div class="bind-tip" style="margin-top: 0;">
+                    下面按钮直接作用于刚查到的 {{ dbgStateUid }}（日期 {{ dbgState.today }}），
+                    无需再填用户 / 日期 / 角色；执行后状态、记录与审计自动刷新。
+                    <b v-if="!dbgState.draw" style="color: #d63384;">今天还没有抽签，与「今日老婆」相关的按钮暂不可用。</b>
+                  </div>
+                  <n-space size="small" align="center" :wrap="true">
+                    <n-button size="small" type="warning" :loading="dbgBusy"
+                              :disabled="!dbgState.draw" @click="doQuickAction('reroll')">
+                      {{ delArm === "quick:reroll" ? "再点确认：强制换签" : "强制换签（换种子）" }}
+                    </n-button>
+                    <n-button size="small" type="error" :loading="dbgBusy"
+                              @click="doQuickAction('clear_today')">
+                      {{ delArm === "quick:clear_today" ? "再点确认：删除今日签" : "重置（删除今日记录）" }}
+                    </n-button>
+                    <n-button size="small" :loading="dbgBusy"
+                              :disabled="!dbgState.draw" @click="doQuickAction('rerender')">
+                      {{ delArm === "quick:rerender" ? "再点确认：重绘卡片" : "重绘卡片（改卡面后看效果）" }}
+                    </n-button>
+                  </n-space>
+                  <n-space size="small" align="center" :wrap="true">
+                    <n-button size="small" type="warning" :loading="dbgBusy"
+                              :disabled="!dbgState.draw" @click="doQuickAction('reset_char_day')">
+                      {{ delArm === "quick:reset_char_day" ? "再点确认：重试今日老婆立绘" : "重试今日老婆立绘" }}
+                    </n-button>
+                    <n-button size="small" type="error" :loading="dbgBusy"
+                              :disabled="!dbgState.draw" @click="doQuickAction('clear_portraits')">
+                      {{ delArm === "quick:clear_portraits" ? "再点确认：清空老婆立绘库" : "清空老婆立绘库" }}
+                    </n-button>
+                  </n-space>
+                  <div class="rec-note">
+                    「重置」只删今天这一条签（连带卡图与当天流水），历史记录不动；
+                    「强制换签」把 nonce+1 重派种子，下次「今日老婆」出新角色，不受每日换签上限限制。
+                  </div>
                 </n-space>
               </n-card>
 
@@ -1128,6 +1177,15 @@
                     <n-button size="small" :disabled="!simResult || !simResult.ok"
                               @click="simulateNext">nonce +1 再试</n-button>
                   </n-space>
+                  <div class="rec-note" style="margin-top: 0;">
+                    抽取范围 = <b>只在「该群绑定卷 ∩ verified」里抽</b>；群号留空 / 私聊 = 全部启用卷。
+                    查过状态会自动带出该 QQ 今日签的群号，也可点下面的已绑定群一键填入。
+                  </div>
+                  <n-space size="small" align="center" :wrap="true" v-if="cfgBoundGroups.length">
+                    <span class="bind-tip" style="margin: 0;">已绑定群：</span>
+                    <n-tag v-for="g in cfgBoundGroups" :key="g" size="small" :bordered="false"
+                           class="link-btn" @click="pickSimGroup(g)">{{ g }}</n-tag>
+                  </n-space>
                   <div v-if="simResult && simResult.ok" class="sim-hero">
                     <div class="sim-avatar" :style="{ background: simResult.char.color }"></div>
                     <div style="flex: 1;">
@@ -1139,6 +1197,7 @@
                         {{ simResult.char.char_id }} · {{ simResult.char.category }} · {{ simResult.char.tier }} ·
                         {{ simResult.char.strategy_type }} · {{ simResult.char.verified ? "已验证" : "未验证" }}
                       </div>
+                      <div class="bind-tip" style="margin-top: 4px;">{{ simScopeText }}</div>
                       <div class="bind-tip" style="margin-top: 4px;">
                         候选 {{ simResult.candidates }} 位 · 命中第 {{ simResult.index }} 位 ·
                         立绘决策 {{ decisionLabel(simResult.decision) }} ·
@@ -1166,8 +1225,8 @@
                 </n-space>
               </n-card>
 
-              <n-card size="small" title="卡片重渲染" :bordered="true">
-                <div class="bind-tip" style="margin-top: 0;">改过卡面样式后，用已存签的立绘重画一张卡（不重抽、不生图、不写抽签流水）。</div>
+              <n-card size="small" title="重渲染 · 指定其它日期" :bordered="true" v-if="dbgState">
+                <div class="bind-tip" style="margin-top: 0;">已自动带上当前 QQ 号；只有想重画往日卡片时才改日期，今天的卡直接用上面的「重绘卡片」。不重抽、不生图、不写抽签流水。</div>
                 <n-space size="small" align="center" :wrap="true" style="margin-top: 8px;">
                   <n-input v-model:value="dbgRenderUid" size="small" placeholder="用户 ID"
                            style="width: 160px;"></n-input>
@@ -1177,7 +1236,11 @@
                 </n-space>
               </n-card>
 
-              <n-card size="small" title="危险操作 · 重置（两段确认）" :bordered="true">
+              <n-card size="small" title="高级 · 指定任意目标（两段确认）" :bordered="true" v-if="dbgState">
+                <div class="bind-tip" style="margin-top: 0; margin-bottom: 10px;">
+                  上面的按钮已自动带好当前 QQ 与今天；这里用于清理其它日期、其它用户或其它角色，
+                  输入框在查询状态时已尽量预填。同样需要两段确认。
+                </div>
                 <n-grid :cols="2" :x-gap="12" :y-gap="12">
                   <n-gi>
                     <div class="debug-card">
@@ -1237,7 +1300,7 @@
                 <table class="rec-table" v-if="dbgAudit.length">
                   <thead><tr><th>时间</th><th>动作</th><th>目标</th><th>说明</th></tr></thead>
                   <tbody><tr v-for="a in dbgAudit" :key="a.id">
-                    <td>{{ a.created_at }}</td><td>{{ a.kind }}</td>
+                    <td>{{ fmtTime(a.created_at) }}</td><td>{{ a.kind }}</td>
                     <td>{{ a.target || "—" }}</td><td>{{ a.detail || "—" }}</td>
                   </tr></tbody>
                 </table>
@@ -1262,7 +1325,7 @@
                     <tr><td>立绘来源</td><td>{{ decisionLabel(recDetail.draw.decision) }}</td></tr>
                     <tr><td>立绘文件</td><td>{{ recDetail.draw.portrait_file || "—" }}</td></tr>
                     <tr><td>卡图</td><td>{{ recDetail.draw.card_path || "—" }}</td></tr>
-                    <tr><td>创建 / 更新</td><td>{{ recDetail.draw.created_at }} · {{ recDetail.draw.updated_at }}</td></tr>
+                    <tr><td>创建 / 更新</td><td>{{ fmtTime(recDetail.draw.created_at) }} · {{ fmtTime(recDetail.draw.updated_at) }}</td></tr>
                   </tbody>
                 </table>
                 <n-button size="small" v-if="recDetail.draw.card_path"
@@ -1272,7 +1335,7 @@
                   <table class="rec-table" v-if="recDetail.events.length">
                     <thead><tr><th>时间</th><th>类型</th><th>角色</th><th>nonce</th><th>种子</th><th>立绘来源</th></tr></thead>
                     <tbody><tr v-for="e in recDetail.events" :key="e.id">
-                      <td>{{ e.created_at }}</td><td>{{ e.kind === "reroll" ? "重抽" : "首抽" }}</td>
+                      <td>{{ fmtTime(e.created_at) }}</td><td>{{ e.kind === "reroll" ? "重抽" : "首抽" }}</td>
                       <td>{{ e.char_name || e.char_id }}</td><td>{{ e.nonce }}</td>
                       <td :title="e.seed_hex">{{ (e.seed_hex || "").slice(0, 10) || "—" }}</td>
                       <td>{{ decisionLabel(e.decision) }}</td>
@@ -1285,7 +1348,7 @@
                   <table class="rec-table" v-if="recDetail.jobs.length">
                     <thead><tr><th>时间</th><th>模式</th><th>状态</th><th>耗时</th><th>错误</th></tr></thead>
                     <tbody><tr v-for="j in recDetail.jobs" :key="j.id">
-                      <td>{{ j.created_at }}</td><td>{{ j.mode }}</td><td>{{ j.status }}</td>
+                      <td>{{ fmtTime(j.created_at) }}</td><td>{{ j.mode }}</td><td>{{ j.status }}</td>
                       <td>{{ j.duration_ms ? j.duration_ms + "ms" : "—" }}</td>
                       <td class="rec-err">{{ j.error || "" }}</td>
                     </tr></tbody>
@@ -3207,6 +3270,31 @@
         reuse_today: "当日复用立绘", "": "—"
       };
       function decisionLabel(d) { return DECISION_LABELS[d] || d || "—"; }
+      // 库里 created_at/updated_at 是 UTC ISO（...Z）。直接裸显既不好读又比本地时间
+      // 早 8 小时——统一按插件配置的 timezone 转成「YYYY-MM-DD HH:mm:ss」。
+      var cfgTimezone = Vue.ref("Asia/Shanghai");
+      var cfgBoundGroups = Vue.ref([]);   // 分群绑定里配好的群号，供各页「一键填入」
+      function fmtTime(s) {
+        var v = String(s == null ? "" : s).trim();
+        if (!v) { return "—"; }
+        var d = new Date(v);
+        if (isNaN(d.getTime())) { return v; }
+        try {
+          var p = {};
+          new Intl.DateTimeFormat("en-US", {
+            timeZone: cfgTimezone.value || "Asia/Shanghai",
+            year: "numeric", month: "2-digit", day: "2-digit",
+            hour: "2-digit", minute: "2-digit", second: "2-digit",
+            hourCycle: "h23"
+          }).formatToParts(d).forEach(function (x) { p[x.type] = x.value; });
+          return p.year + "-" + p.month + "-" + p.day + " " +
+                 p.hour + ":" + p.minute + ":" + p.second;
+        } catch (e) {  // 时区配置非法 → 回落浏览器本地时间
+          var q = function (n) { return String(n).padStart(2, "0"); };
+          return d.getFullYear() + "-" + q(d.getMonth() + 1) + "-" + q(d.getDate()) + " " +
+                 q(d.getHours()) + ":" + q(d.getMinutes()) + ":" + q(d.getSeconds());
+        }
+      }
       function barPct(n, max) {
         return Math.max(2, Math.round(Number(n || 0) / Math.max(1, Number(max || 1)) * 100)) + "%";
       }
@@ -3557,6 +3645,18 @@
       var simF = Vue.ref({ user_id: "", date: "", nonce: 0, salt: "", group_id: "" });
       var simResult = Vue.ref(null);
       var simBusy = Vue.ref(false);
+      // 把「该群绑定卷 ∩ verified」的实际生效范围说清楚，别只丢一个候选数
+      var simScopeText = Vue.computed(function () {
+        var r = simResult.value;
+        if (!r || !r.ok) { return ""; }
+        var s = r.scope || {};
+        var packs = (s.group_packs && s.group_packs.length)
+          ? "绑定卷 " + s.group_packs.join("、")
+          : "全部启用卷（" + (s.enabled_packs || []).join("、") + "）";
+        return "抽取范围：群 " + (r.group_id || "留空 / 私聊") + " · " + packs +
+               " ∩ " + (s.allow_unverified ? "全部角色（含未验证）" : "verified") +
+               " → 候选 " + r.candidates + " 位";
+      });
       var dbgRenderUid = Vue.ref("");
       var dbgRenderDate = Vue.ref("");
       var dbgUid = Vue.ref("");
@@ -3580,6 +3680,24 @@
         try {
           var res = await apiGet("debug/state", { uid: dbgStateUid.value });
           dbgState.value = res || null;
+          // 星语式上下文：查到谁，下面所有面板就默认对谁操作，不用重复填 QQ / 角色。
+          // 用户仍可手动改输入框去操作别的目标。
+          if (res) {
+            var uid = dbgStateUid.value;
+            simF.value.user_id = uid;
+            dbgRenderUid.value = uid;
+            dbgUid.value = uid;
+            dbgUid2.value = uid;
+            if (res.draw) {
+              if (res.draw.char_id) {
+                dbgChar.value = res.draw.char_id;
+                dbgChar2.value = res.draw.char_id;
+              }
+              // 群号决定候选集「该群绑定卷 ∩ verified」，必须跟着状态一起带出，
+              // 否则模拟抽签会拿「全部启用卷」去算，和真实抽签结果不一致。
+              if (res.draw.group_id) { simF.value.group_id = res.draw.group_id; }
+            }
+          }
           await loadDebugHistory();
         } catch (e) { /* 已提示 */ } finally {
           dbgStateLoading.value = false;
@@ -3589,6 +3707,7 @@
         simF.value.nonce = Number(simF.value.nonce || 0) + 1;
         doSimulate();
       }
+      function pickSimGroup(g) { simF.value.group_id = String(g || ""); }
       async function doSimulate() {
         if (!simF.value.user_id) { message.error("请输入用户 ID"); return; }
         simBusy.value = true;
@@ -3623,6 +3742,52 @@
         loadFilterOpts();
         loadDebugHistory();
         if (dbgStateUid.value) { loadDebugState(); }
+      }
+      // 星语式快捷操作：全部自动带上「刚查到状态的 QQ + 今天 + 今日老婆」，
+      // 不再要求用户在每个按钮旁重复填一遍参数。两段确认沿用 delArm 机制。
+      async function doQuickAction(kind) {
+        if (!dbgState.value || !dbgStateUid.value) {
+          message.error("请先输入 QQ 号并查询状态");
+          return;
+        }
+        if (!armDelete("quick:" + kind)) return;
+        var uid = dbgStateUid.value;
+        var row = dbgState.value.draw;
+        var today = dbgState.value.today;
+        if (kind !== "clear_today" && !row) {
+          message.error("今天还没有抽签记录，该操作不可用");
+          delArm.value = "";
+          return;
+        }
+        dbgBusy.value = true;
+        try {
+          var res;
+          if (kind === "reroll") {
+            res = await apiPost("debug/force_reroll", { user_id: uid, date: today });
+            message.success("已强制换签 " + uid + "：nonce=" +
+                            (res && res.row ? res.row.nonce : "?") + "，下次抽签出新角色");
+          } else if (kind === "clear_today") {
+            res = await apiPost("debug/clear_draws", { user_id: uid, date: today });
+            message.success("已重置今日签 " + uid + "（删除 " +
+                            ((res && res.cleared) || 0) + " 条，连带删卡 " +
+                            ((res && res.cards_deleted) || 0) + " 张）");
+          } else if (kind === "rerender") {
+            await apiPost("debug/rerender", { user_id: uid, date: today });
+            message.success("已按现有立绘重绘卡片，可到「抽签记录」查看");
+          } else if (kind === "reset_char_day") {
+            res = await apiPost("debug/reset_char_day",
+              { char_id: row.char_id, date: today });
+            message.success("已重试今日老婆的立绘生成：" +
+                            (row.char_name || row.char_id));
+          } else if (kind === "clear_portraits") {
+            res = await apiPost("debug/clear_portraits", { char_id: row.char_id });
+            message.success("已清空 " + (row.char_name || row.char_id) + " 的立绘库");
+          }
+          delArm.value = "";
+          refreshAfterDebug();
+        } catch (e) { /* 已提示 */ } finally {
+          dbgBusy.value = false;
+        }
       }
       async function doForceReroll() {
         if (!dbgUid.value) { message.error("请输入用户 ID"); return; }
@@ -3799,6 +3964,8 @@
             var m = {};
             configItems.value.forEach(function (it) { m[it.key] = it.value; });
             configModel.value = m;
+            if (res.timezone) { cfgTimezone.value = String(res.timezone); }
+            cfgBoundGroups.value = Array.isArray(res.bound_groups) ? res.bound_groups : [];
           }
         } catch (e) { /* 已提示 */ }
       }
@@ -3811,6 +3978,7 @@
           var ch = ((res && res.changed) || []).length;
           var sk = ((res && res.skipped) || []).length;
           message.success("已保存 " + ch + " 项" + (sk ? "（跳过 " + sk + " 项不符合 schema）" : ""));
+          await loadConfig();  // timezone 改了要立刻反映到时间显示上
         } catch (e) { /* 已提示 */ } finally {
           configSaving.value = false;
         }
@@ -3834,6 +4002,7 @@
         bindSaving.value = true;
         try {
           await apiPost("group_pools", { text: bindText.value });
+          await loadConfig();  // 刷新其它页的「已绑定群」一键填入标签
           message.success("分群绑定已保存并即时生效");
         } catch (e) { /* 已提示 */ } finally {
           bindSaving.value = false;
@@ -3905,6 +4074,7 @@
         moveRefToPortrait: moveRefToPortrait,
         loadGallery: loadGallery,
         charNameOf: charNameOf, decisionLabel: decisionLabel, barPct: barPct,
+        fmtTime: fmtTime,
         recF: recF, recRows: recRows, recTotal: recTotal, recPage: recPage,
         recSize: recSize, recLoading: recLoading,
         groupOpts: groupOpts, charSelectOpts: charSelectOpts, platformOpts: platformOpts,
@@ -3930,9 +4100,10 @@
         dbgStateUid: dbgStateUid, dbgState: dbgState, dbgStateLoading: dbgStateLoading,
         dbgRecent: dbgRecent, dbgAudit: dbgAudit, dbgConfigRows: dbgConfigRows,
         loadDebugState: loadDebugState, loadDebugHistory: loadDebugHistory,
-        pickRecentUser: pickRecentUser,
+        pickRecentUser: pickRecentUser, doQuickAction: doQuickAction,
         simF: simF, simResult: simResult, simBusy: simBusy,
-        doSimulate: doSimulate, simulateNext: simulateNext,
+        simScopeText: simScopeText, cfgBoundGroups: cfgBoundGroups,
+        doSimulate: doSimulate, simulateNext: simulateNext, pickSimGroup: pickSimGroup,
         dbgRenderUid: dbgRenderUid, dbgRenderDate: dbgRenderDate, doRerender: doRerender,
         dbgUid: dbgUid, dbgDate: dbgDate, dbgUid2: dbgUid2, dbgDate2: dbgDate2,
         dbgChar: dbgChar, dbgChar2: dbgChar2, dbgBusy: dbgBusy,

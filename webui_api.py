@@ -1346,7 +1346,13 @@ async def h_config_get(plugin) -> dict:
             "default": default,
             "value": plugin._cfg(key, default),
         })
-    return ok({"items": items, "version": _version_of()})
+    group_pools = str(plugin._cfg("group_pools", "") or "")
+    return ok({
+        "items": items, "version": _version_of(),
+        # 时间显示与「已绑定群」快捷标签用：前端不该再去猜时区或让用户盲填群号
+        "timezone": str(plugin._cfg("timezone", "Asia/Shanghai")),
+        "bound_groups": sorted(pool.parse_group_pools(group_pools).keys()),
+    })
 
 
 async def h_config_set(plugin) -> dict:
@@ -1740,10 +1746,20 @@ def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
     group_pools = str(plugin._cfg("group_pools", "") or "")
     allow_unverified = bool(plugin._cfg("allow_unverified", False))
     candidates = pool.candidates_for(packs, group_id, group_pools, allow_unverified)
+    # 把「该群绑定卷 ∩ verified」这条规则的实际生效范围一并返回，
+    # 前端才说得清为什么候选是 N 位（群号留空时 = 全部启用卷）。
+    bound = pool.parse_group_pools(group_pools)
+    want = pool.pack_names_for_group(bound, group_id)
+    scope = {
+        "group_packs": want,  # None = 未绑定（含私聊）→ 全部启用卷
+        "enabled_packs": [p["pack"] for p in packs
+                          if p["enabled"] and (want is None or p["pack"] in want)],
+        "allow_unverified": allow_unverified,
+    }
     if not candidates:
         return {"ok": False, "readonly": True,
                 "reason": "候选角色为空：请检查启用卷、群绑定与 verified 标记",
-                "candidates": 0,
+                "candidates": 0, "scope": scope,
                 "note": "只读预览不会写库；把角色卷启用或标为 verified 后再试"}
     seed = pool.derive_seed(date, uid, salt, nonce)
     index = pool.sub_int(seed, "char", len(candidates))
@@ -1765,7 +1781,7 @@ def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
         "ok": True, "readonly": True,
         "user_id": uid, "date": date, "nonce": int(nonce),
         "group_id": group_id, "seed_hex": seed.hex(),
-        "candidates": len(candidates), "index": index,
+        "candidates": len(candidates), "index": index, "scope": scope,
         "char": {
             "char_id": entry["id"], "char_name": entry["name"],
             "series": entry.get("series") or "", "pack": entry.get("pack") or "",
