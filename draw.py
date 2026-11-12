@@ -21,6 +21,7 @@ import hashlib
 import json
 import re
 import shutil
+import tempfile
 import time
 import traceback
 from pathlib import Path
@@ -248,6 +249,54 @@ def has_draw_source(entry: dict, data_dir=None) -> bool:
     return bool(draw_source(entry, data_dir))
 
 
+def _stage_refs(refs: list, data_dir) -> tuple[list, str]:
+    """把参考图**复制**到 refs_stage/ 再把副本交给萌绘，返回 (副本列表, 临时目录)。
+
+    萌绘图库归档是「移动转正」语义（`image_store.archive_image` 用
+    `os.replace`），直接传本插件的 `data/refs/` 原图会被它搬进自己的图库，
+    源文件消失——v0.11.0 多图参考实测：生成完成后几张参考图全变成
+    「文件丢失」卡片（绑定还在、文件没了）。这里先复制一份，被搬走的是副本。
+    URL 不需要落盘，原样透传。全部复制失败时返回 ([], "")。
+    """
+    if not data_dir:
+        return list(refs), ""
+    base = Path(data_dir) / "refs_stage"
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+        # 顺手清理上次异常残留（>1h 的 staging 目录）
+        now = time.time()
+        for d in base.iterdir():
+            try:
+                if d.is_dir() and now - d.stat().st_mtime > 3600:
+                    shutil.rmtree(d, ignore_errors=True)
+            except Exception:
+                pass
+        stage = Path(tempfile.mkdtemp(dir=str(base)))
+    except Exception:
+        return list(refs), ""
+    out = []
+    for i, p in enumerate(refs):
+        s = str(p or "").strip()
+        if not s:
+            continue
+        if re.match(r"^[a-zA-Z]+://", s):
+            out.append(s)   # URL 交给萌绘自行下载
+            continue
+        src = Path(s)
+        if not src.is_file():
+            continue
+        dst = stage / f"{i:02d}{(src.suffix or '.png').lower()}"
+        try:
+            shutil.copy2(src, dst)
+            out.append(str(dst))
+        except Exception:
+            continue
+    if not out:
+        shutil.rmtree(stage, ignore_errors=True)
+        return [], ""
+    return out, str(stage)
+
+
 async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
                             event=None, prompt: str | None = None):
     """按角色策略生成立绘。返回 (本地路径|None, status, error, duration_ms)。
@@ -280,6 +329,7 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
     timeout = int(cfg.get("draw_timeout", 120))
     if timeout <= 0:
         timeout = 120
+    stage_dir = ""   # img2img 参考图 staging 目录（finally 里清理）
 
     if stype == "img2img":
         tool_name = "comfyui_img2img"
@@ -299,10 +349,14 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
         )
         if img_workflow:
             kwargs["img2img_workflow"] = img_workflow
-        kwargs["image"] = image
-        if len(refs) > 1:
+        # v0.12.6：传 staging 副本（萌绘归档参考图会 os.replace 搬走源文件）
+        staged, stage_dir = _stage_refs(refs, data_dir)
+        if not staged:
+            return None, "error", "图生图源文件不存在或无法读取", 0
+        kwargs["image"] = staged[0]
+        if len(staged) > 1:
             # 萌绘 v7.8.1+ 的 comfyui_img2img 支持多图；image 仍传第一张兼容旧版。
-            kwargs["images"] = refs
+            kwargs["images"] = staged
         # denoise：条目 strategy.denoise 优先（逐角色调重绘强度）→ 全局配置兜底
         try:
             kwargs["denoise"] = float(
@@ -339,36 +393,41 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
 
     t0 = time.monotonic()
     try:
-        raw = await asyncio.wait_for(handler(event, **kwargs), timeout=timeout)
-    except TypeError as exc:
-        # 旧版萌绘（< v7.8.1）的 comfyui_img2img 没有 images 参数：去掉多图
-        # 重试一次单图，别让「多选参考图」直接把出图打挂。
-        if "images" not in kwargs:
-            return None, "error", f"TypeError: {exc}", int((time.monotonic() - t0) * 1000)
-        kwargs.pop("images", None)
         try:
             raw = await asyncio.wait_for(handler(event, **kwargs), timeout=timeout)
+        except TypeError as exc:
+            # 旧版萌绘（< v7.8.1）的 comfyui_img2img 没有 images 参数：去掉多图
+            # 重试一次单图，别让「多选参考图」直接把出图打挂。
+            if "images" not in kwargs:
+                return None, "error", f"TypeError: {exc}", int((time.monotonic() - t0) * 1000)
+            kwargs.pop("images", None)
+            try:
+                raw = await asyncio.wait_for(handler(event, **kwargs), timeout=timeout)
+            except asyncio.TimeoutError:
+                return None, "timeout", f"萌绘生图超时（>{timeout}s）", int((time.monotonic() - t0) * 1000)
+            except Exception as exc2:
+                return None, "error", f"{exc2.__class__.__name__}: {exc2}", int((time.monotonic() - t0) * 1000)
         except asyncio.TimeoutError:
             return None, "timeout", f"萌绘生图超时（>{timeout}s）", int((time.monotonic() - t0) * 1000)
-        except Exception as exc2:
-            return None, "error", f"{exc2.__class__.__name__}: {exc2}", int((time.monotonic() - t0) * 1000)
-    except asyncio.TimeoutError:
-        return None, "timeout", f"萌绘生图超时（>{timeout}s）", int((time.monotonic() - t0) * 1000)
-    except Exception as exc:
-        return None, "error", f"{exc.__class__.__name__}: {exc}", int((time.monotonic() - t0) * 1000)
-    duration = int((time.monotonic() - t0) * 1000)
+        except Exception as exc:
+            return None, "error", f"{exc.__class__.__name__}: {exc}", int((time.monotonic() - t0) * 1000)
+        duration = int((time.monotonic() - t0) * 1000)
 
-    paths = parse_draw_response(raw)
-    if not paths:
-        # 萌绘失败时的返回是一句话（如「本次生图失败。请用一句话简短…」），
-        # 只取首句 + 提示看萌绘日志，不再把整段提示语拼进错误里
-        return None, "error", (
-            f"萌绘侧生成失败：{_first_sentence(raw)}（请检查所选图生图工作流与"
-            "参考图是否匹配，详见萌绘日志）"), duration
-    first = Path(paths[0])
-    if not first.exists():
-        return None, "error", f"萌绘返回的路径不存在: {paths[0]}", duration
-    return str(first), "ok", "", duration
+        paths = parse_draw_response(raw)
+        if not paths:
+            # 萌绘失败时的返回是一句话（如「本次生图失败。请用一句话简短…」），
+            # 只取首句 + 提示看萌绘日志，不再把整段提示语拼进错误里
+            return None, "error", (
+                f"萌绘侧生成失败：{_first_sentence(raw)}（请检查所选图生图工作流与"
+                "参考图是否匹配，详见萌绘日志）"), duration
+        first = Path(paths[0])
+        if not first.exists():
+            return None, "error", f"萌绘返回的路径不存在: {paths[0]}", duration
+        return str(first), "ok", "", duration
+    finally:
+        # staging 副本：无论成功 / 超时 / 异常都清掉（被萌绘搬走的已不存在）
+        if stage_dir:
+            shutil.rmtree(stage_dir, ignore_errors=True)
 
 
 def pick_ref(refs, seed_int: int, data_dir=None) -> str:

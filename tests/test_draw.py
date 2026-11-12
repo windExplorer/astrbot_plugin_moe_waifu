@@ -113,7 +113,10 @@ with tempfile.TemporaryDirectory() as ref_td:
     r2 = asyncio.run(draw.generate_portrait(_FakeContext(), cfg_ref, explicit, 1))
     check("显式指定也返回 4 元组", len(r2) == 4)
     check("显式指定用 img2img 工具", seen.get("tool") == "comfyui_img2img")
-    check("显式指定的图解析成绝对路径交给萌绘", seen.get("image") == b_abs)
+    # v0.12.6：传的是 refs_stage/ 副本（萌绘归档会 os.replace 搬走源文件）
+    check("显式指定的图以 staging 副本交给萌绘",
+          "refs_stage" in str(seen.get("image") or ""))
+    check("原参考图未被搬走（仍在 refs/）", (ref_dir / "refs" / "b.png").is_file())
 
 # plan_source（v0.9.6 出图方式规划：mix/pool/img2img 三模式 + 回退链）
 # 满配额一律取库
@@ -290,7 +293,11 @@ with tempfile.TemporaryDirectory() as multi_td:
         _MultiCtx(), {"data_dir": mdir}, multi_entry, 1))
     check("多图源返回 4 元组", isinstance(r_multi, tuple) and len(r_multi) == 4)
     check("多图源传 images（3 张）", len(seen2.get("images") or []) == 3)
-    check("image 仍是第一张", seen2.get("image") == front_abs)
+    check("image 是第一张的 staging 副本",
+          "refs_stage" in str(seen2.get("image") or "")
+          and Path(seen2["image"]).name == "00.png")
+    check("多图参考原文件都还在",
+          all((mdir / n).is_file() for n in ("front.png", "side.png", "back.png")))
 
     class _OldTool:
         def __init__(self):
