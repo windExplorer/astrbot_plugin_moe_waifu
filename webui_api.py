@@ -1532,9 +1532,12 @@ async def h_debug_clear_draws(plugin) -> dict:
         return err("清空全部签属于高危操作：请明确指定 user_id 或 date")
     rows = plugin._store.clear_draws(uid, date)
     deleted = _delete_card_files(plugin, [r.get("card_path") for r in rows])
+    users_reset = len({r.get("user_id") for r in rows if r.get("user_id")})
     plugin._store.debug_log("reset", uid or date,
-                            f"清抽取签 {len(rows)} 条（{date or '全部日期'}）")
-    return ok({"cleared": len(rows), "cards_deleted": deleted})
+                            f"清抽取签 {len(rows)} 条（{date or '全部日期'}），"
+                            f"扣减计数并重派 {users_reset} 位用户种子")
+    return ok({"cleared": len(rows), "cards_deleted": deleted,
+               "users_reset": users_reset})
 
 
 async def h_debug_force_reroll(plugin) -> dict:
@@ -1557,7 +1560,8 @@ async def h_debug_force_reroll(plugin) -> dict:
     if row is None:
         return err(f"{uid} 在 {date} 没有抽取记录")
     nonce = int(row.get("nonce") or 0)
-    seed = pool.derive_seed(date, uid, str(plugin._cfg("salt", "moe-waifu")), nonce)
+    seed = pool.derive_seed(date, uid, str(plugin._cfg("salt", "moe-waifu")), nonce,
+                            plugin._store.get_epoch(uid))
     candidates = pool.candidates_for(
         plugin._load_packs(), str(row.get("group_id") or ""),
         str(plugin._cfg("group_pools", "") or ""),
@@ -1786,7 +1790,8 @@ def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
                 "reason": "候选角色为空：请检查启用卷、群绑定与 verified 标记",
                 "candidates": 0, "scope": scope,
                 "note": "只读预览不会写库；把角色卷启用或标为 verified 后再试"}
-    seed = pool.derive_seed(date, uid, salt, nonce)
+    seed = pool.derive_seed(date, uid, salt, nonce,
+                            plugin._store.get_epoch(uid) if plugin._store else 0)
     index = pool.sub_int(seed, "char", len(candidates))
     entry = candidates[index]
     s = plugin._store
@@ -1980,6 +1985,16 @@ async def h_debug_rerender(plugin) -> dict:
     src = Path(plugin._data_dir) / rel
     if not rel or not src.is_file():
         return err("该签的立绘文件已不存在，无法重渲染")
+    # 印象语按签随机选句（与 /今日老婆 同口径）：优先用落库的种子快照
+    seed_hex = str(row.get("seed_hex") or "")
+    if len(seed_hex) == 64:
+        seed_bytes = bytes.fromhex(seed_hex)
+    else:
+        salt = str(plugin._cfg("salt", "moe-waifu"))
+        seed_bytes = pool.derive_seed(date, uid, salt, int(row.get("nonce") or 0),
+                                      plugin._store.get_epoch(uid))
+    entry = dict(entry)
+    entry["quote"] = pool.pick_quote(entry, seed_bytes)
     out = Path(plugin._data_dir) / "cards" / f"{uid}_{date}.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -1993,6 +2008,72 @@ async def h_debug_rerender(plugin) -> dict:
     plugin._store.update_draw_card(uid, date, card_path)
     await asyncio.to_thread(plugin._store.debug_log, "rerender", uid, f"{date} 重渲染卡片")
     return ok({"card_path": card_path, "date": date})
+
+
+# ---------- 印象语 LLM 补写（v0.9.5） ----------
+
+# 角色卡片「印象语」生成：一句中文台词/印象，显示在立绘卡片上。
+_QUOTE_SYSTEM_PROMPT = (
+    "你为二次元角色卡片撰写「印象语」——贴在该角色抽卡立绘卡片上的一句话中文"
+    "台词或印象描述。要求：贴合角色性格与原作设定、口语自然、每句不超过 30 字；"
+    "可以是角色第一人称台词，也可以是简短的旁观印象。输出纪律：每行一句，"
+    "不要编号、不要引号、不要 markdown、不要解释。"
+)
+
+
+def _parse_quote_lines(text: str, count: int) -> list:
+    """LLM 返回 → 干净的印象语列表（去编号/引号/空行，去重，截到 count）。"""
+    out = []
+    for line in str(text or "").splitlines():
+        line = prompt_gen.sanitize_llm_output(line, limit=60)
+        if not line:
+            continue
+        if line in out:
+            continue
+        out.append(line)
+        if len(out) >= count:
+            break
+    return out
+
+
+async def h_quote_gen(plugin) -> dict:
+    """LLM 补写角色印象语：按角色名/作品/tags 生成 N 句，前端填进表单再人工确认保存。"""
+    body = await _body()
+    name = str(body.get("name") or "").strip()
+    if not name:
+        return err("缺少角色名")
+    series = str(body.get("series") or "").strip()
+    tags = str(body.get("tags_en") or "").strip()
+    try:
+        count = max(1, min(10, int(body.get("count") or 5)))
+    except (TypeError, ValueError):
+        count = 5
+    provider = await prompt_gen._resolve_provider(
+        plugin.context, str(plugin._cfg("prompt_llm_provider", "") or ""))
+    if provider is None:
+        return err("未找到可用的对话模型：请先在 AstrBot 配置 LLM，"
+                   "或在本插件配置里指定「提示词模型 ID」")
+    timeout = int(plugin._cfg("prompt_llm_timeout", 30) or 30) or 30
+    user_prompt = (
+        f"角色：{name}" + (f"（出自 {series}）" if series else "") + "。\n"
+        + (f"外观特征 tags：{tags}。\n" if tags else "")
+        + f"请写 {count} 句风格多样的印象语（招呼/傲娇/温柔/俏皮等各来一点，"
+          "不要句式雷同）。"
+    )
+    try:
+        resp = await asyncio.wait_for(
+            provider.text_chat(prompt=user_prompt, session_id=None,
+                               system_prompt=_QUOTE_SYSTEM_PROMPT),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        return err(f"LLM 超时（>{timeout}s），稍后再试")
+    except Exception as exc:
+        return err(f"LLM 调用失败：{exc}")
+    quotes = _parse_quote_lines(getattr(resp, "completion_text", "") or "", count)
+    if not quotes:
+        return err("LLM 没有返回可用句子，请重试")
+    return ok({"quotes": quotes})
 
 
 # ---------- 注册 ----------
@@ -2049,6 +2130,7 @@ def register(plugin) -> None:
         ("/group_pools", h_group_pools_set, ["POST"]),
         ("/config", h_config_get, ["GET"]),
         ("/config", h_config_set, ["POST"]),
+        ("/quote_gen", h_quote_gen, ["POST"]),
         ("/ui_state", h_ui_state_get, ["GET"]),
         ("/ui_state", h_ui_state_set, ["POST"]),
     ]

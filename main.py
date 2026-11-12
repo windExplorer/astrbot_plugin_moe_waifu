@@ -228,6 +228,21 @@ class MoeWaifuPlugin(Star):
                 yield event.plain_result("今天已经抽过老婆啦，但这位角色已不在库里，明天再来吧")
                 return
             if rel is not None and (self._data_dir / rel["file"]).is_file():
+                # 印象语按签随机选句：优先用落库的种子快照（换老婆后句子跟着变）
+                seed_hex = str(existing.get("seed_hex") or "")
+                if len(seed_hex) == 64:
+                    try:
+                        seed_bytes = bytes.fromhex(seed_hex)
+                    except ValueError:
+                        seed_bytes = pool.derive_seed(
+                            date, uid, str(self._cfg("salt", "moe-waifu")),
+                            int(existing.get("nonce") or 0), self._store.get_epoch(uid))
+                else:
+                    seed_bytes = pool.derive_seed(
+                        date, uid, str(self._cfg("salt", "moe-waifu")),
+                        int(existing.get("nonce") or 0), self._store.get_epoch(uid))
+                entry = dict(entry)
+                entry["quote"] = pool.pick_quote(entry, seed_bytes)
                 card_path = await asyncio.to_thread(
                     card.render_card, self._data_dir / rel["file"], entry,
                     date_str=date, same_count=1, total_count=1,
@@ -270,7 +285,8 @@ class MoeWaifuPlugin(Star):
             )
             return
         salt = str(self._cfg("salt", "moe-waifu"))
-        entry = pool.pick_character(pool.derive_seed(date, uid, salt, 0), candidates)
+        entry = pool.pick_character(
+            pool.derive_seed(date, uid, salt, 0, self._store.get_epoch(uid)), candidates)
         key = (uid, date)
         if key in self._inflight:
             yield event.plain_result("正在召唤中，稍等一下再看看～")
@@ -316,7 +332,9 @@ class MoeWaifuPlugin(Star):
             yield event.plain_result("老婆库还是空的，换不了哦")
             return
         salt = str(self._cfg("salt", "moe-waifu"))
-        entry = pool.pick_character(pool.derive_seed(date, uid, salt, used + 1), candidates)
+        entry = pool.pick_character(
+            pool.derive_seed(date, uid, salt, used + 1, self._store.get_epoch(uid)),
+            candidates)
         key = (uid, date)
         if key in self._inflight:
             yield event.plain_result("正在召唤中，稍等一下再看看～")
@@ -410,9 +428,13 @@ class MoeWaifuPlugin(Star):
         # 落库与计数（先 upsert 再查同款，含自己）
         # v0.9.0：角色名/作品/种子/立绘来源随签快照落库，历史记录不再依赖角色库反查；
         # upsert_draw 同时追加一条只写不改的抽签流水，换老婆前的角色也留得住。
+        # v0.9.5：种子带重置轮次 epoch；卡片印象语按签从 quotes 池随机选一句
+        seed_bytes = pool.derive_seed(date, uid, salt, nonce, self._store.get_epoch(uid))
+        entry = dict(entry)
+        entry["quote"] = pool.pick_quote(entry, seed_bytes)
         self._store.upsert_draw(
             uid, date, char_id, nonce, rerolled, nickname, gid, gname, platform,
-            seed_hex=pool.derive_seed(date, uid, salt, nonce).hex(),
+            seed_hex=seed_bytes.hex(),
             char_name=str(entry.get("name") or ""),
             series=str(entry.get("series") or ""),
             portrait_file=rel_path,

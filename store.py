@@ -100,6 +100,12 @@ CREATE TABLE IF NOT EXISTS debug_history (
   detail     TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
+-- v0.9.5：用户「重置轮次」。调试清签（clear_draws）时对受影响用户 +1，
+-- 抽签种子据此整体重派——清签重抽不再回到同一个人（用户明确要求）。
+CREATE TABLE IF NOT EXISTS user_epochs (
+  user_id TEXT PRIMARY KEY,
+  epoch   INTEGER NOT NULL DEFAULT 0
+);
 CREATE INDEX IF NOT EXISTS idx_draws_date ON draws(date);
 CREATE INDEX IF NOT EXISTS idx_draws_char_date ON draws(char_id, date);
 CREATE INDEX IF NOT EXISTS idx_draws_user_date ON draws(user_id, date);
@@ -471,7 +477,15 @@ class Store:
     # 文件删除一律由调用方（webui 层）做：这里只动库并返回受影响路径清单。
 
     def clear_draws(self, user_id: str = "", date: str = "") -> list[dict]:
-        """删签（可按 user/date 过滤，两者都空 = 全部）。返回被删行（含 card_path）。"""
+        """删签（可按 user/date 过滤，两者都空 = 全部）。返回被删行（含 card_path）。
+
+        v0.9.5 起删签会做三件连带事：
+        1. 按 draw_events 流水扣减 user_char_counts / char_stats（抽到的次数
+           也减回去，统计不虚高）——次数是逐次 bump 的，流水与之一一对应；
+        2. char_stats.last_date 从剩余 draws 重算；
+        3. 受影响用户的「重置轮次」epoch +1——下次抽取种子整体重派，
+           重置后再抽不再是同一个人。
+        """
         conds, args = [], []
         if user_id:
             conds.append("user_id=?")
@@ -482,11 +496,55 @@ class Store:
         where = (" WHERE " + " AND ".join(conds)) if conds else ""
         rows = self._conn.execute(f"SELECT * FROM draws{where}", args).fetchall()
         out = [dict(r) for r in rows]
+        # 扣减次数：以 draw_events 流水为准（每次抽/换老婆都有一条，与 bump 一一对应）
+        for r in self._conn.execute(
+            f"SELECT user_id, char_id, COUNT(*) AS n FROM draw_events{where}"
+            " GROUP BY user_id, char_id", args,
+        ):
+            self._conn.execute(
+                "UPDATE user_char_counts SET count=count-? WHERE user_id=? AND char_id=?",
+                (int(r["n"]), r["user_id"], r["char_id"]),
+            )
+        for r in self._conn.execute(
+            f"SELECT char_id, COUNT(*) AS n FROM draw_events{where} GROUP BY char_id", args,
+        ):
+            self._conn.execute(
+                "UPDATE char_stats SET total=total-? WHERE char_id=?",
+                (int(r["n"]), r["char_id"]),
+            )
+        # 清零的计数行直接删掉（免得列表里全是 0）；last_date 从剩余 draws 重算
+        self._conn.execute("DELETE FROM user_char_counts WHERE count<=0")
+        self._conn.execute("DELETE FROM char_stats WHERE total<=0")
+        for r in self._conn.execute(
+            "SELECT char_id, MAX(date) AS last FROM draws GROUP BY char_id"
+        ):
+            self._conn.execute(
+                "UPDATE char_stats SET last_date=? WHERE char_id=?",
+                (r["last"], r["char_id"]),
+            )
         self._conn.execute(f"DELETE FROM draws{where}", args)
         # 流水跟着删，避免「签没了、事件还在」的假历史（两张表列名兼容同一 where）
         self._conn.execute(f"DELETE FROM draw_events{where}", args)
+        # 重置轮次 +1：受影响用户下次抽卡种子重派（换个人）
+        if out:
+            affected = list({r["user_id"] for r in out if r.get("user_id")})
+            if not affected and user_id:
+                affected = [user_id]
+            for uid in affected:
+                self._conn.execute(
+                    "INSERT INTO user_epochs (user_id, epoch) VALUES (?, 1)"
+                    " ON CONFLICT(user_id) DO UPDATE SET epoch=epoch+1",
+                    (uid,),
+                )
         self._conn.commit()
         return out
+
+    def get_epoch(self, user_id: str) -> int:
+        """用户重置轮次（抽签种子维度之一，见 derive_seed）。"""
+        row = self._conn.execute(
+            "SELECT epoch FROM user_epochs WHERE user_id=?", (user_id,)
+        ).fetchone()
+        return int(row["epoch"]) if row else 0
 
     def force_reroll(self, user_id: str, date: str) -> dict | None:
         """调试版「换老婆」：nonce+1 重派种子并清卡图，下次抽取即出新角色。

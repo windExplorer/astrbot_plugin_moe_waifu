@@ -27,8 +27,15 @@ CATEGORY_LABELS = {
 
 # ---------- 种子派生 ----------
 
-def derive_seed(date_str: str, user_id: str, salt: str, nonce: int = 0) -> bytes:
-    raw = f"{date_str}|{user_id}|{salt}|{int(nonce)}".encode("utf-8")
+def derive_seed(date_str: str, user_id: str, salt: str, nonce: int = 0,
+                epoch: int = 0) -> bytes:
+    """抽签种子：SHA-256(f"{date}|{uid}|{salt}|{nonce}|{epoch}")。
+
+    epoch 是「重置轮次」（store.user_epochs，调试清签时 +1）：同一天同一人
+    nonce=0 的结果本恒定（一人一天一位），但用户在工坊「重置」后重新抽，
+    期望换个人——epoch 入种子后，每清一次签种子就整体重派（v0.9.5）。
+    """
+    raw = f"{date_str}|{user_id}|{salt}|{int(nonce)}|{int(epoch)}".encode("utf-8")
     return hashlib.sha256(raw).digest()
 
 
@@ -51,6 +58,22 @@ def portrait_seed_int(char_id: str, date_str: str, seq: int, salt: str) -> int:
     """立绘生成种子：同角色同天第 seq 张恒定（31 位内，萌绘可接受）。"""
     raw = f"portrait|{char_id}|{date_str}|{int(seq)}|{salt}".encode("utf-8")
     return int.from_bytes(hashlib.sha256(raw).digest()[:8], "big") % (2 ** 31)
+
+
+def pick_quote(entry: dict, seed: bytes) -> str:
+    """按种子从角色印象语列表里确定性选一句（纯函数，可测）。
+
+    兼容三种数据形态：quotes 列表（多条）、quote 单条、两者皆空返回空串。
+    同一签恒定；换老婆/重置后种子变了，句子也跟着换。
+    """
+    quotes = [str(q).strip() for q in (entry.get("quotes") or [])
+              if str(q).strip()] if isinstance(entry.get("quotes"), list) else []
+    if not quotes:
+        quotes = [str(entry.get("quote") or "").strip()]
+    quotes = [q for q in quotes if q]
+    if not quotes:
+        return ""
+    return quotes[sub_int(seed, "quote", len(quotes))]
 
 
 def pool_index(char_id: str, date_str: str, pool_size: int, salt: str) -> int:
@@ -206,6 +229,14 @@ def normalize_entry(entry: dict, pack_name: str) -> dict | None:
     stype = str(strategy.get("type") or "base").strip().lower()
     if stype not in ("base", "lora", "img2img"):
         stype = "base"
+    # 印象语（v0.9.5）：quotes 多条列表（卡片按种子随机显示一条）；
+    # 兼容旧的单条 quote 字段（并入列表首位，不丢数据）。
+    quotes = []
+    if isinstance(entry.get("quotes"), list):
+        quotes = [str(q).strip() for q in entry["quotes"] if str(q).strip()]
+    single = str(entry.get("quote") or "").strip()
+    if single and single not in quotes:
+        quotes.insert(0, single)
     out = {
         "id": cid,
         "name": name,
@@ -216,7 +247,8 @@ def normalize_entry(entry: dict, pack_name: str) -> dict | None:
         "strategy": strategy,
         "strategy_type": stype,
         "tags_en": tags,
-        "quote": str(entry.get("quote") or "").strip(),
+        "quote": single or (quotes[0] if quotes else ""),
+        "quotes": quotes,
         "color": str(entry.get("color") or "#E8B4C8").strip(),
         "cover": str(entry.get("cover") or "").strip(),   # 角色封面（v0.5.0）
         "verified": bool(entry.get("verified", False)),

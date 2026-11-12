@@ -1600,7 +1600,13 @@
           </div>
           <n-input v-model:value="form.tags_en" type="textarea" :rows="4"
                    placeholder="英文 danbooru 角色 tag（必填）。角色 tag + 系列 tag + 稳定外观特征；括号写成 \\( \\) 转义，如 rem \\(re:zero\\)"></n-input>
-          <n-input v-model:value="form.quote" placeholder="一句角色印象语（可选，显示在卡片上）"></n-input>
+          <n-input v-model:value="form.quote" type="textarea" :rows="3"
+                   placeholder="角色印象语（可选，显示在卡片上）：每行一句，可写多条——卡片会按抽签随机显示其中一句；只写一句则固定显示"></n-input>
+          <n-space align="center">
+            <n-button size="small" :loading="quoteGenLoading" :disabled="!String(form.name || '').trim()"
+                      @click="doQuoteGen">AI 补写印象语</n-button>
+            <span style="font-size:12px;color:#999;">用对话模型生成 5 句，追加到上面（可自行删改后保存）</span>
+          </n-space>
           <n-space align="center">
             <n-switch v-model:value="form.verified"></n-switch>
             <span style="font-size:13px;">verified：画对验证过，参与群内抽卡</span>
@@ -2362,6 +2368,32 @@
       var drawerTitle = Vue.ref("");
       var isNew = Vue.ref(false);
       var saving = Vue.ref(false);
+      var quoteGenLoading = Vue.ref(false);
+      async function doQuoteGen() {
+        // AI 补写印象语：调对话模型生成 5 句，追加到表单（人工删改后再保存）
+        if (!String(form.value.name || "").trim() || quoteGenLoading.value) return;
+        quoteGenLoading.value = true;
+        try {
+          var res = await apiPost("quote_gen", {
+            name: String(form.value.name || "").trim(),
+            series: String(form.value.series || "").trim(),
+            tags_en: String(form.value.tags_en || "").trim(),
+            count: 5
+          });
+          var quotes = (res && res.quotes) || [];
+          if (!quotes.length) {
+            message.warning("LLM 没有返回可用句子，请重试");
+            return;
+          }
+          var cur = String(form.value.quote || "").split(/\n+/)
+            .map(function (s) { return s.trim(); }).filter(Boolean);
+          var merged = cur.concat(quotes.filter(function (q) { return cur.indexOf(q) < 0; }));
+          form.value.quote = merged.join("\n");
+          message.success("已生成 " + quotes.length + " 句，删改后记得点保存");
+        } catch (e) { /* apiPost 已提示 */ } finally {
+          quoteGenLoading.value = false;
+        }
+      }
       var emptyForm = function () {
         return {
           id: "", name: "", series: "", pack: (meta.value.packs[0] || {}).pack || "",
@@ -2398,11 +2430,15 @@
             strategy.denoise = f.strategy_denoise;
           }
         }
+        var quotes = String(f.quote || "").split(/\n+/)
+          .map(function (s) { return s.trim(); }).filter(Boolean);
         return {
           id: String(f.id || "").trim(), name: String(f.name || "").trim(),
           series: String(f.series || "").trim(), category: f.category,
           tier: f.tier || "", strategy: strategy,
-          tags_en: String(f.tags_en || "").trim(), quote: String(f.quote || "").trim(),
+          tags_en: String(f.tags_en || "").trim(),
+          quote: quotes[0] || "",
+          quotes: quotes,
           color: f.color || "#E8B4C8", verified: !!f.verified
         };
       }
@@ -2416,7 +2452,8 @@
           strategy_ref: st.ref || "",
           strategy_img2img_workflow: st.img2img_workflow || null,
           strategy_denoise: (st.denoise !== undefined && st.denoise !== null) ? Number(st.denoise) : null,
-          tags_en: e.tags_en || "", quote: e.quote || "",
+          tags_en: e.tags_en || "",
+          quote: (Array.isArray(e.quotes) && e.quotes.length ? e.quotes.join("\n") : (e.quote || "")),
           color: e.color || "#E8B4C8", verified: !!e.verified
         };
       }
@@ -2847,6 +2884,7 @@
             id: e.id, name: e.name, series: e.series || "", category: e.category,
             tier: e.tier || "", strategy: e.strategy,
             tags_en: e.tags_en || "", quote: e.quote || "",
+            quotes: Array.isArray(e.quotes) ? e.quotes : [],
             color: e.color || "#E8B4C8", verified: !!e.verified
           } });
           message.success("已把本次参数保存到角色：" + e.name);
@@ -3770,7 +3808,8 @@
             res = await apiPost("debug/clear_draws", { user_id: uid, date: today });
             message.success("已重置今日签 " + uid + "（删除 " +
                             ((res && res.cleared) || 0) + " 条，连带删卡 " +
-                            ((res && res.cards_deleted) || 0) + " 张）");
+                            ((res && res.cards_deleted) || 0) +
+                            " 张；统计次数已同步扣减，下次抽取种子已重派）");
           } else if (kind === "rerender") {
             await apiPost("debug/rerender", { user_id: uid, date: today });
             message.success("已按现有立绘重绘卡片，可到「抽签记录」查看");
@@ -3815,7 +3854,9 @@
           var res = await apiPost("debug/clear_draws",
             { user_id: dbgUid2.value, date: dbgDate2.value });
           message.success("已清除 " + ((res && res.cleared) || 0) + " 条签记录（连带删卡 " +
-                          ((res && res.cards_deleted) || 0) + " 张）");
+                          ((res && res.cards_deleted) || 0) +
+                          " 张；统计次数已同步扣减，涉及 " +
+                          ((res && res.users_reset) || 0) + " 位用户下次抽卡种子重派）");
           refreshAfterDebug();
         } catch (e) { /* 已提示 */ } finally {
           dbgBusy.value = false;
@@ -4038,6 +4079,7 @@
         filteredEntries: filteredEntries, entryCols: entryCols,
         showDrawer: showDrawer, drawerTitle: drawerTitle, isNew: isNew,
         form: form, saving: saving, tierOpts: tierOpts, drawerPackOpts: drawerPackOpts,
+        quoteGenLoading: quoteGenLoading, doQuoteGen: doQuoteGen,
         openNew: openNew, openEdit: openEdit, saveForm: saveForm,
         doDeleteEntry: doDeleteEntry, doToggleVerified: doToggleVerified, togglePack: togglePack,
         drawerRefs: drawerRefs, drawerRefsLoading: drawerRefsLoading,
