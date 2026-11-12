@@ -519,6 +519,9 @@ async def h_job_start(plugin) -> dict:
     body = await _body()
     kind = str(body.get("kind") or "try").strip()
     cid = str(body.get("id") or "").strip()
+    # v0.7.5：no_archive=true 时 refill 生成完不自动归档（配合 /jobs/to_ref
+    # 转成参考图，不进立绘列表）
+    no_archive = bool(body.get("no_archive"))
     if kind not in ("try", "refill"):
         return err("kind 只能是 try / refill")
     entry = pool.find_entry(pool.load_packs(_pools_dir(plugin), logger), cid)
@@ -545,7 +548,8 @@ async def h_job_start(plugin) -> dict:
                             "entry_label": pool.entry_label(entry), "src_path": ""}
     _prune_jobs(plugin)
     loop = asyncio.get_running_loop()
-    loop.create_task(_run_job(plugin, job_id, entry, kind, prompt_override))
+    loop.create_task(_run_job(plugin, job_id, entry, kind, prompt_override,
+                              no_archive))
     return ok({"job_id": job_id, "label": pool.entry_label(entry)})
 
 
@@ -559,7 +563,7 @@ def _prune_jobs(plugin) -> None:
 
 
 async def _run_job(plugin, job_id: str, entry: dict, kind: str,
-                   prompt_override: str = "") -> None:
+                   prompt_override: str = "", no_archive: bool = False) -> None:
     job = plugin._jobs.get(job_id, {})
     char_id = entry["id"]
     date = plugin._today()
@@ -586,7 +590,7 @@ async def _run_job(plugin, job_id: str, entry: dict, kind: str,
     job.update({"status": status, "error": error, "duration_ms": duration,
                 "seed": seed_int, "src_path": src or "", "char_id": char_id,
                 "prompt": prompt_text[:500], "prompt_src": prompt_src})
-    if src and kind == "refill":
+    if src and kind == "refill" and not no_archive:
         rel = draw.archive_portrait(src, plugin._data_dir, char_id, date, seq, seed_int)
         plugin._store.add_portrait(char_id, rel, seed_int, date, seq, entry["strategy_type"])
         job["archived"] = rel
@@ -636,6 +640,47 @@ async def h_job_archive(plugin) -> dict:
     plugin._store.add_portrait(cid, rel, int(job.get("seed") or 0), date, seq, "try")
     job["archived"] = rel
     return ok({"archived": rel})
+
+
+async def h_job_to_ref(plugin) -> dict:
+    """把已成功 job 的成品图转存为该角色的参考图（不进立绘库，v0.7.5）。
+
+    文件拷到 data/refs/gen_<时间戳>_<角色>.png 并绑进 strategy.refs（去重追加）。
+    同一 job 只拷一次文件，重复调用只补绑定（幂等）；与归档互不影响。
+    """
+    body = await _body()
+    jid = str(body.get("job_id") or "").strip()
+    job = plugin._jobs.get(jid)
+    if job is None or job.get("status") != "ok" or not job.get("src_path"):
+        return err("job 不存在或未成功")
+    cid = str(job.get("char_id") or body.get("id") or "").strip()
+    if not cid:
+        return err("job 缺角色 id，无法绑定")
+    rel = str(job.get("to_ref") or "")
+    if not rel:
+        src = Path(job["src_path"])
+        if not src.is_file():
+            return err("成品文件已不存在（try_cache 已过期回收）")
+        refs_dir = Path(plugin._data_dir) / "refs"
+        refs_dir.mkdir(parents=True, exist_ok=True)
+        safe_cid = re.sub(r"[^0-9A-Za-z_-]", "_", cid)[:30] or "char"
+        fname = f"gen_{int(time.time())}_{safe_cid}{(src.suffix or '.png').lower()}"
+        shutil.copy2(src, refs_dir / fname)
+        rel = f"refs/{fname}"
+        job["to_ref"] = rel
+
+    def mutate(e, raw):
+        st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
+        refs = [str(x) for x in (st.get("refs") if isinstance(st.get("refs"), list) else [])]
+        if rel not in refs:
+            refs.append(rel)
+        st["refs"] = refs
+        raw["strategy"] = st
+
+    pack_name = _set_entry_field(plugin, cid, mutate)
+    if pack_name is None:
+        return err(f"角色库里找不到 {cid}")
+    return ok({"rel": rel, "path": str(Path(plugin._data_dir) / rel)})
 
 
 # ---------- 分群绑定 ----------
@@ -1143,6 +1188,7 @@ def register(plugin) -> None:
         ("/jobs/start", h_job_start, ["POST"]),
         ("/jobs/status", h_job_status, ["GET", "POST"]),
         ("/jobs/archive", h_job_archive, ["POST"]),
+        ("/jobs/to_ref", h_job_to_ref, ["POST"]),
         ("/group_pools", h_group_pools_get, ["GET"]),
         ("/group_pools", h_group_pools_set, ["POST"]),
         ("/config", h_config_get, ["GET"]),

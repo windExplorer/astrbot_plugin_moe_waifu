@@ -431,6 +431,8 @@
                               @click="doMarkVerified">画对了，标记 verified</n-button>
                     <n-button v-if="tryOk && !tryArchived" size="small" type="success"
                               @click="doArchive">✓ 确认，存入立绘库</n-button>
+                    <n-button v-if="tryOk && !tryToRefed" size="small" type="info"
+                              @click="doTryToRef">⤴ 转为参考图（不入立绘库）</n-button>
                     <n-button v-if="tryOk" size="small" type="warning" secondary
                               @click="discardTry">✗ 舍弃本次结果</n-button>
                     <n-button v-if="tryOk" size="small" type="info" secondary
@@ -559,6 +561,8 @@
                                   @click.stop="setPortraitCover(it)"></w-icon-btn>
                       <w-icon-btn icon="target" size="tiny" type="info" tip="作为图生图源"
                                   @click.stop="useAsSource(it.abs, '立绘 #' + it.seq)"></w-icon-btn>
+                      <w-icon-btn icon="link" size="tiny" tip="加入参考图库"
+                                  @click.stop="bindPortraitAsRef(it)"></w-icon-btn>
                       <w-icon-btn icon="trash" size="tiny" type="error"
                                   :armed="delArm === it.file"
                                   :tip="delArm === it.file ? '再点一次确认删除' : '删除立绘'"
@@ -745,6 +749,8 @@
                     :disabled="!galPrompt || galPromptLoading"
                     @click="generateFromModal">开始生成</n-button>
           <n-button :disabled="refillRunning" @click="galPromptOpen = false">取消</n-button>
+          <n-checkbox v-model:checked="galAsRef" :disabled="refillRunning"
+                      style="margin-left: auto;">转为参考图（不入立绘库）</n-checkbox>
         </n-space>
       </n-space>
     </n-modal>
@@ -1035,7 +1041,9 @@
     star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
     target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
     refresh: '<polyline points="23 4 23 10 17 10"/>' +
-             '<path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>'
+             '<path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>',
+    link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>' +
+          '<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'
   };
   function icon(name, size) {
     return h("svg", {
@@ -1867,6 +1875,7 @@
       var tryOk = Vue.ref(false);
       var tryJobId = Vue.ref("");
       var tryArchived = Vue.ref(false);
+      var tryToRefed = Vue.ref(false);
       var tryPollTimer = null;
       var tryTickTimer = null;
       var tryStartedAt = 0;
@@ -2046,6 +2055,7 @@
         tryElapsed.value = 0;
         tryError.value = ""; tryPreview.value = ""; tryOk.value = false;
         tryArchived.value = false;
+        tryToRefed.value = false;
         tryStep.value = 3;
         try {
           var payload = { kind: "try", id: tryCharId.value,
@@ -2099,6 +2109,7 @@
         tryOk.value = false;
         tryJobId.value = "";
         tryArchived.value = false;
+        tryToRefed.value = false;
         tryError.value = "";
         trySrcPath.value = "";
         message.info("已舍弃本次结果（未存入立绘库）");
@@ -2157,6 +2168,16 @@
           tryArchived.value = true;
           message.success("已存入立绘库：" + ((res && res.archived) || ""));
           await loadAll();
+        } catch (e) { /* 已提示 */ }
+      }
+      // 转为参考图（v0.7.5）：成品拷进角色参考图库并绑定，不入立绘列表
+      async function doTryToRef() {
+        if (!tryJobId.value) return;
+        try {
+          var res = await apiPost("jobs/to_ref", { job_id: tryJobId.value });
+          tryToRefed.value = true;
+          message.success("已转为参考图：" + ((res && res.rel) || "") +
+                          "（可在角色详情参考图墙查看）");
         } catch (e) { /* 已提示 */ }
       }
 
@@ -2304,6 +2325,7 @@
       // 确认后的提示词经 jobs/start 的 prompt 字段直通出图
       var galTheme = Vue.ref("random");
       var galOutfit = Vue.ref("");
+      var galAsRef = Vue.ref(false);   // v0.7.5：勾选后生成结果转参考图，不入立绘库
       var galCustom = Vue.ref("");
       var galAttempt = Vue.ref(0);
       var galPrompt = Vue.ref("");
@@ -2358,6 +2380,7 @@
       async function doDetailGenerate() {
         if (!galCharId.value || refillRunning.value) return;
         var payload = { kind: "refill", id: galCharId.value };
+        if (galAsRef.value) { payload.no_archive = true; }   // v0.7.5：只生成不归档
         if (galMode.value === "img2img") {
           if (!String(galRef.value || "").trim()) {
             message.error("图生图重绘需要先生成源：在下方墙上点 ⊕ 选定一张参考图或立绘");
@@ -2400,10 +2423,20 @@
             refillError.value = "任务未创建成功，请稍后重试";
             return;
           }
-          pollJob(jobId, function () {
+          pollJob(jobId, async function () {
             refillRunning.value = false;
-            message.success("已生成并存入立绘库");
-            loadGallery();
+            if (galAsRef.value) {
+              // v0.7.5：生成为参考图——转存 refs/ 并绑定，不进立绘列表
+              try {
+                var r2 = await apiPost("jobs/to_ref", { job_id: jobId });
+                message.success("已生成并转为参考图：" + ((r2 && r2.rel) || ""));
+              } catch (e2) { /* 已提示 */ }
+              galAsRef.value = false;
+              await loadGalRefs();
+            } else {
+              message.success("已生成并存入立绘库");
+              loadGallery();
+            }
           }, function (why) {
             refillRunning.value = false;
             refillError.value = String(why || "生成失败");
@@ -2426,6 +2459,15 @@
           message.success("已删除 #" + it.seq + "（低于配额时会自动补生）");
           delArm.value = "";
           await loadGallery();
+        } catch (e) { /* 已提示 */ }
+      }
+      // 把已有立绘绑进参考图库（v0.7.5）：不拷文件，直接把立绘路径加进 strategy.refs
+      async function bindPortraitAsRef(it) {
+        if (!it || !it.file) { message.error("该图缺可用路径"); return; }
+        try {
+          await apiPost("refs/bind", { id: galCharId.value, path: it.file });
+          message.success("已加入参考图库：立绘 #" + it.seq);
+          await loadGalRefs();
         } catch (e) { /* 已提示 */ }
       }
       // 封面（v0.5.0）：entry.cover 优先于首张立绘
@@ -2630,6 +2672,7 @@
         tryCharId: tryCharId, charOpts: charOpts, tryEntry: tryEntry,
         tryRunning: tryRunning, tryError: tryError, tryPreview: tryPreview, tryOk: tryOk,
         tryArchived: tryArchived, tryEntryVerified: tryEntryVerified,
+        tryToRefed: tryToRefed, doTryToRef: doTryToRef,
         doTry: doTry, doMarkVerified: doMarkVerified, doArchive: doArchive,
         tryMode: tryMode, tryOverride: tryOverride, tryElapsed: tryElapsed,
         tryStep: tryStep, tryTheme: tryTheme, themeOpts: themeOpts,
@@ -2652,7 +2695,8 @@
         setWorkCover: setWorkCover,
         galCharId: galCharId, galCharOpts: galCharOpts, galItems: galItems,
         loadingGal: loadingGal, refillRunning: refillRunning, refillError: refillError,
-        doDeletePortrait: doDeletePortrait, loadGallery: loadGallery,
+        doDeletePortrait: doDeletePortrait, bindPortraitAsRef: bindPortraitAsRef,
+        loadGallery: loadGallery,
         isCover: isCover, setPortraitCover: setPortraitCover,
         galFrom: galFrom, backFromGallery: backFromGallery, detailEntry: detailEntry,
         gotoTryFromDetail: gotoTryFromDetail,
@@ -2661,6 +2705,7 @@
         galUploadOpen: galUploadOpen, galUpNote: galUpNote,
         onGalPanelFiles: onGalPanelFiles,
         galMode: galMode, galRef: galRef, galWf: galWf, galDenoise: galDenoise,
+        galAsRef: galAsRef,
         galWfAny: galWfAny, wfAllOpts: wfAllOpts,
         genSources: genSources, selectGenSource: selectGenSource,
         useAsSource: useAsSource, doDetailGenerate: doDetailGenerate,
