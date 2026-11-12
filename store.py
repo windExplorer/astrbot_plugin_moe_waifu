@@ -1,18 +1,24 @@
 # -*- coding: utf-8 -*-
 """萌萌今日老婆 · SQLite 存储层（同步 sqlite3，毫秒级小事务；星语同款模式）。
 
-表：draws（当日结果）/ user_char_counts（累计）/ char_stats（全局热度）/
-portraits（立绘库存档）/ draw_jobs（生图审计）。
+表：draws（当日结果，一人一天一行）/ draw_events（每次抽/重抽追加的流水）/
+user_char_counts（累计）/ char_stats（全局热度）/ portraits（立绘库存档）/
+draw_jobs（生图审计）/ debug_history（调试操作与查询审计）。
 落库位置固定 data/plugin_data/ 下（StarTools.get_data_dir），升级目录不丢数据。
-一日一签由 draws 的 (user_id, date) 主键保证：reroll 覆盖更新。
+
+口径（v0.9.0）：draws 是「当前状态」，reroll 覆盖更新；draw_events 是「事件流」，
+只追加不覆盖——换老婆前抽到谁、当时的种子与立绘来源都留得住。
+统计一律以 draws 为准（一人一天只计一次），重抽率等从 events 推导，
+两张表不混算。老库通过 PRAGMA table_info + ALTER TABLE 就地补列，不重建表。
 """
 from __future__ import annotations
 
 import functools
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import date as _date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS draws (
@@ -66,11 +72,94 @@ CREATE TABLE IF NOT EXISTS draw_jobs (
   image_path  TEXT,
   created_at  TEXT NOT NULL
 );
+-- v0.9.0：抽签流水。draws 覆盖更新会抹掉「换老婆前是谁」，这里只追加。
+CREATE TABLE IF NOT EXISTS draw_events (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       TEXT NOT NULL,
+  date          TEXT NOT NULL,
+  char_id       TEXT NOT NULL,
+  char_name     TEXT NOT NULL DEFAULT '',
+  series        TEXT NOT NULL DEFAULT '',
+  nonce         INTEGER NOT NULL DEFAULT 0,
+  kind          TEXT NOT NULL DEFAULT 'first',   -- first / reroll
+  seed_hex      TEXT NOT NULL DEFAULT '',
+  decision      TEXT NOT NULL DEFAULT '',        -- reuse_today / generate / from_pool
+  portrait_file TEXT NOT NULL DEFAULT '',
+  card_path     TEXT NOT NULL DEFAULT '',
+  group_id      TEXT NOT NULL DEFAULT '',
+  group_name    TEXT NOT NULL DEFAULT '',
+  platform      TEXT NOT NULL DEFAULT '',
+  created_at    TEXT NOT NULL
+);
+-- v0.9.0：调试审计 + 最近查询 uid（面板无用户态，一律记 webui）。
+-- 环形保留 200 条，避免调试动作把库撑大。
+CREATE TABLE IF NOT EXISTS debug_history (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind       TEXT NOT NULL,              -- query / simulate / rerender / reset / ...
+  target     TEXT NOT NULL DEFAULT '',
+  detail     TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_draws_date ON draws(date);
+CREATE INDEX IF NOT EXISTS idx_draws_char_date ON draws(char_id, date);
+CREATE INDEX IF NOT EXISTS idx_draws_user_date ON draws(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_draw_jobs_date ON draw_jobs(date);
+CREATE INDEX IF NOT EXISTS idx_draw_jobs_user_date ON draw_jobs(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_draw_jobs_status ON draw_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_draw_events_user_date ON draw_events(user_id, date, id);
+CREATE INDEX IF NOT EXISTS idx_draw_events_date ON draw_events(date);
+CREATE INDEX IF NOT EXISTS idx_debug_history_kind ON debug_history(kind, id);
 """
+
+# 老库补列（PRAGMA 探测 → ALTER TABLE，绝不重建已有表）。
+# draws 早期只有 12 列：角色名/种子/立绘来源都得靠角色库反查，角色删了就显示 id。
+_MIGRATIONS = {
+    "draws": {
+        "seed_hex": "TEXT NOT NULL DEFAULT ''",
+        "char_name": "TEXT NOT NULL DEFAULT ''",
+        "series": "TEXT NOT NULL DEFAULT ''",
+        "portrait_file": "TEXT NOT NULL DEFAULT ''",
+        "decision": "TEXT NOT NULL DEFAULT ''",
+    },
+}
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _streak_stats(dates, today: str = "") -> tuple[int, int]:
+    """(当前连签, 最长连签)，输入为 YYYY-MM-DD 字符串的可迭代对象（纯函数，可直测）。
+
+    当前连签允许「今天还没抽」时从昨天起算——早上打开面板不该显示断签。
+    纯字符串比较不够（跨月/跨年），这里用 date.fromisoformat 逐日推进。
+    """
+    ds = {str(d)[:10] for d in dates if d}
+    if not ds:
+        return (0, 0)
+
+    def parse(s):
+        try:
+            return _date.fromisoformat(s)
+        except (ValueError, TypeError):
+            return None
+
+    anchor = parse(today) or max((x for x in (parse(s) for s in ds) if x), default=None)
+    current = 0
+    if anchor:
+        probe = anchor if anchor.isoformat() in ds else anchor - timedelta(days=1)
+        while probe.isoformat() in ds:
+            current += 1
+            probe -= timedelta(days=1)
+
+    ordered = sorted(x for x in (parse(s) for s in ds) if x)
+    longest = run = 0
+    prev = None
+    for cur in ordered:
+        run = run + 1 if prev is not None and (cur - prev).days == 1 else 1
+        longest = max(longest, run)
+        prev = cur
+    return (current, longest)
 
 
 def _serialized(cls):
@@ -99,8 +188,18 @@ class Store:
     def __init__(self, db_path):
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """老库就地补列：只加缺的列，不改已有数据、不重建表。"""
+        for table, cols in _MIGRATIONS.items():
+            have = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+            for col, ddl in cols.items():
+                if col not in have:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
     def close(self):
         try:
@@ -119,22 +218,45 @@ class Store:
     def upsert_draw(
         self, user_id: str, date: str, char_id: str, nonce: int, rerolled: bool,
         nickname: str = "", group_id: str = "", group_name: str = "",
-        platform: str = "",
+        platform: str = "", seed_hex: str = "", char_name: str = "",
+        series: str = "", portrait_file: str = "", decision: str = "",
     ) -> None:
+        """写当日结果 + 追加一条抽签流水。
+
+        v0.9.0 起角色名 / 作品 / 种子 / 立绘来源 / 立绘决策都随签快照落库：
+        角色条目日后被删或被改名，历史记录仍读得懂。
+        """
         now = _now()
+        nonce = int(nonce)
         self._conn.execute(
             """
             INSERT INTO draws (user_id, date, char_id, nonce, rerolled, nickname,
-                               group_id, group_name, platform, created_at, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                               group_id, group_name, platform, seed_hex, char_name,
+                               series, portrait_file, decision, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(user_id, date) DO UPDATE SET
               char_id=excluded.char_id, nonce=excluded.nonce,
               rerolled=excluded.rerolled, nickname=excluded.nickname,
               group_id=excluded.group_id, group_name=excluded.group_name,
-              platform=excluded.platform, updated_at=excluded.updated_at
+              platform=excluded.platform, seed_hex=excluded.seed_hex,
+              char_name=excluded.char_name, series=excluded.series,
+              portrait_file=excluded.portrait_file, decision=excluded.decision,
+              updated_at=excluded.updated_at
             """,
-            (user_id, date, char_id, int(nonce), int(bool(rerolled)), nickname,
-             group_id, group_name, platform, now, now),
+            (user_id, date, char_id, nonce, int(bool(rerolled)), nickname,
+             group_id, group_name, platform, seed_hex, char_name, series,
+             portrait_file, decision, now, now),
+        )
+        self._conn.execute(
+            """
+            INSERT INTO draw_events (user_id, date, char_id, char_name, series,
+                                     nonce, kind, seed_hex, decision, portrait_file,
+                                     group_id, group_name, platform, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (user_id, date, char_id, char_name, series, nonce,
+             "reroll" if nonce > 0 else "first", seed_hex, decision,
+             portrait_file, group_id, group_name, platform, now),
         )
         self._conn.commit()
 
@@ -142,6 +264,13 @@ class Store:
         self._conn.execute(
             "UPDATE draws SET card_path=?, updated_at=? WHERE user_id=? AND date=?",
             (card_path, _now(), user_id, date),
+        )
+        # 流水补上成卡路径（只写该人当天最后一条事件）
+        self._conn.execute(
+            "UPDATE draw_events SET card_path=? WHERE id=("
+            "  SELECT id FROM draw_events WHERE user_id=? AND date=? "
+            "  ORDER BY id DESC LIMIT 1)",
+            (card_path, user_id, date),
         )
         self._conn.commit()
 
@@ -298,7 +427,8 @@ class Store:
         return [dict(r) for r in rows]
 
     def list_jobs(self, limit: int = 200, offset: int = 0,
-                  char_id: str = "", status: str = "", mode: str = "") -> tuple[list, int]:
+                  char_id: str = "", status: str = "", mode: str = "",
+                  user_id: str = "") -> tuple[list, int]:
         """生图审计分页（created_at 倒序）。mode/status 为空串 = 不过滤。"""
         conds, args = [], []
         if char_id:
@@ -310,6 +440,9 @@ class Store:
         if mode:
             conds.append("mode=?")
             args.append(mode)
+        if user_id:
+            conds.append("user_id=?")
+            args.append(user_id)
         where = (" WHERE " + " AND ".join(conds)) if conds else ""
         total = int(self._conn.execute(
             f"SELECT COUNT(*) AS n FROM draw_jobs{where}", args).fetchone()["n"])
@@ -350,6 +483,8 @@ class Store:
         rows = self._conn.execute(f"SELECT * FROM draws{where}", args).fetchall()
         out = [dict(r) for r in rows]
         self._conn.execute(f"DELETE FROM draws{where}", args)
+        # 流水跟着删，避免「签没了、事件还在」的假历史（两张表列名兼容同一 where）
+        self._conn.execute(f"DELETE FROM draw_events{where}", args)
         self._conn.commit()
         return out
 
@@ -402,3 +537,376 @@ class Store:
         self._conn.execute("DELETE FROM portraits WHERE char_id=?", (char_id,))
         self._conn.commit()
         return out
+
+    # ---------- 抽签记录 / 用户查询 / 区间统计（v0.9.0） ----------
+    # 口径：draws = 当前状态（一人一天一行），draw_events = 只追加的事件流。
+    # 所有列表统一返回 {total,page,size,rows}，区间一律「含两端」的字符串比较。
+
+    def _record_filters(self, date_from="", date_to="", q="", char_id="",
+                        group_id="", platform="", rerolled="") -> tuple[str, list]:
+        conds, args = [], []
+        if date_from:
+            conds.append("date>=?")
+            args.append(date_from)
+        if date_to:
+            conds.append("date<=?")
+            args.append(date_to)
+        q = str(q or "").strip()
+        if q:
+            conds.append("(user_id LIKE ? OR nickname LIKE ? OR char_name LIKE ?)")
+            args.extend([f"%{q}%"] * 3)
+        if char_id:
+            conds.append("char_id=?")
+            args.append(char_id)
+        if group_id == "__private__":
+            conds.append("(group_id='' OR group_id IS NULL)")
+        elif group_id:
+            conds.append("group_id=?")
+            args.append(group_id)
+        if platform:
+            conds.append("platform=?")
+            args.append(platform)
+        if rerolled in ("yes", "no"):
+            conds.append("rerolled=?")
+            args.append(1 if rerolled == "yes" else 0)
+        return ((" WHERE " + " AND ".join(conds)) if conds else ""), args
+
+    def list_records(self, page: int = 1, size: int = 20, date_from: str = "",
+                     date_to: str = "", q: str = "", char_id: str = "",
+                     group_id: str = "", platform: str = "",
+                     rerolled: str = "") -> dict:
+        """抽签记录分页：日期区间 + 关键词（QQ/昵称/角色名）+ 角色/群/平台/重抽筛选。"""
+        page, size = max(1, int(page)), max(1, min(100, int(size)))
+        where, args = self._record_filters(date_from, date_to, q, char_id,
+                                           group_id, platform, rerolled)
+        total = int(self._conn.execute(
+            f"SELECT COUNT(*) AS n FROM draws{where}", args).fetchone()["n"])
+        rows = self._conn.execute(
+            f"SELECT * FROM draws{where} ORDER BY date DESC, updated_at DESC"
+            " LIMIT ? OFFSET ?", (*args, size, (page - 1) * size),
+        ).fetchall()
+        return {"total": total, "page": page, "size": size,
+                "rows": [dict(r) for r in rows]}
+
+    def record_detail(self, user_id: str, date: str) -> dict | None:
+        """单条签的完整上下文：当前行 + 当天抽签流水 + 相关出图任务。"""
+        row = self._conn.execute(
+            "SELECT * FROM draws WHERE user_id=? AND date=?", (user_id, date)
+        ).fetchone()
+        if row is None:
+            return None
+        events = self._conn.execute(
+            "SELECT * FROM draw_events WHERE user_id=? AND date=? ORDER BY id ASC",
+            (user_id, date),
+        ).fetchall()
+        jobs = self._conn.execute(
+            "SELECT * FROM draw_jobs WHERE date=? AND (user_id=? OR char_id=?)"
+            " ORDER BY id DESC LIMIT 20", (date, user_id, row["char_id"]),
+        ).fetchall()
+        return {"draw": dict(row), "events": [dict(r) for r in events],
+                "jobs": [dict(r) for r in jobs]}
+
+    def list_events(self, limit: int = 50, offset: int = 0, user_id: str = "",
+                    date: str = "", kind: str = "") -> tuple[list, int]:
+        """抽签流水（含被覆盖掉的重抽前角色）。返回 (rows, total)。"""
+        conds, args = [], []
+        if user_id:
+            conds.append("user_id=?")
+            args.append(user_id)
+        if date:
+            conds.append("date=?")
+            args.append(date)
+        if kind in ("first", "reroll"):
+            conds.append("kind=?")
+            args.append(kind)
+        where = (" WHERE " + " AND ".join(conds)) if conds else ""
+        total = int(self._conn.execute(
+            f"SELECT COUNT(*) AS n FROM draw_events{where}", args).fetchone()["n"])
+        rows = self._conn.execute(
+            f"SELECT * FROM draw_events{where} ORDER BY id DESC LIMIT ? OFFSET ?",
+            (*args, max(1, int(limit)), max(0, int(offset))),
+        ).fetchall()
+        return [dict(r) for r in rows], total
+
+    def list_groups(self) -> list:
+        """记录里出现过的群（含私聊伪群 `__private__`），群名取最近一次非空快照。"""
+        rows = self._conn.execute(
+            """
+            SELECT group_id, COUNT(*) AS n,
+              (SELECT d2.group_name FROM draws d2
+               WHERE d2.group_id=d.group_id AND d2.group_name<>''
+               ORDER BY d2.updated_at DESC LIMIT 1) AS group_name
+            FROM draws d WHERE d.group_id<>'' AND d.group_id IS NOT NULL
+            GROUP BY group_id ORDER BY n DESC
+            """
+        ).fetchall()
+        out = [{"group_id": r["group_id"],
+                "group_name": r["group_name"] or r["group_id"],
+                "n": int(r["n"])} for r in rows]
+        private = int(self._conn.execute(
+            "SELECT COUNT(*) AS n FROM draws WHERE group_id='' OR group_id IS NULL"
+        ).fetchone()["n"])
+        out.append({"group_id": "__private__", "group_name": "私聊", "n": private})
+        return out
+
+    def list_platforms(self) -> list:
+        """记录里出现过的平台（筛选下拉用）。"""
+        rows = self._conn.execute(
+            "SELECT DISTINCT platform FROM draws WHERE platform<>'' AND platform IS NOT NULL"
+            " ORDER BY platform"
+        ).fetchall()
+        return [r["platform"] for r in rows]
+
+    def list_users(self, page: int = 1, size: int = 24, q: str = "",
+                   order: str = "last", today: str = "") -> dict:
+        """用户列表：分页 + QQ/昵称搜索 + 连签天数（Python 侧按日期集合算）。"""
+        page, size = max(1, int(page)), max(1, min(100, int(size)))
+        conds, args = [], []
+        q = str(q or "").strip()
+        if q:
+            conds.append("(user_id LIKE ? OR nickname LIKE ?)")
+            args.extend([f"%{q}%"] * 2)
+        where = (" WHERE " + " AND ".join(conds)) if conds else ""
+        order_sql = {
+            "last": "last_date DESC", "draws": "draws DESC",
+            "chars": "chars DESC", "rerolls": "rerolls DESC",
+        }.get(order, "last_date DESC")
+        total = int(self._conn.execute(
+            f"SELECT COUNT(*) AS n FROM (SELECT user_id FROM draws{where} GROUP BY user_id)",
+            args).fetchone()["n"])
+        rows = self._conn.execute(
+            f"""
+            SELECT user_id, MAX(nickname) AS nickname, COUNT(*) AS draws,
+                   COUNT(DISTINCT char_id) AS chars,
+                   COALESCE(SUM(nonce),0) AS rerolls,
+                   MIN(date) AS first_date, MAX(date) AS last_date
+            FROM draws{where} GROUP BY user_id
+            ORDER BY {order_sql}, user_id LIMIT ? OFFSET ?
+            """, (*args, size, (page - 1) * size),
+        ).fetchall()
+        dates_by_user: dict = {}
+        for r in self._conn.execute("SELECT user_id, date FROM draws"):
+            dates_by_user.setdefault(r["user_id"], []).append(r["date"])
+        out = []
+        for r in rows:
+            item = dict(r)
+            cur, longest = _streak_stats(dates_by_user.get(item["user_id"], []), today)
+            item["streak"], item["longest_streak"] = cur, longest
+            out.append(item)
+        return {"total": total, "page": page, "size": size, "rows": out}
+
+    def user_profile(self, user_id: str, today: str = "",
+                     calendar_months: int = 3) -> dict | None:
+        """单用户档案：汇总 / 今日签 / 角色偏好 / 历史签 / 抽签日历 / 流水 / 出图任务。"""
+        base = self._conn.execute(
+            """
+            SELECT MAX(nickname) AS nickname, COUNT(*) AS draws,
+                   COUNT(DISTINCT char_id) AS chars,
+                   COALESCE(SUM(nonce),0) AS rerolls,
+                   MIN(date) AS first_date, MAX(date) AS last_date
+            FROM draws WHERE user_id=?
+            """, (user_id,),
+        ).fetchone()
+        if base is None or not base["draws"]:
+            return None
+        all_dates = [r["date"] for r in self._conn.execute(
+            "SELECT date FROM draws WHERE user_id=?", (user_id,))]
+        cur, longest = _streak_stats(all_dates, today)
+        months = max(1, min(12, int(calendar_months)))
+        cal_from = ""
+        try:
+            anchor = _date.fromisoformat(today) if today else _date.fromisoformat(max(all_dates))
+            cal_from = (anchor - timedelta(days=months * 31)).isoformat()
+        except (ValueError, TypeError):
+            cal_from = ""
+        top_chars = self._conn.execute(
+            "SELECT char_id, MAX(char_name) AS char_name, COUNT(*) AS n"
+            " FROM draws WHERE user_id=? GROUP BY char_id"
+            " ORDER BY n DESC, char_id LIMIT 12", (user_id,),
+        ).fetchall()
+        history = self._conn.execute(
+            "SELECT * FROM draws WHERE user_id=? ORDER BY date DESC LIMIT 60", (user_id,)
+        ).fetchall()
+        events = self._conn.execute(
+            "SELECT * FROM draw_events WHERE user_id=? ORDER BY id DESC LIMIT 40", (user_id,)
+        ).fetchall()
+        jobs = self._conn.execute(
+            "SELECT * FROM draw_jobs WHERE user_id=? ORDER BY id DESC LIMIT 20", (user_id,)
+        ).fetchall()
+        calendar = self._conn.execute(
+            "SELECT date, char_id, char_name, rerolled, card_path FROM draws"
+            " WHERE user_id=? AND date>=? ORDER BY date", (user_id, cal_from),
+        ).fetchall()
+        today_row = self.get_draw(user_id, today) if today else None
+        return {
+            "user_id": user_id,
+            "nickname": base["nickname"] or "",
+            "today": dict(today_row) if today_row else None,
+            "summary": {
+                "draws": int(base["draws"]), "chars": int(base["chars"]),
+                "rerolls": int(base["rerolls"]), "first_date": base["first_date"],
+                "last_date": base["last_date"], "streak": cur,
+                "longest_streak": longest,
+            },
+            "top_chars": [dict(r) for r in top_chars],
+            "history": [dict(r) for r in history],
+            "events": [dict(r) for r in events],
+            "jobs": [dict(r) for r in jobs],
+            "calendar": [dict(r) for r in calendar],
+        }
+
+    def stats_range(self, date_from: str, date_to: str,
+                    tz_name: str = "Asia/Shanghai") -> dict:
+        """区间统计：趋势 / 时段 / 角色 / 群 / 立绘决策 / 出图质量。
+
+        绝大多数维度走 SQL 聚合；只有「时段」需要 UTC→配置时区换算，在 Python 侧
+        逐行做（区间上限 180 天，数千行足够快，也不依赖 SQLite 的 JSON1 扩展）。
+        """
+        lo, hi = str(date_from or "0000-01-01"), str(date_to or "9999-12-31")
+        span = (lo, hi)
+
+        def one(sql, args=()):
+            row = self._conn.execute(sql, args).fetchone()
+            return row[0] if row is not None else 0
+
+        draws = int(one("SELECT COUNT(*) FROM draws WHERE date>=? AND date<=?", span))
+        users = int(one("SELECT COUNT(DISTINCT user_id) FROM draws WHERE date>=? AND date<=?", span))
+        rerolls = int(one("SELECT COALESCE(SUM(nonce),0) FROM draws WHERE date>=? AND date<=?", span))
+        chars = int(one("SELECT COUNT(DISTINCT char_id) FROM draws WHERE date>=? AND date<=?", span))
+        new_users = int(one(
+            "SELECT COUNT(*) FROM (SELECT user_id, MIN(date) AS first FROM draws"
+            " GROUP BY user_id) WHERE first>=? AND first<=?", span))
+        events_rerolls = int(one(
+            "SELECT COUNT(*) FROM draw_events WHERE kind='reroll' AND date>=? AND date<=?", span))
+        portraits_added = int(one(
+            "SELECT COUNT(*) FROM portraits WHERE date>=? AND date<=?", span))
+        jobs_total = int(one("SELECT COUNT(*) FROM draw_jobs WHERE date>=? AND date<=?", span))
+        jobs_ok = int(one(
+            "SELECT COUNT(*) FROM draw_jobs WHERE status='ok' AND date>=? AND date<=?", span))
+        jobs_fail = int(one(
+            "SELECT COUNT(*) FROM draw_jobs WHERE status IN ('error','timeout','skipped_no_anima')"
+            " AND date>=? AND date<=?", span))
+        avg_ms = int(one(
+            "SELECT COALESCE(AVG(duration_ms),0) FROM draw_jobs"
+            " WHERE status='ok' AND duration_ms>0 AND date>=? AND date<=?", span))
+
+        trend_map: dict = {}
+        for r in self._conn.execute(
+            "SELECT date, COUNT(*) AS n, COUNT(DISTINCT user_id) AS u,"
+            " COALESCE(SUM(nonce),0) AS r FROM draws WHERE date>=? AND date<=?"
+            " GROUP BY date", span,
+        ):
+            trend_map[r["date"]] = {"date": r["date"], "draws": int(r["n"]),
+                                    "users": int(r["u"]), "rerolls": int(r["r"]),
+                                    "jobs_ok": 0, "jobs_fail": 0}
+        for r in self._conn.execute(
+            "SELECT date, status, COUNT(*) AS n FROM draw_jobs WHERE date>=? AND date<=?"
+            " GROUP BY date, status", span,
+        ):
+            item = trend_map.setdefault(r["date"], {
+                "date": r["date"], "draws": 0, "users": 0, "rerolls": 0,
+                "jobs_ok": 0, "jobs_fail": 0})
+            if r["status"] == "ok":
+                item["jobs_ok"] += int(r["n"])
+            elif r["status"] in ("error", "timeout", "skipped_no_anima"):
+                item["jobs_fail"] += int(r["n"])
+        # 补齐没有数据的日子，前端折线才不会把 7 天画成 2 个点
+        try:
+            start, end = _date.fromisoformat(lo), _date.fromisoformat(hi)
+            if 0 <= (end - start).days <= 366:
+                for i in range((end - start).days + 1):
+                    d = (start + timedelta(days=i)).isoformat()
+                    trend_map.setdefault(d, {"date": d, "draws": 0, "users": 0,
+                                             "rerolls": 0, "jobs_ok": 0, "jobs_fail": 0})
+        except (ValueError, TypeError):
+            pass
+        trend = [trend_map[k] for k in sorted(trend_map)]
+
+        try:
+            tz = ZoneInfo(tz_name)
+        except Exception:
+            tz = timezone.utc
+        hours = [0] * 24
+        for r in self._conn.execute(
+            "SELECT created_at FROM draws WHERE date>=? AND date<=?", span
+        ):
+            try:
+                dt = datetime.strptime(str(r["created_at"]), "%Y-%m-%dT%H:%M:%SZ")
+                hours[dt.replace(tzinfo=timezone.utc).astimezone(tz).hour] += 1
+            except (ValueError, TypeError):
+                continue
+
+        chars_top = [dict(r) for r in self._conn.execute(
+            "SELECT char_id, MAX(char_name) AS char_name, COUNT(*) AS n"
+            " FROM draws WHERE date>=? AND date<=? GROUP BY char_id"
+            " ORDER BY n DESC, char_id LIMIT 12", span)]
+        decisions = [dict(r) for r in self._conn.execute(
+            "SELECT decision, COUNT(*) AS n FROM draws WHERE date>=? AND date<=?"
+            " GROUP BY decision ORDER BY n DESC", span)]
+        groups = []
+        group_names: dict = {}
+        for r in self._conn.execute(
+            "SELECT group_id, group_name, date FROM draws WHERE date>=? AND date<=?"
+            " ORDER BY date", span,
+        ):
+            gid = str(r["group_id"] or "") or "__private__"
+            if r["group_name"]:
+                group_names[gid] = r["group_name"]
+        for r in self._conn.execute(
+            "SELECT COALESCE(group_id,'') AS gid, COUNT(*) AS n FROM draws"
+            " WHERE date>=? AND date<=? GROUP BY gid ORDER BY n DESC", span,
+        ):
+            gid = str(r["gid"] or "") or "__private__"
+            groups.append({"group_id": gid,
+                           "group_name": group_names.get(gid) or ("私聊" if gid == "__private__" else gid),
+                           "n": int(r["n"])})
+
+        return {
+            "range": {"from": lo, "to": hi},
+            "totals": {
+                "draws": draws, "users": users, "new_users": new_users,
+                "rerolls": rerolls, "events_rerolls": events_rerolls,
+                "reroll_rate": round(rerolls / draws * 100, 1) if draws else 0.0,
+                "chars": chars, "avg_per_user": round(draws / users, 2) if users else 0.0,
+                "portraits_added": portraits_added,
+                "jobs_total": jobs_total, "jobs_ok": jobs_ok, "jobs_fail": jobs_fail,
+                "success_rate": round(jobs_ok / jobs_total * 100, 1) if jobs_total else 0.0,
+                "avg_ms": avg_ms,
+            },
+            "trend": trend,
+            "hours": [{"hour": h, "n": hours[h]} for h in range(24)],
+            "chars": chars_top,
+            "decisions": decisions,
+            "groups": groups,
+            "sample_days": len(trend),
+        }
+
+    # ---------- 调试审计（v0.9.0） ----------
+
+    def debug_log(self, kind: str, target: str = "", detail: str = "") -> None:
+        """记一条调试动作；环形保留最近 200 条（不让它变成第二个日志库）。"""
+        self._conn.execute(
+            "INSERT INTO debug_history (kind, target, detail, created_at) VALUES (?,?,?,?)",
+            (str(kind)[:32], str(target)[:120], str(detail)[:500], _now()),
+        )
+        self._conn.execute(
+            "DELETE FROM debug_history WHERE id NOT IN"
+            " (SELECT id FROM debug_history ORDER BY id DESC LIMIT 200)"
+        )
+        self._conn.commit()
+
+    def debug_recent(self, limit: int = 8) -> list:
+        """最近查询过的 uid（供调试页快捷标签）。"""
+        rows = self._conn.execute(
+            "SELECT target FROM debug_history WHERE kind='query' AND target<>''"
+            " GROUP BY target ORDER BY MAX(id) DESC LIMIT ?",
+            (max(1, min(30, int(limit))),),
+        ).fetchall()
+        return [r["target"] for r in rows]
+
+    def debug_audit(self, limit: int = 40) -> list:
+        rows = self._conn.execute(
+            "SELECT * FROM debug_history WHERE kind<>'query'"
+            " ORDER BY id DESC LIMIT ?", (max(1, min(200, int(limit))),),
+        ).fetchall()
+        return [dict(r) for r in rows]

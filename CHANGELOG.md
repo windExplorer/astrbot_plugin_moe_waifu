@@ -2,6 +2,134 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.9.1 (2026-11-12)
+
+立绘 / 参考图改成真·移动语义，支持双向互转（版本 v0.9.0 -> v0.9.1）。
+
+- **现象（用户）**：「立绘里面将图片转移到参考图，为啥立绘列表中还存在，并且删除之后，
+  参考图那边的就没有了，按道理是可以互转，转之后就去对应列表，而不是两个列表都有」。
+- **根因**：v0.7.5 的「加入参考图库」（`bindPortraitAsRef` → `POST /refs/bind`）只是把
+  **立绘自身的相对路径** `portraits/<角色>/<文件>` 追加进 `strategy.refs`——既不搬文件，
+  也不删 `portraits` 库行。于是：① 立绘列表照旧显示这张图（行还在）；
+  ② 两个列表指向**同一个磁盘文件**；③ 点「删除立绘」时 `h_portrait_delete` 直接
+  `unlink` 那个文件，参考图那条绑定瞬间变成死链，看起来就是「参考图也没了」。
+  本质是「建立关联」被当成了「转移」，而且完全没有反向操作。
+- **修复（后端 · `webui_api.py`）**
+  - 新增两条路由：`/portraits/move_to_ref`（立绘 → 参考图）、
+    `/refs/move_to_portrait`（参考图 → 立绘）。业务抽成同步 core
+    `_move_portrait_to_ref` / `_move_ref_to_portrait` / `_delete_portrait_core`，
+    handler 只夹参数 + `asyncio.to_thread`，不启 quart 也能喂桩跑真文件。
+  - **真·移动**：立绘转参考图时按内容寻址另存到 `data/refs/mv_<sha16>.png`
+    （同内容复用不堆重复文件），把所有引用改到新路径，再删原立绘文件与库行；
+    参考图转立绘时用 `draw.archive_portrait` 归档、写 `portraits` 行、从
+    `strategy.refs` 解绑，无其它引用时删原 refs 文件。两边列表互斥、文件独立。
+  - **历史脏数据保活**：`_delete_portrait_core` 删立绘前先探测该路径是否仍被
+    `strategy.ref / refs`、`entry.cover` 或作品封面引用；若有，先另存一份到 refs/
+    并把引用整体改过去再删——旧数据里「删立绘导致参考图消失」从此不再发生，
+    返回 `relocated_to`，前端提示「已自动另存到参考图库」。
+  - **引用改写规范化**：`_norm_ref` 把绝对路径（上传走的 `res.path`）与相对路径
+    （旧版绑立绘走的 `it.file`）统一成「相对 data 目录的 POSIX 串」，
+    `_rewrite_path_refs` 顺手去重；主参考在转回立绘时清空，封面改指新文件，
+    避免转移后留下死链。
+  - **跨角色共用保护**：转回立绘只解绑当前角色，不动其它角色 / 作品封面；
+    只有全库都无引用时才删原 refs 文件（实测踩到过「一把梭从所有角色移除」的 bug）。
+  - 旧 `/refs/bind`、`/refs/unbind` 保留给上传与「只移除绑定」场景，不破坏外部调用。
+- **修复（前端 · `pages/waifu-console/index.html`）**
+  - 立绘卡「加入参考图库」→「**转移到参考图（从立绘库移走）**」，换方向箭头图标；
+    参考图卡新增「**转回立绘（从参考图库移走）**」，双向可点。
+  - 两个操作都刷新**两侧**列表（旧版只刷参考图，所以视觉上像没移走）；
+    删除立绘时按 `relocated_to` 提示已自动保活；参考图区标题注明「与立绘库互斥，可双向转移」。
+- **测试**：新增 `tests/test_refs_move.py` —— 临时目录真文件 + 真 SQLite，
+  6 组 33 项断言，覆盖单向转移、往返互转、历史脏数据保活、干净立绘直接删、
+  跨角色共用不误删、路径规范化与越界拒绝；`test_webui_contract.py` 同步加入
+  两条新路由与两个新方法名。既有 11 个自检全部保持通过。
+- 文档：`README.md` 补互转说明，`docs/设计说明.md` 补第 12 条设计决策。
+
+## v0.9.0 (2026-11-12)
+
+抽签记录 / 数据统计 / 用户查询 / 调试工具四条能力线补齐，对齐萌萌星语的控制台（版本 v0.8.0 -> v0.9.0）。
+
+- **需求（用户）**：参考 `astrbot_plugin_moe_star_whisper`，那边「抽签记录、数据统计、
+  用户查询、调试工具」做得刚刚好，本插件 v0.8.0 的「记录·调试」太敷衍。
+- **根因**：不只是「少几个页面」。① `draws` 是 `(user_id, date)` 主键 + `ON CONFLICT
+  DO UPDATE`，重抽会把「换老婆前抽到谁」永久抹掉，且行里没有种子 / 角色名快照 /
+  立绘文件 / 决策模式，角色删了记录就只剩 id；② 查询层只有精确 `user_id/date`
+  过滤 + `LIMIT 100`，`draw_stats` 只算「今天」，没有区间、分页、关键词、图表；
+  ③ 没有单用户维度，也没有任何只读调试手段——四个调试动作全是破坏性改库；
+  ④ 四类能力挤在同一个页签里，零图表、无下钻；⑤ `store.py` 只有 `CREATE TABLE
+  IF NOT EXISTS`，老库加列无处下手。
+- **① 数据层：状态表 + 事件流双表口径**（`store.py`）
+  - 新增 `draw_events`（每次抽 / 重抽只追加一行：`kind=first|reroll`、`seed_hex`、
+    `char_name`、`series`、`decision`、`portrait_file`、`card_path`、群 / 平台快照）
+    与 `debug_history`（调试查询与动作审计，环形保留 200 条）；补 9 条索引
+    （`draws.date/char,date/user,date`、`draw_jobs.date/user,date/status`、
+    `draw_events.user,date,idx/date`、`debug_history.kind,id`）；
+  - `draws` 就地补 5 列（`seed_hex/char_name/series/portrait_file/decision`）：
+    `_migrate()` 用 `PRAGMA table_info` 探测后 `ALTER TABLE`，**不重建表、不动旧数据**，
+    老用户直接热更可用；
+  - `upsert_draw` 同时写 `draw_events`，`update_draw_card` 回补当天最后一条流水的卡图路径；
+    `clear_draws` 同步删对应流水，避免「签没了、事件还在」的假历史；
+  - `main._produce` 现在把种子 / 角色名 / 作品 / 立绘相对路径 / 立绘决策随签落库，
+    并把「满库取图但文件已丢 → 回退重新生成」的 `decision` 如实记成 `generate`。
+  - **口径**：统计一律以 `draws`（一人一天一行）为准，重抽覆盖不重复计人数；
+    流水另算 `events_rerolls`，UI 如实标注两者可能不一致（历史数据没有流水）。
+    **升级前的重抽轨迹无法回填**，这是覆盖语义的固有代价。
+- **② 查询层（`store.py`，全部公开方法自动被 `_serialized` 加锁）**
+  - `list_records`：统一 `{total,page,size,rows}` 分页，支持日期区间（含两端）、
+    QQ / 昵称 / 角色名关键词、角色 / 群（含伪群 `__private__`）/ 平台 / 只看重抽；
+    `record_detail` 给单条签的当天流水 + 相关出图任务；
+  - `list_users`（搜索 / 排序白名单 / 连签天数）与 `user_profile`（今日签、汇总、
+    角色偏好 Top、历史签、流水、抽签日历）；连签用纯函数 `_streak_stats`，
+    「今天还没抽」从昨天起算，早上打开面板不会误判断签；
+  - `stats_range`：趋势（补齐无数据的日子）、时段（UTC→配置时区换算）、角色热度、
+    群 / 私聊占比、立绘决策分布、出图成功率与平均耗时；除时段外全走 SQL 聚合，
+    不引 JSON1 扩展；区间上限由 API 夹在 1~180 天；
+  - `debug_log/debug_recent/debug_audit`：最近查询 uid 的快捷标签 + 动作审计。
+- **③ API 层（`webui_api.py`，星语同款薄分层）**
+  - handler 只夹参数 + `asyncio.to_thread`，业务全在同步 `_xxx_core`
+    （`_records_core/_stats_core/_users_core/_user_core/_debug_state_core/
+    _debug_simulate_core`），不启 quart 就能喂桩跑真 SQL；
+  - 新增 11 条路由：`/records`、`/records/detail`、`/records/events`、`/stats`、
+    `/users`、`/user`、`/filters`、`/debug/state`、`/debug/history`、
+    `/debug/simulate`、`/debug/rerender`；v0.8.0 的三条 `/records/*` 与四个重置保留；
+  - **模拟抽签是纯 dry-run**：复用真实链路的 `derive_seed / candidates_for /
+    sub_int / decision_of / pool_index`，返回种子、候选数、命中索引、角色、立绘决策、
+    取图槽位与「是否与当前签一致」，不写库 / 不生图 / 不发消息 / 不消耗换老婆次数；
+  - `/debug/rerender` 按已存签的立绘重画卡片（改 `card.py` 后看效果）；
+    四个破坏性重置现在都写审计；四条统计型 handler 全部走 `to_thread`；
+    配置快照里的盐值脱敏后回显。
+- **④ 前端：一个合并页签拆成四个独立页签**（`pages/waifu-console/index.html`）
+  - 导航 6 → 9：抽签记录 / 数据统计 / 用户查询 / 调试工具；`_UI_MENUS` 同步扩白名单，
+    旧记忆值 `records` 仍落在抽签记录页，不会跳回角色库；
+  - **抽签记录**：筛选栏（关键词 / 日期区间 + 快捷近 7·30·90 天 / 群 / 角色 / 平台 /
+    首抽重抽）、分页表格、点用户下钻用户查询、卡图预览、详情抽屉（全部字段 +
+    当天重抽轨迹 + 相关任务）、抽签流水与生成任务审计两张表；
+  - **数据统计**：7/30/90/180 天区间、8 张指标卡、每日趋势折线（抽签 / 独立用户 /
+    成功出图）、24 小时分布、角色热度 Top12、群占比环图、立绘来源与出图质量，
+    底部写明统计口径；
+  - **用户查询**：搜索 / 排序 / 分页的用户卡、单用户档案（连签、今日老婆、近 3 月
+    抽签日历、老婆偏好、历史签、流水），记录页点 QQ 号可直接跳进来；
+  - **调试工具**：状态查询（今日签 / 配置快照 / 流水 / 任务 + 最近 uid 标签）、
+    只读模拟抽签（可换 nonce 预览 `/换老婆`）、卡片重渲染、四项带两段确认的
+    危险操作、操作审计表；
+  - **图表用内联 SVG 字符串经 `v-html` 注入，不引 ECharts**：单文件零构建前端多一个
+    vendored `<script>` 就会撞 `test_html_integrity` 的「script 恰好 3 个」守卫，
+    而这几个维度用 SVG 完全够画；`v-html` 也顺带避开 in-DOM 模板把 `viewBox`
+    大小写吃掉的问题。
+- **⑤ 守卫**（`tests/`，均可直接运行、退出码即结论）
+  - 新增 `test_records.py`：临时库真 SQL，覆盖老库迁移、重抽轨迹、分页筛选、
+    连签、区间统计口径、审计环形保留，以及 6 个 `_xxx_core` 的桩测（65 项断言）；
+  - 新增 `test_webui_contract.py`：页签前后白名单一致、模板变量全部暴露、
+    新路由全部注册、store 方法齐全、迁移靠 ALTER；
+  - 新增 `test_template_structure.py`：引号感知的标签配对扫描（能正确处理
+    `v-if="recTotal > recSize"` 里的 `>`），防漏 `</div>` 把页签吞掉；
+  - 新增 `test_template_compile.py`：用页面自带的 Vue 3.5 全局构建真编译 in-DOM
+    模板，抓 `{{ }}` / 指令表达式语法错（Node 里给最小 DOM 桩）；
+  - 既有 `test_inline_js` / `test_html_integrity` / `test_schema` 与 4 个纯函数
+    守卫全部保持通过。
+- 文档：`README.md` 更新九页签与控制台说明、`docs/设计说明.md` 补双表口径与
+  前端取舍。版本按「新功能系列升次版本」从 v0.8.0 升到 v0.9.0。
+
 ## v0.8.0 (2026-11-12)
 
 角色详情降为二级页面 + 新增「记录·调试」页（版本 v0.7.5 -> v0.8.0）。

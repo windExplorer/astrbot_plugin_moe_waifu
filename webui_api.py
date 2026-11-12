@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import io
 import re
 import shutil
@@ -468,18 +469,280 @@ def _safe_portrait_rel(rel: str) -> bool:
     return ".." not in rel
 
 
-async def h_portrait_delete(plugin) -> dict:
-    body = await _body()
-    rel = str(body.get("file") or "").strip()
+# ---------- 立绘 ↔ 参考图互转（v0.9.1） ----------
+# 旧行为「加入参考图库」只是把立绘路径追加进 strategy.refs：两个列表指向同一个
+# 文件，立绘没消失，删立绘又会把参考图变死链。这里改成真·移动语义：
+#   立绘 → 参考图：另存 refs/ → 改写所有引用 → 删原立绘行与文件
+#   参考图 → 立绘：另存 portraits/ → 从 refs 解绑 → 无其它引用时删原文件
+# 两边列表互斥，文件各自独立，删一边不影响另一边。
+
+def _norm_ref(plugin, path: str) -> str:
+    """引用路径规范化成「相对 data 目录的 POSIX 串」。
+
+    历史数据里 refs 混着绝对路径（上传走的 res.path）和相对路径（绑立绘走的
+    it.file），不规范化就没法比较是不是同一张图。URL / 目录外字符串原样返回。
+    """
+    s = str(path or "").strip().replace("\\", "/")
+    if not s or re.match(r"^[a-zA-Z]+://", s):
+        return s
+    fp = Path(s)
+    if not fp.is_absolute():
+        fp = Path(plugin._data_dir) / fp
+    try:
+        return fp.resolve().relative_to(Path(plugin._data_dir).resolve()).as_posix()
+    except Exception:
+        return s
+
+
+def _walk_pack_entries(plugin, mutate) -> int:
+    """遍历所有卷的**原始**条目；mutate(raw) 返回 True 表示该条有改动。
+    有改动的卷整体写回，返回被改写的卷数。"""
+    touched = 0
+    for pack in pool.load_packs(_pools_dir(plugin), logger):
+        loaded = _load_pack_file(plugin, pack["pack"])
+        if loaded is None:
+            continue
+        path, data = loaded
+        entries = data.get("entries") if isinstance(data.get("entries"), list) else []
+        changed = False
+        for raw in entries:
+            if isinstance(raw, dict) and mutate(raw):
+                changed = True
+        if changed:
+            _json_save(path, data)
+            touched += 1
+    return touched
+
+
+def _rewrite_path_refs(plugin, old: str, new: str) -> int:
+    """把条目 strategy.ref / refs、entry.cover 及作品封面里指向 old 的引用
+    全部改成 new。用在「文件搬家后保活引用」，返回改动的条目数。"""
+    target = _norm_ref(plugin, old)
+    if not target or target == _norm_ref(plugin, new):
+        return 0
+    count = 0
+
+    def mutate(raw):
+        nonlocal count
+        hit = False
+        st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else None
+        if st is not None:
+            if _norm_ref(plugin, st.get("ref")) == target:
+                st["ref"] = new
+                hit = True
+            refs = st.get("refs")
+            if isinstance(refs, list):
+                replaced = []
+                for x in refs:
+                    v = new if _norm_ref(plugin, x) == target else x
+                    # 绝对/相对两种写法可能同时存在，改写后要顺手去重
+                    if v not in replaced:
+                        replaced.append(v)
+                if replaced != refs:
+                    st["refs"] = replaced
+                    hit = True
+        if _norm_ref(plugin, raw.get("cover")) == target:
+            raw["cover"] = new
+            hit = True
+        if hit:
+            count += 1
+        return hit
+
+    _walk_pack_entries(plugin, mutate)
+    meta = _load_works_meta(plugin)
+    meta_hit = False
+    for slot in meta.values():
+        if isinstance(slot, dict) and _norm_ref(plugin, slot.get("cover")) == target:
+            slot["cover"] = new
+            meta_hit = True
+    if meta_hit:
+        _save_works_meta(plugin, meta)
+        count += 1
+    return count
+
+
+def _path_is_referenced(plugin, rel: str) -> bool:
+    """该路径是否仍被任何角色条目 / 作品封面引用（只读探测，不写回）。"""
+    target = _norm_ref(plugin, rel)
+    found = False
+
+    def probe(raw):
+        nonlocal found
+        st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
+        vals = [st.get("ref"), raw.get("cover")]
+        vals += list(st.get("refs") or []) if isinstance(st.get("refs"), list) else []
+        if any(_norm_ref(plugin, v) == target for v in vals):
+            found = True
+        return False
+
+    _walk_pack_entries(plugin, probe)
+    for slot in _load_works_meta(plugin).values():
+        if isinstance(slot, dict) and _norm_ref(plugin, slot.get("cover")) == target:
+            found = True
+    return found
+
+
+def _copy_into_refs(plugin, src: Path) -> str:
+    """按内容寻址另存一份到 data/refs/，返回相对路径；同内容复用不重复堆文件。"""
+    raw = src.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()[:16]
+    suffix = (src.suffix or ".png").lower()
+    if suffix not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        suffix = ".png"
+    refs_dir = Path(plugin._data_dir) / "refs"
+    refs_dir.mkdir(parents=True, exist_ok=True)
+    dest = refs_dir / f"mv_{digest}{suffix}"
+    if not dest.is_file():
+        dest.write_bytes(raw)
+    return f"refs/{dest.name}"
+
+
+def _unlink_portrait(plugin, rel: str) -> None:
+    (Path(plugin._data_dir) / rel).unlink(missing_ok=True)
+    plugin._store.delete_portrait(rel)
+
+
+def _move_portrait_to_ref(plugin, rel: str, cid: str = "") -> dict:
+    """立绘 → 参考图（同步 core，可直测）。失败抛 ValueError。"""
     if not _safe_portrait_rel(rel):
-        return err("非法路径")
+        raise ValueError("非法立绘路径")
+    src = Path(plugin._data_dir) / rel
+    if not src.is_file():
+        raise ValueError("立绘文件不存在")
+    cid = str(cid or "").strip() or rel.split("/")[1]
+    if pool.find_entry(pool.load_packs(_pools_dir(plugin), logger), cid) is None:
+        raise ValueError(f"角色库里找不到「{cid}」，无法绑定参考图")
+    new_rel = _copy_into_refs(plugin, src)
+    # 历史脏数据：同一个立绘路径可能早被老版「加入参考图库」绑进 refs，
+    # 先统一改到新路径，再去重追加，避免出现两条引用同一张图。
+    rewritten = _rewrite_path_refs(plugin, rel, new_rel)
+
+    def bind(_e, raw):
+        st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
+        refs = [str(x) for x in (st.get("refs") or []) if str(x or "").strip()]
+        if new_rel not in refs:
+            refs.append(new_rel)
+        st["refs"] = refs
+        raw["strategy"] = st
+
+    if _set_entry_field(plugin, cid, bind) is None:
+        raise ValueError(f"角色库里找不到 {cid}")
+    _unlink_portrait(plugin, rel)
+    return {"from": rel, "to": new_rel, "char_id": cid, "rewritten_refs": rewritten}
+
+
+def _move_ref_to_portrait(plugin, cid: str, path: str) -> dict:
+    """参考图 → 立绘（同步 core，可直测）。失败抛 ValueError。"""
+    norm = _norm_ref(plugin, path)
+    if not norm.startswith("refs/"):
+        raise ValueError("这张参考图不在 refs/ 目录里；若它本来就是立绘，请直接移除绑定")
+    src = _safe_data_file(plugin, path)
+    if src is None:
+        raise ValueError("参考图文件不存在或不在数据目录内")
+    if pool.find_entry(pool.load_packs(_pools_dir(plugin), logger), cid) is None:
+        raise ValueError(f"角色库里找不到「{cid}」")
+    if not plugin._store:
+        raise ValueError("插件未初始化完成")
+    date = plugin._today()
+    seq = plugin._store.count_portraits(cid)
+    seed = int(hashlib.sha256(src.read_bytes()).hexdigest()[:8], 16) % 100000
+    new_rel = draw.archive_portrait(str(src), plugin._data_dir, cid, date, seq, seed)
+    plugin._store.add_portrait(cid, new_rel, seed, date, seq, "moved")
+
+    main_ref_cleared = False
+
+    def mutate(raw):
+        # 只解绑「当前角色」：同一张 refs 可能被别的角色共用，牵连别人会让
+        # 那边的参考图凭空消失（v0.9.1 实测踩到）。
+        nonlocal main_ref_cleared
+        if str(raw.get("id") or "") != cid:
+            return False
+        hit = False
+        st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else None
+        if st is not None:
+            refs = st.get("refs")
+            if isinstance(refs, list):
+                kept = [x for x in refs if _norm_ref(plugin, x) != norm]
+                if kept != refs:
+                    st["refs"] = kept
+                    hit = True
+            if _norm_ref(plugin, st.get("ref")) == norm:
+                st["ref"] = ""   # 主参考跟着解绑，避免指向已搬走的文件
+                main_ref_cleared = True
+                hit = True
+        if _norm_ref(plugin, raw.get("cover")) == norm:
+            raw["cover"] = new_rel  # 封面只是展示，图还在，改指新立绘
+            hit = True
+        return hit
+
+    _walk_pack_entries(plugin, mutate)
+    # 作品封面 / 其它角色的引用一律保留：下面的「无引用才删文件」会因此
+    # 保守地保住原文件，既不死链也不误删。
+    # 只有没有任何其它条目还引用它时，才删掉原 refs 文件（跨角色共用不能误伤）
+    removed_file = False
+    if not _path_is_referenced(plugin, norm):
+        try:
+            src.unlink(missing_ok=True)
+            removed_file = True
+        except Exception:
+            pass
+    return {"from": norm, "to": new_rel, "char_id": cid,
+            "file_removed": removed_file, "main_ref_cleared": main_ref_cleared}
+
+
+async def h_portrait_move_to_ref(plugin) -> dict:
+    body = await _body()
+    try:
+        return ok(await asyncio.to_thread(
+            _move_portrait_to_ref, plugin,
+            str(body.get("file") or "").strip(), str(body.get("id") or "").strip()))
+    except ValueError as exc:
+        return err(str(exc))
+    except Exception as exc:
+        logger.warning(f"[{PLUGIN_NAME}] 立绘转参考图失败\n{traceback.format_exc()}")
+        return err(f"转移失败：{exc}")
+
+
+async def h_ref_move_to_portrait(plugin) -> dict:
+    body = await _body()
+    try:
+        return ok(await asyncio.to_thread(
+            _move_ref_to_portrait, plugin,
+            str(body.get("id") or "").strip(), str(body.get("path") or "").strip()))
+    except ValueError as exc:
+        return err(str(exc))
+    except Exception as exc:
+        logger.warning(f"[{PLUGIN_NAME}] 参考图转立绘失败\n{traceback.format_exc()}")
+        return err(f"转移失败：{exc}")
+
+
+def _delete_portrait_core(plugin, rel: str) -> dict:
+    """删除立绘；若它还被参考图引用（老版脏数据），先另存到 refs/ 保活。"""
+    if not _safe_portrait_rel(rel):
+        raise ValueError("非法路径")
     full = Path(plugin._data_dir) / rel
+    relocated = ""
+    if full.is_file() and _path_is_referenced(plugin, rel):
+        relocated = _copy_into_refs(plugin, full)
+        _rewrite_path_refs(plugin, rel, relocated)
     try:
         full.unlink(missing_ok=True)
     except Exception as exc:
-        return err(f"删除文件失败：{exc}")
+        raise RuntimeError(f"删除文件失败：{exc}")
     plugin._store.delete_portrait(rel)
-    return ok({"deleted": rel})
+    return {"deleted": rel, "relocated_to": relocated}
+
+
+async def h_portrait_delete(plugin) -> dict:
+    body = await _body()
+    try:
+        return ok(await asyncio.to_thread(
+            _delete_portrait_core, plugin, str(body.get("file") or "").strip()))
+    except (ValueError, RuntimeError) as exc:
+        return err(str(exc))
+    except Exception as exc:
+        logger.warning(f"[{PLUGIN_NAME}] 删除立绘失败\n{traceback.format_exc()}")
+        return err(f"删除失败：{exc}")
 
 
 # ---------- 试画 / 补图（后台 job + 轮询） ----------
@@ -1128,9 +1391,11 @@ async def h_config_set(plugin) -> dict:
 # 页内 hash 留不住——所以「刷新停在上次页签」只能落在服务端。
 
 # 页签白名单：与前端 menuOpts 的 key 一致，防越权写入。
-# v0.8.0：角色详情改为二级页面（不再是导航页签，旧记忆值自动回落 chars），
-# 新增「记录 · 调试」页签。
-_UI_MENUS = ("chars", "works", "try", "records", "bind", "config")
+# v0.8.0：角色详情改为二级页面（不再是导航页签，旧记忆值自动回落 chars）。
+# v0.9.0：原「记录 · 调试」拆成 抽签记录 / 数据统计 / 用户查询 / 调试工具 四页，
+# 旧键 records 保留（老记忆值仍落在抽签记录页，不会跳回角色库）。
+_UI_MENUS = ("chars", "works", "try", "records", "stats", "users",
+             "debug", "bind", "config")
 
 
 def _ui_state_path(plugin) -> Path:
@@ -1261,6 +1526,8 @@ async def h_debug_clear_draws(plugin) -> dict:
         return err("清空全部签属于高危操作：请明确指定 user_id 或 date")
     rows = plugin._store.clear_draws(uid, date)
     deleted = _delete_card_files(plugin, [r.get("card_path") for r in rows])
+    plugin._store.debug_log("reset", uid or date,
+                            f"清抽取签 {len(rows)} 条（{date or '全部日期'}）")
     return ok({"cleared": len(rows), "cards_deleted": deleted})
 
 
@@ -1281,6 +1548,7 @@ async def h_debug_force_reroll(plugin) -> dict:
     if row is None:
         return err(f"{uid} 在 {date} 没有抽取记录")
     deleted = _delete_card_files(plugin, [(old or {}).get("card_path")])
+    plugin._store.debug_log("reset", uid, f"{date} 强制换签 → nonce={row['nonce']}")
     return ok({"row": row, "cards_deleted": deleted})
 
 
@@ -1296,6 +1564,7 @@ async def h_debug_reset_char_day(plugin) -> dict:
     date = str(body.get("date") or plugin._today()).strip()
     res = plugin._store.reset_char_day(cid, date)
     deleted = _delete_card_files(plugin, res["removed_files"])
+    plugin._store.debug_log("reset", cid, f"{date} 重试当日生成，删图 {deleted} 张")
     return ok({"char_id": cid, "date": date, "cleared_draws": res["cleared_draws"],
                "files_deleted": deleted})
 
@@ -1310,7 +1579,379 @@ async def h_debug_clear_portraits(plugin) -> dict:
         return err("缺少 char_id")
     files = plugin._store.clear_char_portraits(cid)
     deleted = _delete_card_files(plugin, files)
+    plugin._store.debug_log("reset", cid, f"清空立绘库 {len(files)} 张")
     return ok({"char_id": cid, "cleared": len(files), "files_deleted": deleted})
+
+
+# ---------- 抽签记录 / 统计 / 用户查询 / 调试（v0.9.0） ----------
+# 参照萌萌星语的分层：handler 只夹参数 + asyncio.to_thread，业务全在同步
+# _xxx_core 里——不启 quart 也能直接喂 SimpleNamespace 桩跑真 SQL。
+
+def _int_clamp(value, default: int, lo: int, hi: int) -> int:
+    try:
+        return max(lo, min(hi, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _range_of(plugin, days=30, date_from="", date_to="") -> tuple[str, str]:
+    """按插件时区算「含今天」的区间；显式传日期时以传参为准。"""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    try:
+        tz = ZoneInfo(str(plugin._cfg("timezone", "Asia/Shanghai")))
+        end = datetime.now(tz).date()
+    except Exception:
+        end = datetime.now().date()
+    start = end - timedelta(days=max(1, min(180, int(days))) - 1)
+    return (str(date_from or start.isoformat()), str(date_to or end.isoformat()))
+
+
+def _enrich_char_rows(rows, name_of: dict, id_key: str = "char_id") -> None:
+    """角色名快照为空（老库 / 角色已删）时用当前角色库回填，颜色也一并补上。
+
+    只改返回值、不写库：历史记录读得懂，但不会把已删角色「复活」进库。
+    """
+    for r in rows:
+        meta = name_of.get(str(r.get(id_key) or ""))
+        if not r.get("char_name"):
+            r["char_name"] = meta[0] if meta else str(r.get(id_key) or "")
+        r["char_color"] = meta[1] if meta else "#8A8A9A"
+        r["pack"] = meta[2] if meta else ""
+
+
+def _mask_salt(salt: str) -> str:
+    s = str(salt or "")
+    return s if len(s) <= 2 else f"{s[:2]}***{s[-1:]}"
+
+
+# ---- core ----
+
+def _records_core(plugin, p: dict) -> dict:
+    data = plugin._store.list_records(
+        page=_int_clamp(p.get("page"), 1, 1, 100000),
+        size=_int_clamp(p.get("size"), 20, 1, 100),
+        date_from=str(p.get("date_from") or ""), date_to=str(p.get("date_to") or ""),
+        q=str(p.get("q") or ""), char_id=str(p.get("char_id") or ""),
+        group_id=str(p.get("group_id") or ""), platform=str(p.get("platform") or ""),
+        rerolled=str(p.get("rerolled") or ""),
+    )
+    _enrich_char_rows(data["rows"], _name_color_map(plugin))
+    return data
+
+
+def _record_detail_core(plugin, uid: str, date: str) -> dict | None:
+    detail = plugin._store.record_detail(uid, date)
+    if detail is None:
+        return None
+    name_of = _name_color_map(plugin)
+    _enrich_char_rows([detail["draw"]], name_of)
+    _enrich_char_rows(detail["events"], name_of)
+    _enrich_char_rows(detail["jobs"], name_of)
+    return detail
+
+
+def _stats_core(plugin, days=30, date_from="", date_to="") -> dict:
+    lo, hi = _range_of(plugin, days, date_from, date_to)
+    data = plugin._store.stats_range(
+        lo, hi, tz_name=str(plugin._cfg("timezone", "Asia/Shanghai")))
+    _enrich_char_rows(data["chars"], _name_color_map(plugin))
+    data["today"] = plugin._today()
+    return data
+
+
+def _users_core(plugin, page, size, q, order) -> dict:
+    data = plugin._store.list_users(
+        _int_clamp(page, 1, 1, 100000), _int_clamp(size, 24, 1, 100),
+        str(q or ""), str(order or "last"), plugin._today())
+    return data
+
+
+def _user_core(plugin, uid: str, months=3) -> dict:
+    prof = plugin._store.user_profile(uid, plugin._today(),
+                                      _int_clamp(months, 3, 1, 12))
+    if prof is None:
+        return {"found": False, "user_id": uid}
+    prof["found"] = True
+    name_of = _name_color_map(plugin)
+    _enrich_char_rows(prof["history"], name_of)
+    _enrich_char_rows(prof["events"], name_of)
+    _enrich_char_rows(prof["jobs"], name_of)
+    _enrich_char_rows(prof["calendar"], name_of)
+    _enrich_char_rows(prof["top_chars"], name_of)
+    if prof.get("today"):
+        _enrich_char_rows([prof["today"]], name_of)
+    return prof
+
+
+def _debug_state_core(plugin, uid: str) -> dict:
+    s = plugin._store
+    today = plugin._today()
+    row = s.get_draw(uid, today) if uid else None
+    card_exists = False
+    if row and row.get("card_path"):
+        try:
+            card_exists = Path(str(row["card_path"])).is_file()
+        except Exception:
+            pass
+    events, events_total = s.list_events(10, 0, uid) if uid else ([], 0)
+    jobs, jobs_total = s.list_jobs(10, 0, user_id=uid) if uid else ([], 0)
+    name_of = _name_color_map(plugin)
+    if row:
+        _enrich_char_rows([row], name_of)
+    _enrich_char_rows(events, name_of)
+    _enrich_char_rows(jobs, name_of)
+    packs = pool.load_packs(_pools_dir(plugin), logger)
+    group_pools = str(plugin._cfg("group_pools", "") or "")
+    allow_unverified = bool(plugin._cfg("allow_unverified", False))
+    candidates = pool.candidates_for(packs, "", group_pools, allow_unverified)
+    portraits = s.count_portraits(row["char_id"]) if row else 0
+    return {
+        "user_id": uid, "today": today,
+        "draw": row, "card_exists": card_exists,
+        "portraits_of_current": portraits,
+        "nonce": int(row["nonce"]) if row else 0,
+        "reroll_limit": int(plugin._cfg("reroll_daily_limit", 1)),
+        "events": events, "events_total": events_total,
+        "jobs": jobs, "jobs_total": jobs_total,
+        "pool": {"packs": len(packs), "candidates": len(candidates),
+                 "verified": sum(1 for p in packs for e in p["entries"] if e.get("verified"))},
+        "config": {
+            "timezone": str(plugin._cfg("timezone", "Asia/Shanghai")),
+            "salt": _mask_salt(str(plugin._cfg("salt", "moe-waifu"))),
+            "reroll_daily_limit": int(plugin._cfg("reroll_daily_limit", 1)),
+            "portraits_per_char": int(plugin._cfg("portraits_per_char", 5)),
+            "allow_unverified": allow_unverified,
+            "group_pools": group_pools,
+            "draw_workflow": str(plugin._cfg("draw_workflow", "") or ""),
+            "draw_timeout": int(plugin._cfg("draw_timeout", 120)),
+        },
+    }
+
+
+def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
+                         salt: str, group_id: str) -> dict:
+    """只读模拟抽签（dry-run）：不写库、不生图、不发消息。
+
+    复用真实链路的纯函数 derive_seed / candidates_for / decision_of / pool_index，
+    所以预览结果和 `/今日老婆` 完全一致；改 nonce 就能看清「换老婆」会换到谁。
+    """
+    packs = pool.load_packs(_pools_dir(plugin), logger)
+    group_pools = str(plugin._cfg("group_pools", "") or "")
+    allow_unverified = bool(plugin._cfg("allow_unverified", False))
+    candidates = pool.candidates_for(packs, group_id, group_pools, allow_unverified)
+    if not candidates:
+        return {"ok": False, "readonly": True,
+                "reason": "候选角色为空：请检查启用卷、群绑定与 verified 标记",
+                "candidates": 0,
+                "note": "只读预览不会写库；把角色卷启用或标为 verified 后再试"}
+    seed = pool.derive_seed(date, uid, salt, nonce)
+    index = pool.sub_int(seed, "char", len(candidates))
+    entry = candidates[index]
+    s = plugin._store
+    today_row = s.portrait_by_date(entry["id"], date)
+    pool_size = s.count_portraits(entry["id"])
+    quota = max(1, int(plugin._cfg("portraits_per_char", 5)))
+    decision = draw.decision_of(entry["id"], date, today_row, pool_size, quota)
+    pick = None
+    if decision == "reuse_today":
+        pick = {"file": today_row["file"] if today_row else "", "index": None}
+    elif decision == "from_pool":
+        rows = s.list_portraits(entry["id"])
+        pidx = pool.pool_index(entry["id"], date, pool_size, salt) % len(rows) if rows else 0
+        pick = {"file": rows[pidx]["file"] if rows else "", "index": pidx}
+    current = s.get_draw(uid, date)
+    return {
+        "ok": True, "readonly": True,
+        "user_id": uid, "date": date, "nonce": int(nonce),
+        "group_id": group_id, "seed_hex": seed.hex(),
+        "candidates": len(candidates), "index": index,
+        "char": {
+            "char_id": entry["id"], "char_name": entry["name"],
+            "series": entry.get("series") or "", "pack": entry.get("pack") or "",
+            "category": entry.get("category") or "", "tier": entry.get("tier") or "",
+            "color": entry.get("color") or "#E8B4C8",
+            "strategy_type": entry.get("strategy_type") or "base",
+            "verified": bool(entry.get("verified")),
+        },
+        "decision": decision, "portrait_pool_size": pool_size, "quota": quota,
+        "portrait_pick": pick,
+        "current": ({"char_id": current["char_id"],
+                     "char_name": current.get("char_name") or current["char_id"],
+                     "nonce": int(current["nonce"])} if current else None),
+        "matches_current": bool(current and current["char_id"] == entry["id"]),
+        "note": "只读预览：不写库、不生图、不发消息，也不消耗换老婆次数",
+    }
+
+
+# ---- handlers ----
+
+_RECORD_KEYS = ("page", "size", "date_from", "date_to", "q", "char_id",
+                "group_id", "platform", "rerolled")
+
+
+def _params(body: dict, keys) -> dict:
+    return {k: (body.get(k) if body.get(k) not in (None, "") else _q(k, "")) for k in keys}
+
+
+async def h_records(plugin) -> dict:
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    return ok(await asyncio.to_thread(_records_core, plugin, _params(body, _RECORD_KEYS)))
+
+
+async def h_record_detail(plugin) -> dict:
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    uid = str(body.get("user_id") or _q("user_id", "") or "").strip()
+    date = str(body.get("date") or _q("date", "") or "").strip()
+    if not uid or not date:
+        return err("缺少 user_id 或 date")
+    data = await asyncio.to_thread(_record_detail_core, plugin, uid, date)
+    if data is None:
+        return err(f"{uid} 在 {date} 没有抽取记录")
+    return ok(data)
+
+
+async def h_record_events(plugin) -> dict:
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    uid = str(body.get("user_id") or _q("user_id", "") or "").strip()
+    date = str(body.get("date") or _q("date", "") or "").strip()
+    kind = str(body.get("kind") or _q("kind", "") or "").strip()
+    limit = _int_clamp(body.get("limit") or _q("limit", 50), 50, 1, 200)
+    offset = _int_clamp(body.get("offset") or _q("offset", 0), 0, 0, 100000)
+    rows, total = await asyncio.to_thread(
+        plugin._store.list_events, limit, offset, uid, date, kind)
+    _enrich_char_rows(rows, _name_color_map(plugin))
+    return ok({"total": total, "rows": rows})
+
+
+async def h_stats(plugin) -> dict:
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    days = _int_clamp(body.get("days") or _q("days", 30), 30, 1, 180)
+    lo = str(body.get("date_from") or _q("date_from", "") or "")
+    hi = str(body.get("date_to") or _q("date_to", "") or "")
+    return ok(await asyncio.to_thread(_stats_core, plugin, days, lo, hi))
+
+
+async def h_users(plugin) -> dict:
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    return ok(await asyncio.to_thread(
+        _users_core, plugin,
+        body.get("page") or _q("page", 1), body.get("size") or _q("size", 24),
+        body.get("q") or _q("q", ""), body.get("order") or _q("order", "last")))
+
+
+async def h_user(plugin) -> dict:
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    uid = str(body.get("uid") or body.get("user_id") or _q("uid", "") or "").strip()
+    if not uid:
+        return err("缺少 uid")
+    await asyncio.to_thread(plugin._store.debug_log, "query", uid, "用户查询")
+    return ok(await asyncio.to_thread(
+        _user_core, plugin, uid, body.get("months") or _q("months", 3)))
+
+
+async def h_filter_options(plugin) -> dict:
+    """记录筛选下拉：群 / 平台 / 角色（一次取齐，避免每开一页发三个请求）。"""
+    if not plugin._store:
+        return err("插件未初始化完成")
+
+    def build():
+        name_of = _name_color_map(plugin)
+        chars = [{"char_id": cid, "char_name": meta[0], "char_color": meta[1],
+                  "pack": meta[2]} for cid, meta in sorted(name_of.items())]
+        return {"groups": plugin._store.list_groups(),
+                "platforms": plugin._store.list_platforms(), "chars": chars}
+    return ok(await asyncio.to_thread(build))
+
+
+async def h_debug_state(plugin) -> dict:
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    uid = str(body.get("uid") or body.get("user_id") or _q("uid", "") or "").strip()
+    if not uid:
+        return err("缺少 uid")
+    await asyncio.to_thread(plugin._store.debug_log, "query", uid, "调试状态查询")
+    return ok(await asyncio.to_thread(_debug_state_core, plugin, uid))
+
+
+async def h_debug_history(plugin) -> dict:
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    limit = _int_clamp(body.get("limit") or _q("limit", 30), 30, 1, 200)
+    recent = await asyncio.to_thread(plugin._store.debug_recent, 8)
+    audit = await asyncio.to_thread(plugin._store.debug_audit, limit)
+    return ok({"recent": recent, "audit": audit})
+
+
+async def h_debug_simulate(plugin) -> dict:
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    uid = str(body.get("user_id") or _q("user_id", "") or "").strip()
+    if not uid:
+        return err("缺少 user_id")
+    date = str(body.get("date") or _q("date", "") or "").strip() or plugin._today()
+    nonce = _int_clamp(body.get("nonce") or _q("nonce", 0), 0, 0, 9999)
+    salt = str(body.get("salt") or _q("salt", "") or "").strip() \
+        or str(plugin._cfg("salt", "moe-waifu"))
+    gid = str(body.get("group_id") or _q("group_id", "") or "").strip()
+    data = await asyncio.to_thread(_debug_simulate_core, plugin, uid, date, nonce, salt, gid)
+    await asyncio.to_thread(plugin._store.debug_log, "simulate", uid,
+                            f"{date} nonce={nonce} → {data.get('char', {}).get('char_name', '-')}")
+    return ok(data)
+
+
+async def h_debug_rerender(plugin) -> dict:
+    """按已存签重渲染卡片（改了 card.py 后看效果），不重抽、不生图。"""
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    uid = str(body.get("user_id") or _q("user_id", "") or "").strip()
+    if not uid:
+        return err("缺少 user_id")
+    date = str(body.get("date") or _q("date", "") or "").strip() or plugin._today()
+    row = plugin._store.get_draw(uid, date)
+    if not row:
+        return err(f"{uid} 在 {date} 没有抽取记录")
+    packs = pool.load_packs(_pools_dir(plugin), logger)
+    entry = pool.find_entry(packs, row["char_id"])
+    if entry is None:
+        return err("角色条目已不在角色库，无法重渲染")
+    rel = str(row.get("portrait_file") or "")
+    if not rel:
+        pr = plugin._store.portrait_by_date(row["char_id"], date)
+        pr = pr or (plugin._store.list_portraits(row["char_id"]) or [None])[-1]
+        rel = str(pr["file"]) if pr else ""
+    src = Path(plugin._data_dir) / rel
+    if not rel or not src.is_file():
+        return err("该签的立绘文件已不存在，无法重渲染")
+    out = Path(plugin._data_dir) / "cards" / f"{uid}_{date}.png"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        from . import card  # 延迟导入：Pillow 只在真的重渲染时才需要
+    except ImportError:  # pragma: no cover - 平铺调试
+        import card  # type: ignore
+    card_path = await asyncio.to_thread(
+        card.render_card, src, entry, date_str=date, same_count=1, total_count=1,
+        rerolled=bool(row["rerolled"]), out_path=str(out),
+        data_dir=Path(plugin._data_dir))
+    plugin._store.update_draw_card(uid, date, card_path)
+    await asyncio.to_thread(plugin._store.debug_log, "rerender", uid, f"{date} 重渲染卡片")
+    return ok({"card_path": card_path, "date": date})
 
 
 # ---------- 注册 ----------
@@ -1330,6 +1971,9 @@ def register(plugin) -> None:
         ("/portraits/index", h_portraits_index, ["GET"]),
         ("/portraits/list", h_portraits_list, ["GET", "POST"]),
         ("/portraits/delete", h_portrait_delete, ["POST"]),
+        # v0.9.1：真·移动语义的互转（旧 /refs/bind 保留给上传/外部调用）
+        ("/portraits/move_to_ref", h_portrait_move_to_ref, ["POST"]),
+        ("/refs/move_to_portrait", h_ref_move_to_portrait, ["POST"]),
         ("/refs/upload", h_refs_upload, ["POST"]),
         ("/refs/list", h_refs_list, ["GET", "POST"]),
         ("/image/data", h_image_data, ["GET", "POST"]),
@@ -1344,6 +1988,18 @@ def register(plugin) -> None:
         ("/records/draws", h_records_draws, ["GET", "POST"]),
         ("/records/jobs", h_records_jobs, ["GET", "POST"]),
         ("/records/stats", h_records_stats, ["GET", "POST"]),
+        # v0.9.0：独立页签各自的数据出口（旧三条路由保留给老页面/外部调用）
+        ("/records", h_records, ["GET", "POST"]),
+        ("/records/detail", h_record_detail, ["GET", "POST"]),
+        ("/records/events", h_record_events, ["GET", "POST"]),
+        ("/stats", h_stats, ["GET", "POST"]),
+        ("/users", h_users, ["GET", "POST"]),
+        ("/user", h_user, ["GET", "POST"]),
+        ("/filters", h_filter_options, ["GET"]),
+        ("/debug/state", h_debug_state, ["GET", "POST"]),
+        ("/debug/history", h_debug_history, ["GET", "POST"]),
+        ("/debug/simulate", h_debug_simulate, ["POST"]),
+        ("/debug/rerender", h_debug_rerender, ["POST"]),
         ("/debug/clear_draws", h_debug_clear_draws, ["POST"]),
         ("/debug/force_reroll", h_debug_force_reroll, ["POST"]),
         ("/debug/reset_char_day", h_debug_reset_char_day, ["POST"]),

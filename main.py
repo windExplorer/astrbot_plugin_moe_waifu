@@ -362,6 +362,7 @@ class MoeWaifuPlugin(Star):
             src = self._data_dir / rel_path
             if not src.is_file():  # 库文件被手动删了：回退为重新生成
                 src = None
+                decision = "generate"  # 记录真实发生的决策，别把它记成「库存复用」
 
         if src is None:  # generate
             seq = pool_size
@@ -388,8 +389,16 @@ class MoeWaifuPlugin(Star):
             src = self._data_dir / rel_path
 
         # 落库与计数（先 upsert 再查同款，含自己）
-        self._store.upsert_draw(uid, date, char_id, nonce, rerolled,
-                                nickname, gid, gname, platform)
+        # v0.9.0：角色名/作品/种子/立绘来源随签快照落库，历史记录不再依赖角色库反查；
+        # upsert_draw 同时追加一条只写不改的抽签流水，换老婆前的角色也留得住。
+        self._store.upsert_draw(
+            uid, date, char_id, nonce, rerolled, nickname, gid, gname, platform,
+            seed_hex=pool.derive_seed(date, uid, salt, nonce).hex(),
+            char_name=str(entry.get("name") or ""),
+            series=str(entry.get("series") or ""),
+            portrait_file=rel_path,
+            decision=decision,
+        )
         total = self._store.bump_user_char(uid, char_id)
         self._store.bump_char_stats(char_id, date)
         same = self._store.same_group_today(gid, date, char_id)
