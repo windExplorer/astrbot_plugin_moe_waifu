@@ -258,6 +258,32 @@ def normalize_entry(entry: dict, pack_name: str) -> dict | None:
     return out
 
 
+def merge_saved_entry(raw: dict, normalized: dict) -> dict:
+    """编辑保存时合并旧条目：只覆盖表单实际提交的字段，其余原样保留。
+
+    `h_save_entry` 是整体替换（`entries[i] = normalized`），而工坊表单会
+    **重建** strategy（只有 type，img2img 时才带 ref / denoise），既不带
+    `strategy.refs`（参考图库）也不带 `cover`。不做这层合并，用户「改个
+    名字点保存」就会把该角色全部参考图绑定、主参考与封面清空——文件还在
+    data/refs/，工坊里却一张都看不到了（v0.9.10 实测事故）。
+
+    strategy 只 `update` 本次提交的键、绝不主动 pop：base/lora 模式下表单
+    不带 ref / loras / denoise，旧值一律留着（对当前画法无副作用，切回
+    img2img 还能继续用），比"顺手清掉"安全得多。
+    """
+    merged = dict(raw) if isinstance(raw, dict) else {}
+    for key, value in (normalized or {}).items():
+        if key == "strategy":
+            old_st = merged.get("strategy")
+            st = dict(old_st) if isinstance(old_st, dict) else {}
+            st.update(value or {})
+            merged["strategy"] = st
+        elif key != "cover":
+            # cover 不在编辑表单里，旧值必须保住
+            merged[key] = value
+    return merged
+
+
 def candidates_for(
     packs: list,
     group_id: str = "",

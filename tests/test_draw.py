@@ -133,6 +133,16 @@ with tempfile.TemporaryDirectory() as td:
     check("归档文件存在且内容一致", dest.is_file() and dest.read_bytes() == b"PNGDATA")
     check("归档路径形状", rel == "portraits/miku/2026-11-11_000_12345.png")
 
+    # v0.9.10：同日同角色同 seq 会算出同名，绝不覆盖旧图
+    src2 = td / "raw2.png"
+    src2.write_bytes(b"ANOTHER_PNG")
+    rel2 = draw.archive_portrait(str(src2), td, "miku", "2026-11-11", 0, 12345)
+    check("同名归档不覆盖旧立绘",
+          rel2 != rel and (td / rel).read_bytes() == b"PNGDATA"
+          and (td / rel2).read_bytes() == b"ANOTHER_PNG")
+    rel3 = draw.archive_portrait(str(src2), td, "miku", "2026-11-11", 0, 12345)
+    check("同内容归档复用不堆重复文件", rel3 == rel2)
+
 # workflow_img2img_capable（v0.3.6 用户口径：绑定基础工作流以解析注记为准，
 # 未绑定看名字，手填 image_node 亦可用）
 check("新版绑定+解析有图节点", draw.workflow_img2img_capable(

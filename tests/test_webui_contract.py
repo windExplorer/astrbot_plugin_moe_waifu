@@ -45,13 +45,14 @@ dbgUid dbgDate dbgUid2 dbgDate2 dbgChar dbgChar2 dbgBusy
 doForceReroll doClearDraws doResetCharDay doClearCharPortraits
 charNameOf decisionLabel barPct
 movePortraitToRef moveRefToPortrait doQuickAction
+galOrphans bindOrphan
 fmtTime cfgBoundGroups pickSimGroup simScopeText
 """.split()
 
 ROUTES = """
 /records /records/detail /records/events /stats /users /user /filters
 /debug/state /debug/history /debug/simulate /debug/rerender
-/portraits/move_to_ref /refs/move_to_portrait
+/portraits/move_to_ref /refs/move_to_portrait /refs/orphans
 """.split()
 
 STORE_METHODS = """

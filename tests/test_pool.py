@@ -146,4 +146,24 @@ for pack in seed["packs"]:
 check("种子卷条目 id 无重复", dup == [])
 check(f"种子卷规模 ≥ 36（当前 {total}）", total >= 36)
 
+# merge_saved_entry（v0.9.10：编辑角色保存不能清空参考图绑定 / 封面）
+old = {"id": "c1", "name": "小明", "tags_en": "x, test",
+       "cover": "refs/cover.png", "extra_flag": 1,
+       "strategy": {"type": "img2img", "ref": "refs/a.png",
+                    "refs": ["refs/a.png", "refs/b.png"], "denoise": 0.7},
+       "strategy_type": "img2img"}
+form = {"id": "c1", "name": "小明改", "tags_en": "x, test",
+        "strategy": {"type": "base"}, "strategy_type": "base"}
+merged = pool.merge_saved_entry(old, pool.normalize_entry(form, "anime"))
+check("编辑保存保留 refs", merged["strategy"]["refs"] == ["refs/a.png", "refs/b.png"])
+check("编辑保存保留主参考", merged["strategy"]["ref"] == "refs/a.png")
+check("编辑保存保留封面", merged["cover"] == "refs/cover.png")
+check("编辑保存保留扩展字段", merged["extra_flag"] == 1)
+check("编辑保存更新名字", merged["name"] == "小明改")
+check("编辑保存切换画法生效", merged["strategy"]["type"] == "base")
+check("base 模式下旧主参考/重绘强度仍保留",
+      merged["strategy"]["ref"] == "refs/a.png"
+      and merged["strategy"]["denoise"] == 0.7)
+check("原条目不被修改", old["strategy"]["refs"] == ["refs/a.png", "refs/b.png"])
+
 print("test_pool: ALL OK")

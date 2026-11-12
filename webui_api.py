@@ -330,7 +330,9 @@ async def h_save_entry(plugin) -> dict:
     for i, raw in enumerate(entries):
         existing = pool.normalize_entry(raw, pack_name)
         if existing and existing["id"] == normalized["id"]:
-            entries[i] = normalized
+            # 表单只托管部分字段：整体替换会静默清空 strategy.refs / cover，
+            # 用户「改个名字保存」后参考图就全不见了（v0.9.10 修复）。
+            entries[i] = pool.merge_saved_entry(raw, normalized)
             replaced = True
             break
     if not replaced:
@@ -1083,6 +1085,50 @@ async def h_refs_list(plugin) -> dict:
     return ok({"id": cid, "items": items, "designated": str(st.get("ref") or "")})
 
 
+async def h_refs_orphans(plugin) -> dict:
+    """列出 data/refs/ 下没被任何角色 / 作品封面引用的图片（找回用）。
+
+    v0.9.10 之前「编辑角色点保存」会静默清空 strategy.refs，文件其实还在
+    磁盘上，只是没有任何列表能找到它们。这里把它们列出来，工坊可一键
+    重新绑定到当前角色；不扫描 data 目录以外的路径，不改任何文件。
+    """
+    refs_dir = Path(plugin._data_dir) / "refs"
+    if not refs_dir.is_dir():
+        return ok({"items": []})
+    used = set()
+
+    def probe(raw):
+        st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
+        vals = [st.get("ref"), raw.get("cover")]
+        vals += list(st.get("refs") or []) if isinstance(st.get("refs"), list) else []
+        for v in vals:
+            n = _norm_ref(plugin, v)
+            if n:
+                used.add(n)
+        return False
+
+    _walk_pack_entries(plugin, probe)
+    for slot in _load_works_meta(plugin).values():
+        if isinstance(slot, dict):
+            n = _norm_ref(plugin, slot.get("cover"))
+            if n:
+                used.add(n)
+    items = []
+    for f in sorted(refs_dir.iterdir()):
+        if not f.is_file() or f.suffix.lower() not in (
+                ".png", ".jpg", ".jpeg", ".webp", ".gif"):
+            continue
+        rel = f"refs/{f.name}"
+        if rel in used:
+            continue
+        try:
+            items.append({"path": rel, "thumb": _thumb_cached(f, 240),
+                          "size": f.stat().st_size})
+        except Exception:
+            items.append({"path": rel, "thumb": None, "size": 0})
+    return ok({"items": items})
+
+
 async def h_refs_bind(plugin) -> dict:
     """把一张已存在的图片绑进角色的参考图库（strategy.refs，去重追加）。"""
     body = await _body()
@@ -1116,11 +1162,14 @@ async def h_refs_unbind(plugin) -> dict:
     if not cid or not path:
         return err("缺少 id 或 path")
 
+    # 归一后比较：refs 里同一张图可能同时存着绝对路径与 `refs/xxx.png`
+    norm = _norm_ref(plugin, path)
+
     def mutate(e, raw):
         st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
-        refs = [str(x) for x in (st.get("refs") or []) if str(x) != path]
+        refs = [str(x) for x in (st.get("refs") or []) if _norm_ref(plugin, x) != norm]
         st["refs"] = refs
-        if str(st.get("ref") or "") == path:
+        if _norm_ref(plugin, st.get("ref")) == norm:
             st["ref"] = ""
         raw["strategy"] = st
 
@@ -1130,7 +1179,9 @@ async def h_refs_unbind(plugin) -> dict:
     removed_file = False
     if delete_file:
         fp = _safe_data_file(plugin, path)
-        if fp is not None:
+        # 同一张 refs 可能被多个角色 / 作品封面共用：解绑当前角色后还有引用
+        # 就绝不能物理删文件，否则别的角色参考图会凭空消失（v0.9.10 修复）。
+        if fp is not None and not _path_is_referenced(plugin, norm):
             try:
                 fp.unlink()
                 removed_file = True
@@ -2108,6 +2159,7 @@ def register(plugin) -> None:
         ("/refs/move_to_portrait", h_ref_move_to_portrait, ["POST"]),
         ("/refs/upload", h_refs_upload, ["POST"]),
         ("/refs/list", h_refs_list, ["GET", "POST"]),
+        ("/refs/orphans", h_refs_orphans, ["GET", "POST"]),
         ("/image/data", h_image_data, ["GET", "POST"]),
         ("/refs/bind", h_refs_bind, ["POST"]),
         ("/refs/unbind", h_refs_unbind, ["POST"]),

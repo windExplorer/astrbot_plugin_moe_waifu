@@ -674,6 +674,26 @@
               <div v-else class="dropzone" style="padding: 18px; text-align: center;">
                 <span class="bind-tip" style="margin-top: 0;">还没有绑定参考图：点「上传」或把图片直接拖进页面，会自动绑定到该角色</span>
               </div>
+              <!-- v0.9.10：找回因编辑保存丢失绑定的孤儿图片（文件其实还在 data/refs/） -->
+              <div v-if="galOrphans.length > 0" style="margin-top: 10px;">
+                <div class="bind-tip" style="margin-bottom: 6px;">
+                  发现 {{ galOrphans.length }} 张未绑定图片（文件仍在 data/refs/，只是绑定丢了），可重新绑定到本角色：
+                </div>
+                <n-grid :cols="6" :x-gap="8" :y-gap="8">
+                  <n-gi v-for="o in galOrphans" :key="o.path">
+                    <div class="gal-item">
+                      <img v-if="o.thumb" :src="o.thumb" class="clickable-img"
+                           title="点击查看大图" alt="未绑定图片"
+                           @click.stop="openViewer(o.path, '未绑定图片')">
+                      <div v-else class="gal-meta">预览不可用</div>
+                      <div class="gal-ops">
+                        <n-button size="tiny" type="primary" secondary
+                                  @click.stop="bindOrphan(o.path)">绑定到本角色</n-button>
+                      </div>
+                    </div>
+                  </n-gi>
+                </n-grid>
+              </div>
             </div>
           </div>
 
@@ -3029,13 +3049,32 @@
       var galRefsLoading = Vue.ref(false);
       var galMainRef = Vue.ref("");
       function loadGalRefs() {
-        if (!galCharId.value) { galRefs.value = []; galMainRef.value = ""; return; }
+        if (!galCharId.value) {
+          galRefs.value = []; galMainRef.value = ""; galOrphans.value = []; return;
+        }
         galRefsLoading.value = true;
         apiGet("refs/list", { id: galCharId.value }).then(function (res) {
           galRefs.value = (res && res.items) || [];
           galMainRef.value = (res && res.designated) || "";
         }).catch(function () { galRefs.value = []; galMainRef.value = ""; })
           .finally(function () { galRefsLoading.value = false; });
+        loadGalOrphans();
+      }
+      // 找回未绑定图片（v0.9.10：编辑保存曾清空 refs，文件其实还在磁盘）
+      var galOrphans = Vue.ref([]);
+      function loadGalOrphans() {
+        apiGet("refs/orphans", {}).then(function (res) {
+          galOrphans.value = (res && res.items) || [];
+        }).catch(function () { galOrphans.value = []; });
+      }
+      async function bindOrphan(p) {
+        if (!galCharId.value) return;
+        try {
+          await apiPost("refs/bind", { id: galCharId.value, path: p });
+          message.success("已重新绑定到当前角色");
+          await loadAll();
+          loadGalRefs();
+        } catch (e) { /* 已提示 */ }
       }
       // 上传弹窗（v0.6.2 拖拽多选；v0.6.3 换 w-upload-panel 公共组件 + 粘贴）
       var galUploadOpen = Vue.ref(false);
@@ -4162,6 +4201,7 @@
         galFrom: galFrom, backFromGallery: backFromGallery, detailEntry: detailEntry,
         gotoTryFromDetail: gotoTryFromDetail,
         galRefs: galRefs, galRefsLoading: galRefsLoading, galMainRef: galMainRef,
+        galOrphans: galOrphans, bindOrphan: bindOrphan,
         setMainRef: setMainRef, unbindGalRef: unbindGalRef,
         galUploadOpen: galUploadOpen, galUpNote: galUpNote,
         onGalPanelFiles: onGalPanelFiles,

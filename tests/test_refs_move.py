@@ -6,6 +6,7 @@
   ② 删立绘时把两个列表共同指向的同一个文件 unlink → 参考图也变死链。
 修复后要求：转移是「移动」，两列表互斥、文件独立；历史脏数据在删除时能自动保活。
 """
+import asyncio
 import json
 import sys
 import tempfile
@@ -203,12 +204,100 @@ def test_validation(root: Path):
     st.close()
 
 
+async def call_handler(plugin, handler, payload):
+    """替换 _body 桩后调用 async handler（真文件 / 真 SQLite）。"""
+    async def fake_body():
+        return payload
+    old = api._body
+    api._body = fake_body
+    try:
+        return await handler(plugin)
+    finally:
+        api._body = old
+
+
+def test_save_entry_keeps_refs(root: Path):
+    """v0.9.10：工坊编辑点保存不能把 strategy.refs / cover 清空。"""
+    plugin, st = make_plugin(root)
+    data = read_pack(root)
+    e1 = data["entries"][0]
+    e1["strategy"].update({"type": "img2img", "ref": "refs/a.png",
+                           "refs": ["refs/a.png", "refs/b.png"]})
+    e1["cover"] = "refs/cover.png"
+    write_pack(root, data)
+    form = {"id": "c1", "name": "小明改", "series": "测试作品",
+            "category": "anime", "tier": "S", "tags_en": "x, test",
+            "color": "#39C5BB", "verified": True, "quote": "", "quotes": [],
+            "strategy": {"type": "base"}, "strategy_type": "base"}
+    res = asyncio.run(call_handler(plugin, api.h_save_entry,
+                                   {"pack": "anime", "entry": form}))
+    check("编辑保存成功", res["status"] == "ok", str(res))
+    saved = char_of(root, "c1")
+    check("编辑保存保留参考图绑定",
+          saved["strategy"].get("refs") == ["refs/a.png", "refs/b.png"])
+    check("编辑保存保留主参考", saved["strategy"].get("ref") == "refs/a.png")
+    check("编辑保存保留封面", saved.get("cover") == "refs/cover.png")
+    check("编辑保存更新名字", saved["name"] == "小明改")
+    check("编辑保存切换画法生效", saved["strategy"]["type"] == "base")
+    st.close()
+
+
+def test_unbind_shared_ref(root: Path):
+    """v0.9.10：试画台删参考图不能把其它角色共用的文件一起删掉。"""
+    plugin, st = make_plugin(root)
+    refs_dir = root / "refs"
+    refs_dir.mkdir(parents=True, exist_ok=True)
+    shared = refs_dir / "shared.png"
+    shared.write_bytes(b"SHARED")
+    data = read_pack(root)
+    for e in data["entries"]:
+        e["strategy"]["refs"] = ["refs/shared.png"]
+    write_pack(root, data)
+    r1 = asyncio.run(call_handler(plugin, api.h_refs_unbind,
+                                  {"id": "c1", "path": "refs/shared.png",
+                                   "delete_file": True}))
+    check("共用图解绑不删文件",
+          r1["data"]["file_deleted"] is False and shared.is_file(), str(r1))
+    check("另一角色引用不受影响",
+          char_of(root, "c2")["strategy"]["refs"] == ["refs/shared.png"])
+    r2 = asyncio.run(call_handler(plugin, api.h_refs_unbind,
+                                  {"id": "c2", "path": "refs/shared.png",
+                                   "delete_file": True}))
+    check("最后一个引用解绑后才删文件",
+          r2["data"]["file_deleted"] is True and not shared.exists(), str(r2))
+    st.close()
+
+
+def test_orphans_recovery(root: Path):
+    """v0.9.10：丢失绑定的图片能被扫描出来并一键重新绑定。"""
+    plugin, st = make_plugin(root)
+    refs_dir = root / "refs"
+    refs_dir.mkdir(parents=True, exist_ok=True)
+    (refs_dir / "lost.png").write_bytes(b"LOST")
+    (refs_dir / "bound.png").write_bytes(b"BOUND")
+    data = read_pack(root)
+    data["entries"][0]["strategy"]["refs"] = ["refs/bound.png"]
+    write_pack(root, data)
+    res = asyncio.run(api.h_refs_orphans(plugin))
+    paths = [i["path"] for i in res["data"]["items"]]
+    check("孤儿扫描只列未绑定图片", paths == ["refs/lost.png"], str(paths))
+    bound = asyncio.run(call_handler(plugin, api.h_refs_bind,
+                                     {"id": "c1", "path": "refs/lost.png"}))
+    check("孤儿可重新绑定", bound["status"] == "ok", str(bound))
+    res2 = asyncio.run(api.h_refs_orphans(plugin))
+    check("重新绑定后不再算孤儿", res2["data"]["items"] == [])
+    st.close()
+
+
 def main():
     jobs = [("move_to_ref", test_move_to_ref), ("roundtrip", test_roundtrip),
             ("delete_legacy", test_delete_legacy_dirty_data),
             ("delete_clean", test_delete_clean_portrait),
             ("shared_ref", test_shared_ref_not_deleted),
-            ("validation", test_validation)]
+            ("validation", test_validation),
+            ("save_keeps_refs", test_save_entry_keeps_refs),
+            ("unbind_shared", test_unbind_shared_ref),
+            ("orphans", test_orphans_recovery)]
     for name, fn in jobs:
         with tempfile.TemporaryDirectory() as td:
             print(f"--- {name} ---")

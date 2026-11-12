@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import shutil
@@ -414,6 +415,19 @@ def archive_portrait(src: str, data_dir: Path, char_id: str, date_str: str,
     dest_dir.mkdir(parents=True, exist_ok=True)
     name = f"{date_str}_{int(seq):03d}_{int(seed_int) % 100000:05d}.png"
     dest = dest_dir / name
+    if dest.is_file():
+        # 同角色 / 同日 / 同 seq 必然算出同名（删过立绘行后 seq 会被复用，
+        # 抽卡与工坊补图同日也容易撞）。绝不覆盖旧图：内容相同就复用，
+        # 不同则按内容寻址另起文件名，避免「旧立绘被悄悄换掉 / 少一张」。
+        try:
+            raw_new, raw_old = Path(src).read_bytes(), dest.read_bytes()
+        except OSError:
+            raw_new, raw_old = b"", b""
+        if raw_new and raw_new == raw_old:
+            return f"portraits/{char_id}/{name}"
+        digest = hashlib.sha256(raw_new or str(time.time()).encode()).hexdigest()[:8]
+        name = f"{date_str}_{int(seq):03d}_{int(seed_int) % 100000:05d}_{digest}.png"
+        dest = dest_dir / name
     try:
         shutil.copy2(src, dest)
     except shutil.SameFileError:
