@@ -110,9 +110,12 @@ def test_roundtrip(root: Path):
     check("主参考已清空（不指向搬走的文件）",
           char_of(root, "c1")["strategy"]["ref"] == "")
     check("封面改指新立绘而非死链", char_of(root, "c1")["cover"] == back["to"])
-    check("原 refs 文件已删除", not (root / moved["to"]).is_file()
-          and back["file_removed"] is True)
-    check("两边互斥：立绘有、参考图无",
+    # v0.12.5：转回立绘不再物理删原图（误操作能从「未绑定图片」找回）
+    check("原 refs 文件保留（可找回）",
+          (root / moved["to"]).is_file() and back["file_removed"] is False)
+    orphans = [i["path"] for i in api._orphan_items(plugin)]
+    check("转移后原图出现在未绑定图片里", moved["to"] in orphans, str(orphans))
+    check("绑定互斥：立绘有、参考图列表无",
           len(st.list_portraits("c1")) == 1
           and not char_of(root, "c1")["strategy"]["refs"])
     st.close()

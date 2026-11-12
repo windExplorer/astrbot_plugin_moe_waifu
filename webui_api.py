@@ -640,6 +640,7 @@ def _move_portrait_to_ref(plugin, rel: str, cid: str = "") -> dict:
     if _set_entry_field(plugin, cid, bind) is None:
         raise ValueError(f"角色库里找不到 {cid}")
     _unlink_portrait(plugin, rel)
+    logger.info(f"[{PLUGIN_NAME}] 立绘转参考图：{rel} → {new_rel}")
     return {"from": rel, "to": new_rel, "char_id": cid, "rewritten_refs": rewritten}
 
 
@@ -691,18 +692,12 @@ def _move_ref_to_portrait(plugin, cid: str, path: str) -> dict:
         return hit
 
     _walk_pack_entries(plugin, mutate)
-    # 作品封面 / 其它角色的引用一律保留：下面的「无引用才删文件」会因此
-    # 保守地保住原文件，既不死链也不误删。
-    # 只有没有任何其它条目还引用它时，才删掉原 refs 文件（跨角色共用不能误伤）
-    removed_file = False
-    if not _path_is_referenced(plugin, norm):
-        try:
-            src.unlink(missing_ok=True)
-            removed_file = True
-        except Exception:
-            pass
+    # v0.12.5：**不再删除原 refs 文件**。转移 = 复制进立绘库 + 解绑参考图，
+    # 原图留在 refs/ 里成为「未绑定图片」，误操作也能在参考图区一键找回。
+    # （用户反馈过「生成后参考图消失」；宁可多占一份空间也不静默删文件。）
+    logger.info(f"[{PLUGIN_NAME}] 参考图转立绘：{norm} → {new_rel}（原图保留在 refs/）")
     return {"from": norm, "to": new_rel, "char_id": cid,
-            "file_removed": removed_file, "main_ref_cleared": main_ref_cleared}
+            "file_removed": False, "main_ref_cleared": main_ref_cleared}
 
 
 async def h_portrait_move_to_ref(plugin) -> dict:

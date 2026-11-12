@@ -748,7 +748,9 @@
                                   :tip="galDrawRefAbs === it.abs ? '当前出卡图生图源（再点取消）' : '设为出卡图生图源（/今日老婆 专用）'"
                                   @click.stop="setDrawSource(it.abs)"></w-icon-btn>
                       <w-icon-btn icon="arrowRight" size="tiny" type="primary"
-                                  tip="转移到参考图（从立绘库移走）"
+                                  :armed="delArm === 'mv2ref:' + it.file"
+                                  :tip="delArm === 'mv2ref:' + it.file
+                                        ? '再点一次确认转移到参考图' : '转移到参考图（从立绘库移走）'"
                                   @click.stop="movePortraitToRef(it)"></w-icon-btn>
                       <w-icon-btn icon="trash" size="tiny" type="error"
                                   :armed="delArm === it.file"
@@ -792,7 +794,9 @@
                                   :tip="galDrawRef === r.path ? '当前出卡图生图源（再点取消）' : '设为出卡图生图源（/今日老婆 专用）'"
                                   @click.stop="setDrawSource(r.path)"></w-icon-btn>
                       <w-icon-btn icon="arrowLeft" size="tiny" type="primary" :disabled="!r.exists"
-                                  tip="转回立绘（从参考图库移走）"
+                                  :armed="delArm === 'ref2port:' + r.path"
+                                  :tip="delArm === 'ref2port:' + r.path
+                                        ? '再点一次确认转回立绘' : '转回立绘（从参考图库移走）'"
                                   @click.stop="moveRefToPortrait(r)"></w-icon-btn>
                       <w-icon-btn icon="trash" size="tiny" type="error"
                                   :armed="delArm === 'galref:' + r.path"
@@ -3570,6 +3574,7 @@
       // 旧版只是把立绘路径 append 进 strategy.refs，导致「两个列表都有、删一边另一边也消失」。
       async function movePortraitToRef(it) {
         if (!it || !it.file) { message.error("该图缺可用路径"); return; }
+        if (!armDelete("mv2ref:" + it.file)) return;
         try {
           var res = await apiPost("portraits/move_to_ref",
             { file: it.file, id: galCharId.value });
@@ -3581,13 +3586,13 @@
       // 参考图 → 立绘（反向互转）：refs 解绑、文件归档进立绘库，参考图列表里不再有。
       async function moveRefToPortrait(r) {
         if (!r || !r.path) { message.error("该图缺可用路径"); return; }
+        if (!armDelete("ref2port:" + r.path)) return;
         try {
           var res = await apiPost("refs/move_to_portrait",
             { id: galCharId.value, path: r.path });
           message.success("已转回立绘库" +
-            (res && res.main_ref_cleared ? "（主参考已清空，可重新指定）" : ""));
-          await loadGalRefs();
-          await loadGallery();
+            (res && res.main_ref_cleared ? "（主参考已清空，可重新指定）" : "") +
+            "；原图仍保留在参考图库的「未绑定图片」里，可随时找回");
           await refreshAll();
         } catch (e) { /* 已提示 */ }
       }
