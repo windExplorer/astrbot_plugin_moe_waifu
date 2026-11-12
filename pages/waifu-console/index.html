@@ -812,25 +812,35 @@
               <div v-else class="dropzone" style="padding: 18px; text-align: center;">
                 <span class="bind-tip" style="margin-top: 0;">还没有绑定参考图：点「上传」或把图片直接拖进页面，会自动绑定到该角色</span>
               </div>
-              <!-- v0.9.10：找回因编辑保存丢失绑定的孤儿图片（文件其实还在 data/refs/） -->
+              <!-- v0.9.10：找回因编辑保存丢失绑定的孤儿图片（文件其实还在 data/refs/）
+                   v0.12.7：默认折叠，并可物理删除（仍被引用的图后端会拒绝） -->
               <div v-if="galOrphans.length > 0" style="margin-top: 10px;">
-                <div class="bind-tip" style="margin-bottom: 6px;">
-                  发现 {{ galOrphans.length }} 张未绑定图片（文件仍在 data/refs/，只是绑定丢了），可重新绑定到本角色：
+                <div class="bind-tip" style="margin-bottom: 6px; cursor: pointer; user-select: none;"
+                     @click="galOrphansOpen = !galOrphansOpen">
+                  {{ galOrphansOpen ? "▾ 收起" : "▸ 展开" }} · 发现 {{ galOrphans.length }} 张未绑定图片
+                  （文件仍在 data/refs/，只是绑定丢了）：可重新绑定，或确认后物理删除
                 </div>
-                <n-grid :cols="6" :x-gap="8" :y-gap="8">
-                  <n-gi v-for="o in galOrphans" :key="o.path">
-                    <div class="gal-item">
-                      <img v-if="o.thumb" :src="o.thumb" class="clickable-img"
-                           title="点击查看大图" alt="未绑定图片"
-                           @click.stop="openViewer(o.path, '未绑定图片')">
-                      <div v-else class="gal-meta">预览不可用</div>
-                      <div class="gal-ops">
-                        <n-button size="tiny" type="primary" secondary
-                                  @click.stop="bindOrphan(o.path)">绑定到本角色</n-button>
+                <div v-if="galOrphansOpen">
+                  <n-grid :cols="6" :x-gap="8" :y-gap="8">
+                    <n-gi v-for="o in galOrphans" :key="o.path">
+                      <div class="gal-item">
+                        <img v-if="o.thumb" :src="o.thumb" class="clickable-img"
+                             title="点击查看大图" alt="未绑定图片"
+                             @click.stop="openViewer(o.path, '未绑定图片')">
+                        <div v-else class="gal-meta">预览不可用</div>
+                        <div class="gal-ops">
+                          <n-button size="tiny" type="primary" secondary
+                                    @click.stop="bindOrphan(o.path)">绑定</n-button>
+                          <w-icon-btn icon="trash" size="tiny" type="error"
+                                      :armed="delArm === 'orphan:' + o.path"
+                                      :tip="delArm === 'orphan:' + o.path
+                                            ? '再点一次确认物理删除文件' : '物理删除这个文件'"
+                                      @click.stop="deleteOrphan(o)"></w-icon-btn>
+                        </div>
                       </div>
-                    </div>
-                  </n-gi>
-                </n-grid>
+                    </n-gi>
+                  </n-grid>
+                </div>
               </div>
             </div>
           </div>
@@ -3314,10 +3324,23 @@
       }
       // 找回未绑定图片（v0.9.10：编辑保存曾清空 refs，文件其实还在磁盘）
       var galOrphans = Vue.ref([]);
+      var galOrphansOpen = Vue.ref(false);   // v0.12.7：默认折叠，避免刷屏
       function loadGalOrphans() {
         apiGet("refs/orphans", {}).then(function (res) {
           galOrphans.value = (res && res.items) || [];
         }).catch(function () { galOrphans.value = []; });
+      }
+      // v0.12.7：物理删除未绑定图片（后端会拒绝仍被引用的图）
+      async function deleteOrphan(o) {
+        var p = (o && o.path) || "";
+        if (!p) return;
+        if (!armDelete("orphan:" + p)) return;
+        try {
+          await apiPost("refs/orphan_delete", { path: p });
+          message.success("已物理删除该文件");
+          delArm.value = "";
+          await refreshAll();
+        } catch (e) { /* 已提示 */ }
       }
       async function bindOrphan(p) {
         if (!galCharId.value) return;
@@ -4578,6 +4601,7 @@
         gotoTryFromDetail: gotoTryFromDetail,
         galRefs: galRefs, galRefsLoading: galRefsLoading, galMainRef: galMainRef,
         galOrphans: galOrphans, bindOrphan: bindOrphan,
+        galOrphansOpen: galOrphansOpen, deleteOrphan: deleteOrphan,
         galDrawRef: galDrawRef, galDrawRefAbs: galDrawRefAbs, setDrawSource: setDrawSource,
         setMainRef: setMainRef, unbindGalRef: unbindGalRef,
         galUploadOpen: galUploadOpen, galUpNote: galUpNote,

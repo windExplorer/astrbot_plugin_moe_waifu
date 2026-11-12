@@ -45,7 +45,7 @@ dbgUid dbgDate dbgUid2 dbgDate2 dbgChar dbgChar2 dbgBusy
 doForceReroll doClearDraws doResetCharDay doClearCharPortraits
 charNameOf decisionLabel barPct
 movePortraitToRef moveRefToPortrait doQuickAction
-galOrphans bindOrphan
+galOrphans bindOrphan galOrphansOpen deleteOrphan
 ov goMenu refreshing refreshAll
 galDrawRef galDrawRefAbs setDrawSource galRefsSel
 workKeyword workFilterCat workFilterVerified workSort workCatOpts workVerifiedOpts
@@ -57,6 +57,7 @@ ROUTES = """
 /records /records/detail /records/events /stats /users /user /filters
 /debug/state /debug/history /debug/simulate /debug/rerender
 /portraits/move_to_ref /refs/move_to_portrait /refs/orphans
+/refs/orphan_delete
 /refs/set_draw_source /overview
 """.split()
 

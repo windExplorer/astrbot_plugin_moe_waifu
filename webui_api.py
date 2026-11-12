@@ -1187,6 +1187,36 @@ async def h_refs_orphans(plugin) -> dict:
     return ok({"items": await asyncio.to_thread(_orphan_items, plugin)})
 
 
+async def h_refs_orphan_delete(plugin) -> dict:
+    """物理删除一张**未绑定**的参考图（data/refs/ 下的孤儿文件）。
+
+    安全约束与 /refs/orphans 同一套：路径必须落在 refs/ 内，且当前没有任何
+    角色条目 / 作品封面 / 出卡源引用它；仍被引用时拒绝，避免「删孤儿把别人
+    还在用的图删了」。真正的删除语义只有用户在这里点两段确认才会发生。
+    """
+    body = await _body()
+    path = str(body.get("path") or "").strip()
+    if not path:
+        return err("缺少 path")
+    fp = _safe_data_file(plugin, path)
+    if fp is None:
+        return err("文件不存在或不在数据目录内")
+    norm = _norm_ref(plugin, path)
+    if not norm.startswith("refs/"):
+        return err("只能删除 refs/ 下的未绑定参考图")
+    if _path_is_referenced(plugin, norm):
+        return err("这张图仍被某个角色或作品封面引用，请先解绑再删除")
+    try:
+        await asyncio.to_thread(fp.unlink)
+    except FileNotFoundError:
+        return ok({"deleted": path, "already_gone": True})
+    except Exception as exc:
+        logger.warning(f"[{PLUGIN_NAME}] 删除未绑定图片失败\n{traceback.format_exc()}")
+        return err(f"删除失败：{exc}")
+    logger.info(f"[{PLUGIN_NAME}] 已物理删除未绑定图片：{norm}")
+    return ok({"deleted": path})
+
+
 async def h_refs_bind(plugin) -> dict:
     """把一张已存在的图片绑进角色的参考图库（strategy.refs，去重追加）。"""
     body = await _body()
@@ -2278,6 +2308,7 @@ def register(plugin) -> None:
         ("/refs/upload", h_refs_upload, ["POST"]),
         ("/refs/list", h_refs_list, ["GET", "POST"]),
         ("/refs/orphans", h_refs_orphans, ["GET", "POST"]),
+        ("/refs/orphan_delete", h_refs_orphan_delete, ["POST"]),
         ("/refs/set_draw_source", h_refs_set_draw_source, ["POST"]),
         ("/image/data", h_image_data, ["GET", "POST"]),
         ("/refs/bind", h_refs_bind, ["POST"]),

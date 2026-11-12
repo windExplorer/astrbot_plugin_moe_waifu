@@ -325,6 +325,37 @@ def test_draw_source(root: Path):
     st.close()
 
 
+def test_orphan_delete(root: Path):
+    """v0.12.7：未绑定图片可物理删除；仍被引用 / 越界路径一律拒绝。"""
+    plugin, st = make_plugin(root)
+    refs_dir = root / "refs"
+    refs_dir.mkdir(parents=True, exist_ok=True)
+    (refs_dir / "lost.png").write_bytes(b"LOST")
+    (refs_dir / "bound.png").write_bytes(b"BOUND")
+    data = read_pack(root)
+    data["entries"][0]["strategy"]["refs"] = ["refs/bound.png"]
+    write_pack(root, data)
+
+    r1 = asyncio.run(call_handler(plugin, api.h_refs_orphan_delete,
+                                  {"path": "refs/bound.png"}))
+    check("被引用的图拒绝物理删除",
+          r1["status"] == "error" and (refs_dir / "bound.png").is_file(), str(r1))
+    r2 = asyncio.run(call_handler(plugin, api.h_refs_orphan_delete,
+                                  {"path": "refs/lost.png"}))
+    check("未绑定图可物理删除",
+          r2["status"] == "ok" and not (refs_dir / "lost.png").exists(), str(r2))
+    check("删除后不再出现在孤儿列表",
+          all(i["path"] != "refs/lost.png"
+              for i in asyncio.run(api.h_refs_orphans(plugin))["data"]["items"]))
+    r3 = asyncio.run(call_handler(plugin, api.h_refs_orphan_delete,
+                                  {"path": "../outside.png"}))
+    check("越界路径拒绝删除", r3["status"] == "error", str(r3))
+    r4 = asyncio.run(call_handler(plugin, api.h_refs_orphan_delete,
+                                  {"path": "portraits/c1/a.png"}))
+    check("非 refs/ 路径拒绝删除", r4["status"] == "error", str(r4))
+    st.close()
+
+
 def main():
     jobs = [("move_to_ref", test_move_to_ref), ("roundtrip", test_roundtrip),
             ("delete_legacy", test_delete_legacy_dirty_data),
@@ -334,7 +365,8 @@ def main():
             ("save_keeps_refs", test_save_entry_keeps_refs),
             ("unbind_shared", test_unbind_shared_ref),
             ("orphans", test_orphans_recovery),
-            ("draw_source", test_draw_source)]
+            ("draw_source", test_draw_source),
+            ("orphan_delete", test_orphan_delete)]
     for name, fn in jobs:
         with tempfile.TemporaryDirectory() as td:
             print(f"--- {name} ---")
