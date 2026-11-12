@@ -211,7 +211,11 @@
           </n-space>
         </div>
         <div class="page-scroll">
-          <n-space vertical size="large">
+          <!-- v0.9.7：页面容器弃用 n-space——vendored naive 的 Space 把每个槽子元素
+               包一层 div 且 key 全是 1，页签 v-if 切换时 children 数组变化、keyed diff
+               全部撞 key → DOM 错位补丁 → 「分群绑定点一次多一个框、别的页签也能看到」
+               （v0.2.1 坑的真面目，div v-if 也躲不过）。普通 div + .stack 间距工具类。 -->
+          <div class="stack">
 
           <!-- ============ 角色库 ============ -->
           <div v-if="menu === 'chars'">
@@ -1421,7 +1425,7 @@
               </n-space>
             </n-card>
           </div>
-          </n-space>
+          </div>
         </div>
         <!-- 底部分页栏（v0.6.0）：固定在底部，不用滚到内容末尾找分页器 -->
         <div class="page-foot"
@@ -1520,7 +1524,9 @@
     <!-- ============ 编辑抽屉（新增/编辑角色） ============ -->
     <n-drawer v-model:show="showDrawer" :width="540">
       <n-drawer-content :title="drawerTitle" closable>
-        <n-space vertical size="medium">
+        <!-- v0.9.7：同页面容器——抽屉表单里有 v-if 直邻子元素（lora 输入框/img2img
+             参数块随画法策略切换），n-space 槽 key 全 1 会错位补丁，换 div.stack -->
+        <div class="stack">
           <n-grid :cols="2" :x-gap="10">
             <n-gi>
               <n-input v-model:value="form.id" :disabled="!isNew" placeholder="id（英文唯一标识）"></n-input>
@@ -1615,7 +1621,7 @@
             <n-button type="primary" :loading="saving" @click="saveForm">保存</n-button>
             <n-button @click="showDrawer = false">取消</n-button>
           </n-space>
-        </n-space>
+        </div>
       </n-drawer-content>
     </n-drawer>
   </n-config-provider>

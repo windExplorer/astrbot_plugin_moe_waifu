@@ -96,6 +96,16 @@ def main():
               f'v-if="menu === \'{key}\'"' in page)
     check("旧的合并页签已移除", "记录·调试" not in page.split("<body>")[1][:200])
 
+    # v0.9.8 回归守卫：带 v-if 切换的容器绝不能是 n-space——vendored naive 的
+    # Space 给每个槽子元素包一层 div 且 key 全是 1，v-if 切换时 keyed diff 错位
+    # 补丁，jsdom 真页面实证：「分群绑定」点一次出两份表单、切到别的页签还残留。
+    # 页面主容器与编辑抽屉表单容器一律 div.stack。
+    seg = page.split('page-scroll">', 1)[1][:400]
+    check("页面主容器不是 n-space", "<n-space" not in seg)
+    check("页面主容器用 div.stack", '<div class="stack">' in seg)
+    dseg = page.split('<n-drawer-content :title="drawerTitle" closable>', 1)[1][:300]
+    check("编辑抽屉表单容器不是 n-space（div.stack）", "<n-space" not in dseg.split("<n-grid")[0])
+
     if FAILURES:
         print(f"test_template_structure: {len(FAILURES)} FAILED")
         sys.exit(1)
