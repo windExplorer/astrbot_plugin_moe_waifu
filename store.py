@@ -120,6 +120,12 @@ CREATE INDEX IF NOT EXISTS idx_debug_history_kind ON debug_history(kind, id);
 # 老库补列（PRAGMA 探测 → ALTER TABLE，绝不重建已有表）。
 # draws 早期只有 12 列：角色名/种子/立绘来源都得靠角色库反查，角色删了就显示 id。
 _MIGRATIONS = {
+    "portraits": {
+        # v0.15.0：立绘记录生成时的主题与提示词（详情弹窗查看）；
+        # prompt 可空（参考图转立绘的行没有提示词）
+        "prompt": "TEXT",
+        "theme": "TEXT NOT NULL DEFAULT ''",
+    },
     "draws": {
         "seed_hex": "TEXT NOT NULL DEFAULT ''",
         "char_name": "TEXT NOT NULL DEFAULT ''",
@@ -320,13 +326,29 @@ class Store:
     # ---------- portraits ----------
 
     def add_portrait(self, char_id: str, file: str, seed: int, date: str,
-                     seq: int, strategy: str) -> None:
+                     seq: int, strategy: str,
+                     prompt: str | None = None, theme: str = "") -> None:
+        # v0.15.0：prompt/theme 随档记录（立绘详情弹窗展示）；prompt 可空。
         self._conn.execute(
-            "INSERT INTO portraits (char_id, file, seed, date, seq, strategy, created_at)"
-            " VALUES (?,?,?,?,?,?,?)",
-            (char_id, file, int(seed), date, int(seq), strategy, _now()),
+            "INSERT INTO portraits (char_id, file, seed, date, seq, strategy, created_at,"
+            " prompt, theme) VALUES (?,?,?,?,?,?,?,?,?)",
+            (char_id, file, int(seed), date, int(seq), strategy, _now(),
+             prompt, str(theme or "")),
         )
         self._conn.commit()
+
+    def next_portrait_seq(self, char_id: str) -> int:
+        """该角色的下一个立绘序号 = 历史最大 seq + 1（v0.15.0 修重复编号）。
+
+        旧实现 seq = COUNT(*)：删过立绘（单删 / 转参考图 / 清空）后 count 回退，
+        下一次生成会复用已用过的 seq → 编号重复、seed 撞车（同角色同日同 seq
+        的种子完全相同）。改用 MAX+1 单调递增，对历史重复行也安全。
+        """
+        row = self._conn.execute(
+            "SELECT COALESCE(MAX(seq), -1) + 1 AS n FROM portraits WHERE char_id=?",
+            (char_id,),
+        ).fetchone()
+        return int(row["n"]) if row is not None else 0
 
     def count_portraits(self, char_id: str) -> int:
         row = self._conn.execute(
@@ -345,13 +367,16 @@ class Store:
     def list_portraits(self, char_id: str) -> list:
         """按 seq 升序返回该角色全部立绘（满库取图按此排序 + pool_index 取模）。"""
         rows = self._conn.execute(
-            "SELECT * FROM portraits WHERE char_id=? ORDER BY seq ASC", (char_id,)
+            "SELECT * FROM portraits WHERE char_id=?"
+            " ORDER BY seq ASC, created_at ASC, id ASC", (char_id,)
         ).fetchall()
         return [dict(r) for r in rows]
 
     def list_portraits_all(self) -> list:
         """全部立绘行（工坊孤立图发现用）。"""
-        rows = self._conn.execute("SELECT * FROM portraits ORDER BY char_id, seq ASC").fetchall()
+        rows = self._conn.execute(
+            "SELECT * FROM portraits ORDER BY char_id, seq ASC, created_at ASC, id ASC"
+        ).fetchall()
         return [dict(r) for r in rows]
 
     def delete_portrait(self, file: str) -> None:

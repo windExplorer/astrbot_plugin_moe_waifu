@@ -144,7 +144,11 @@
   .detail-name { font-size: 17px; font-weight: 700; }
   .gen-strip { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 8px; }
   .gen-strip .gal-item { flex: 0 0 84px; }
-  .gen-strip .gal-item img { aspect-ratio: 7 / 12; }
+  /* v0.15.0：生成源缩略改正方形裁切（偏上保脸）；选中交互在下方文字条上 */
+  .gen-strip .gal-item img { aspect-ratio: 1 / 1; object-fit: cover; object-position: 50% 12%; }
+  .gen-sel { cursor: pointer; }
+  .gen-sel:hover { opacity: 1 !important; color: #d63384; }
+  .gen-sel-tip b { color: #d63384; }
   /* 记录 · 调试页（v0.8.0） */
   /* v0.13.2：卡片语言全站统一（radius 10 / 同一灰阶描边），总览卡同款 */
   .stat-card { border: 1px solid rgba(128,128,128,.22); border-radius: 10px;
@@ -794,17 +798,22 @@
                     「重绘强度」仅对带 KSampler 的经典 img2img 工作流生效，
                     Qwen2.1 Turbo 编辑类工作流（ManualSigmas 固定调度表）没有该字段、会被忽略。
                   </div>
-                  <div class="bind-tip" style="margin-top: 0;" v-if="galRefsSel.length > 0">
-                    本次已选 {{ galRefsSel.length }} 张生成源。
+                  <!-- v0.15.0：提示行常驻（不再随选中出现/消失引起布局跳动），
+                       选中数并入文案；交互拆分——点图片看大图，点图片下方文字选中 -->
+                  <div class="bind-tip gen-sel-tip" style="margin-top: 0;">
+                    生成源（点击图片看大图；点图片<b>下方文字</b>选中/取消，顺序即「图1/图2/图3」）{{ galRefsSel.length > 0 ? " · 已选 " + galRefsSel.length + " 张" : "" }}
                   </div>
                   <div class="gen-strip" v-if="genSources.length > 0">
                     <div v-for="g in genSources" :key="g.kind + ':' + g.path"
                          class="gal-item" :class="{ 'ref-selected': galRefsSel.indexOf(g.path) >= 0 }"
-                         :title="g.kind === 'ref' ? '参考图' : '立绘 #' + g.seq"
-                         @click="selectGenSource(g)">
-                      <img v-if="g.thumb" :src="g.thumb" alt="生成源">
+                         :title="g.kind === 'ref' ? '参考图' : '立绘 #' + g.seq">
+                      <img v-if="g.thumb" :src="g.thumb" class="clickable-img" alt="生成源"
+                           title="点击查看大图"
+                           @click.stop="openViewer(g.path, g.kind === 'ref' ? '参考图' : '#' + g.seq)">
                       <div v-else class="gal-meta">文件丢失</div>
-                      <div class="gal-meta">
+                      <div class="gal-meta gen-sel"
+                           title="点击选中 / 取消（多选顺序 = 图1/图2/图3）"
+                           @click.stop="selectGenSource(g)">
                         {{ galRefsSel.indexOf(g.path) >= 0
                            ? "已选 #" + (galRefsSel.indexOf(g.path) + 1)
                            : (g.kind === "ref" ? "参考图" : "立绘 #" + g.seq) }}
@@ -824,15 +833,24 @@
             <div>
               <div class="sec-title">立绘
                 <span class="cnt">{{ galItems.length }}/{{ meta.quota }} · 不足配额会按种子自动补生{{ galDrawRef ? " · 出卡源已指定" : "" }}</span>
+                <!-- v0.15.0：排序（默认最新在前；编号正序=库里 seq 升序）。seq 改
+                     「历史最大+1」单调派发，删立绘不再复用编号 -->
+                <n-select v-model:value="galSort" size="tiny" :bordered="false"
+                          :options="[{ label: '最新在前', value: 'newest' },
+                                      { label: '编号正序', value: 'seq' }]"
+                          style="width: 100px; margin-left: 8px;"></n-select>
               </div>
               <n-grid :cols="uiCols" :x-gap="10" :y-gap="10" v-if="galItems.length > 0">
-                <n-gi v-for="it in galItems" :key="it.file">
+                <n-gi v-for="it in galItemsView" :key="it.file">
                   <div class="gal-item">
                     <img v-if="it.thumb" :src="it.thumb" class="clickable-img"
                          title="点击查看大图" alt="立绘缩略"
                          @click.stop="openViewer(it.file, '#' + it.seq)">
                     <div v-else class="gal-meta">文件丢失</div>
                     <div class="gal-ops">
+                      <w-icon-btn icon="info" size="tiny" type="info"
+                                  tip="查看详情（主题 / 提示词 / seed 全文）"
+                                  @click.stop="openGalDetail(it)"></w-icon-btn>
                       <w-icon-btn icon="star" size="tiny"
                                   :type="isCover(it) ? 'warning' : 'default'"
                                   :tip="isCover(it) ? '当前封面' : '设为角色封面'"
@@ -1858,6 +1876,33 @@
       </n-space>
     </n-modal>
 
+    <!-- ============ 角色详情 · 立绘详情弹窗（v0.15.0）：主题 / 提示词 / seed 全文。
+         v0.15.0 之前生成的立绘没存这两项（旧行 prompt 为 null），如实提示。
+         preset 必须是 dialog（见生成立绘弹窗处的注释） ============ -->
+    <n-modal v-model:show="galDetailOpen" preset="dialog" title="立绘详情"
+             style="width: 580px;">
+      <n-space vertical size="small" v-if="galDetail">
+        <div class="bind-tip" style="margin-top: 0;">
+          #{{ galDetail.seq }} · {{ galDetail.date }} · {{ portraitStrategyLabel(galDetail.strategy) }} · seed {{ galDetail.seed }}{{ galDetail.created_at ? " · 归档 " + galDetail.created_at : "" }}
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <span class="bind-tip" style="margin-top: 0;">主题</span>
+          <n-tag size="small" :bordered="false" type="info" v-if="galDetail.theme">
+            {{ themeLabel(galDetail.theme) }}
+          </n-tag>
+          <span v-else class="bind-tip" style="margin-top: 0;">随机（未指定主题）</span>
+        </div>
+        <div>
+          <div class="bind-tip" style="margin-top: 4px;" v-if="galDetail.prompt">生成提示词（可直接复制）</div>
+          <div class="bind-tip" style="margin-top: 4px;" v-else>
+            未记录提示词（v0.15.0 之前生成的立绘不带此信息）
+          </div>
+          <n-input v-if="galDetail.prompt" :value="galDetail.prompt" type="textarea"
+                   :rows="6" readonly class="gal-detail-prompt"></n-input>
+        </div>
+      </n-space>
+    </n-modal>
+
     <!-- ============ 角色详情 · 参考图上传弹窗（v0.6.2 拖拽多选；v0.6.3 换公共组件 + 粘贴；preset 须 dialog，见上） ============ -->
     <n-modal v-model:show="galUploadOpen" preset="dialog" title="上传参考图"
              style="width: 520px;">
@@ -2157,7 +2202,10 @@
           '<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
     // v0.9.1：立绘 ↔ 参考图互转用方向箭头，别再用「link」误导成「建立关联」
     arrowRight: '<line x1="4" y1="12" x2="20" y2="12"/><polyline points="14 6 20 12 14 18"/>',
-    arrowLeft: '<line x1="20" y1="12" x2="4" y2="12"/><polyline points="10 6 4 12 10 18"/>'
+    arrowLeft: '<line x1="20" y1="12" x2="4" y2="12"/><polyline points="10 6 4 12 10 18"/>',
+    // v0.15.0：立绘详情（主题 / 提示词 / seed 全文）
+    info: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/>' +
+          '<line x1="12" y1="8" x2="12.01" y2="8"/>'
   };
   function icon(name, size) {
     return h("svg", {
@@ -3312,7 +3360,8 @@
         tryStep.value = 3;
         try {
           var payload = { kind: "try", id: tryCharId.value,
-                          prompt: String(tryPrompt.value || "").trim() };
+                          prompt: String(tryPrompt.value || "").trim(),
+                          theme: tryTheme.value || "" };
           var ov = overrideOf();
           if (ov) payload.override = ov;
           var res = await apiPost("jobs/start", payload);
@@ -3490,8 +3539,9 @@
         if (!galCharId.value) { galItems.value = []; return; }
         try {
           var res = await apiGet("portraits/list", { char_id: galCharId.value });
-          // v0.12.0：后生成的排最前（后端仍按 seq 升序，满库取图的确定性不能动）
-          galItems.value = ((res && res.items) || []).slice().reverse();
+          // v0.15.0：排序统一收口到 galItemsView（默认最新在前；此处保持后端
+          // seq 升序原样——满库取图 pool_index 的确定性依赖这个顺序，别动）
+          galItems.value = (res && res.items) || [];
         } catch (e) { galItems.value = []; }
       }
 
@@ -3667,6 +3717,40 @@
       var galPromptLoading = Vue.ref(false);
       var galPromptOpen = Vue.ref(false);
       var galPromptConfirmed = Vue.ref(false);
+      // v0.15.0：立绘排序（默认最新在前）+ 详情弹窗
+      var galSort = Vue.ref("newest");
+      var galItemsView = Vue.computed(function () {
+        var arr = (galItems.value || []).slice();
+        arr.sort(function (a, b) {
+          if (galSort.value === "newest") {
+            // 最新在前：seq 降序；历史重复 seq 行按归档时间降序兜底
+            if ((b.seq || 0) !== (a.seq || 0)) return (b.seq || 0) - (a.seq || 0);
+            return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+          }
+          return (a.seq || 0) - (b.seq || 0)
+            || String(a.created_at || "").localeCompare(String(b.created_at || ""));
+        });
+        return arr;
+      });
+      var galDetailOpen = Vue.ref(false);
+      var galDetail = Vue.ref(null);
+      function openGalDetail(it) {
+        galDetail.value = it || null;
+        galDetailOpen.value = true;
+      }
+      function themeLabel(id) {
+        var t = (themes.value || []).find(function (x) { return x.id === id; });
+        return t ? t.label : String(id || "");
+      }
+      function portraitStrategyLabel(s) {
+        s = String(s || "");
+        if (s === "try") return "试画入库";
+        if (s === "moved") return "参考图转立绘";
+        if (s === "img2img") return "图生图";
+        if (s === "lora") return "lora";
+        if (s === "base") return "base 直出";
+        return s || "未知";
+      }
       // v0.14.0 维度级控制：单独重摇(attempts) / 锁定(fixed) / 移除(disabled) /
       // 启用(enabled)，随 preview 请求发往 prompt_gen.apply_dim_state
       var galDimAttempts = Vue.ref({});
@@ -3798,7 +3882,8 @@
       }
       async function doDetailGenerate() {
         if (!galCharId.value || refillRunning.value) return;
-        var payload = { kind: "refill", id: galCharId.value };
+        // v0.15.0：主题随任务下发，归档时写进立绘行（详情弹窗展示）
+        var payload = { kind: "refill", id: galCharId.value, theme: galTheme.value || "" };
         if (galAsRef.value) { payload.no_archive = true; }   // v0.7.5：只生成不归档
         if (galMode.value === "img2img") {
           if (!galRefsSel.value.length) {
@@ -5065,6 +5150,11 @@
         galDimOpts: galDimOpts, onDimPick: onDimPick,
         removeGalDim: removeGalDim, addGalDim: addGalDim,
         resetGalDimCtl: resetGalDimCtl, loadGalPools: loadGalPools,
+        // v0.15.0：立绘排序 + 详情弹窗 + 生成源交互
+        galSort: galSort, galItemsView: galItemsView,
+        galDetailOpen: galDetailOpen, galDetail: galDetail,
+        openGalDetail: openGalDetail, themeLabel: themeLabel,
+        portraitStrategyLabel: portraitStrategyLabel,
         bindText: bindText, parsedBind: parsedBind, bindSaving: bindSaving,
         bindRows: bindRows, bindPackOpts: bindPackOpts, bindRawOpen: bindRawOpen,
         bindLoading: bindLoading, loadBindPools: loadBindPools, onBindRawInput: onBindRawInput,

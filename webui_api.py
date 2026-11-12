@@ -466,6 +466,11 @@ async def h_portraits_list(plugin) -> dict:
             # Path(ref).exists() 按 CWD 解析相对路径，必须传绝对路径
             "abs": str(full),
             "thumb": _thumb_data_url(str(full), 420) if full.is_file() else None,
+            # v0.15.0：详情弹窗用（旧行 prompt 为 null）
+            "created_at": row["created_at"],
+            "prompt": row["prompt"],
+            "theme": row["theme"],
+            "strategy": row["strategy"],
         })
     return ok({"char_id": cid, "items": items})
 
@@ -657,7 +662,7 @@ def _move_ref_to_portrait(plugin, cid: str, path: str) -> dict:
     if not plugin._store:
         raise ValueError("插件未初始化完成")
     date = plugin._today()
-    seq = plugin._store.count_portraits(cid)
+    seq = plugin._store.next_portrait_seq(cid)
     seed = int(hashlib.sha256(src.read_bytes()).hexdigest()[:8], 16) % 100000
     new_rel = draw.archive_portrait(str(src), plugin._data_dir, cid, date, seq, seed)
     plugin._store.add_portrait(cid, new_rel, seed, date, seq, "moved")
@@ -816,13 +821,16 @@ async def h_job_start(plugin) -> dict:
                 return err("请先指定本次图生图源：选一张或多张参考图/立绘，或填 URL / 本地路径（不会自动取参考图列表里的图）")
     # 预览确认过的提示词直通（v0.5.9）：非空时不再走 prompt_gen，按原文出图
     prompt_override = str(body.get("prompt") or "").strip()[:2000]
+    # v0.15.0：主题 id 随任务记录（未确认提示词时也参与生成），归档写进立绘行
+    theme_id = str(body.get("theme") or "").strip()
     job_id = f"{kind}:{cid}:{int(time.time() * 1000)}"
     plugin._jobs[job_id] = {"status": "running", "kind": kind, "char_id": cid,
-                            "entry_label": pool.entry_label(entry), "src_path": ""}
+                            "entry_label": pool.entry_label(entry), "src_path": "",
+                            "theme": theme_id}
     _prune_jobs(plugin)
     loop = asyncio.get_running_loop()
     loop.create_task(_run_job(plugin, job_id, entry, kind, prompt_override,
-                              no_archive))
+                              no_archive, theme_id))
     return ok({"job_id": job_id, "label": pool.entry_label(entry)})
 
 
@@ -836,12 +844,14 @@ def _prune_jobs(plugin) -> None:
 
 
 async def _run_job(plugin, job_id: str, entry: dict, kind: str,
-                   prompt_override: str = "", no_archive: bool = False) -> None:
+                   prompt_override: str = "", no_archive: bool = False,
+                   theme_id: str = "") -> None:
     job = plugin._jobs.get(job_id, {})
     char_id = entry["id"]
     date = plugin._today()
     salt = str(plugin._cfg("salt", "moe-waifu"))
-    seq = plugin._store.count_portraits(char_id)
+    # v0.15.0：seq 改单调「历史最大 + 1」，修「删过立绘后编号重复、种子撞车」
+    seq = plugin._store.next_portrait_seq(char_id)
     seed_int = pool.portrait_seed_int(char_id, date, seq, salt)
     draw_cfg = plugin._draw_cfg()
     if prompt_override:
@@ -849,7 +859,7 @@ async def _run_job(plugin, job_id: str, entry: dict, kind: str,
         prompt_text, prompt_src = prompt_override, "manual"
     else:
         prompt_text, prompt_src = await prompt_gen.build_generation_prompt(
-            plugin.context, draw_cfg, entry, seed_int
+            plugin.context, draw_cfg, entry, seed_int, theme_id
         )
     logger.info(f"[{PLUGIN_NAME}] 立绘提示词（{prompt_src}）：{prompt_text[:80]}")
     t0 = time.monotonic()
@@ -858,14 +868,17 @@ async def _run_job(plugin, job_id: str, entry: dict, kind: str,
         prompt=prompt_text,
     )
     duration = int((time.monotonic() - t0) * 1000)
+    # v0.15.0：主题 id 随 job 记录（归档时写进立绘行，详情弹窗展示）
+    theme_rec = str(theme_id or "").strip()
     plugin._store.log_job(char_id, date, "try" if kind == "try" else "refill", status,
                           "workshop", entry["strategy_type"], seed_int, error, duration, src or "")
     job.update({"status": status, "error": error, "duration_ms": duration,
                 "seed": seed_int, "src_path": src or "", "char_id": char_id,
-                "prompt": prompt_text[:500], "prompt_src": prompt_src})
+                "prompt": prompt_text[:500], "prompt_src": prompt_src, "theme": theme_rec})
     if src and kind == "refill" and not no_archive:
         rel = draw.archive_portrait(src, plugin._data_dir, char_id, date, seq, seed_int)
-        plugin._store.add_portrait(char_id, rel, seed_int, date, seq, entry["strategy_type"])
+        plugin._store.add_portrait(char_id, rel, seed_int, date, seq,
+                                   entry["strategy_type"], prompt=prompt_text, theme=theme_rec)
         job["archived"] = rel
     if src:
         # 试画缓存（v0.5.9）：萌绘产物在其自己的数据目录里，/image/data 只认本插件
@@ -907,10 +920,12 @@ async def h_job_archive(plugin) -> dict:
         return err("插件未初始化完成")
     cid = job["char_id"]
     date = plugin._today()
-    seq = plugin._store.count_portraits(cid)
+    seq = plugin._store.next_portrait_seq(cid)
     rel = draw.archive_portrait(job["src_path"], plugin._data_dir, cid, date, seq,
                                 int(job.get("seed") or 0))
-    plugin._store.add_portrait(cid, rel, int(job.get("seed") or 0), date, seq, "try")
+    plugin._store.add_portrait(cid, rel, int(job.get("seed") or 0), date, seq, "try",
+                               prompt=str(job.get("prompt") or "") or None,
+                               theme=str(job.get("theme") or ""))
     job["archived"] = rel
     return ok({"archived": rel})
 
@@ -1384,7 +1399,8 @@ async def h_prompt_preview(plugin) -> dict:
                                 if d != "outfit"]
     date = plugin._today()
     salt = str(plugin._cfg("salt", "moe-waifu"))
-    seq = plugin._store.count_portraits(cid) if plugin._store else 0
+    # v0.15.0：与实际生成同口径（next_portrait_seq），预览编号 = 实出编号
+    seq = plugin._store.next_portrait_seq(cid) if plugin._store else 0
     seed_int = pool.portrait_seed_int(cid, date, seq, salt)
     if attempt:
         seed_int = (seed_int + attempt * 7919) % (2 ** 31)

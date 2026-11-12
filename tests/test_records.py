@@ -95,6 +95,38 @@ def test_migration(tmp: Path):
     st.close()
 
 
+def test_portraits_seq_and_meta(tmp: Path):
+    """v0.15.0：单调 seq（删除不复用）+ prompt/theme 随档 + 老库补列。"""
+    db = tmp / "waifu.db"
+    st = store.Store(db)
+    # 新库 portraits 自带 prompt/theme；对老库（无这两列）建库脚本 CREATE IF NOT
+    # EXISTS 即新形状，真正的老库走 _migrate ALTER 补列——此处验证列存在即口径
+    cols = {r["name"] for r in st._conn.execute("PRAGMA table_info(portraits)")}
+    check("portraits 含 prompt/theme 列", {"prompt", "theme"} <= cols, str(sorted(cols)))
+    n0 = st.next_portrait_seq("c1")
+    check("空角色下一个序号 = 0", n0 == 0)
+    st.add_portrait("c1", "portraits/c1/a.png", 111, "2026-11-13", 0, "base",
+                    prompt="第一条提示词", theme="swimsuit")
+    st.add_portrait("c1", "portraits/c1/b.png", 222, "2026-11-13", 1, "try",
+                    prompt="第二条提示词", theme="")
+    st.add_portrait("c2", "portraits/c2/x.png", 333, "2026-11-13", 0, "moved")
+    check("seq 单调派发", st.next_portrait_seq("c1") == 2)
+    # 修重复编号的关键场景：删「最老」行后 count 会回退到 1（与现存 seq=1 撞号），
+    # MAX+1 不受影响；删最新行会复用号（该号已无行，不会出现可见重复）
+    st.delete_portrait("portraits/c1/a.png")
+    check("删老行后 seq 不回退复用（重复编号根因修复）", st.next_portrait_seq("c1") == 2)
+    rows = st.list_portraits("c1")
+    check("随档 prompt/theme 落库", rows[0]["prompt"] == "第二条提示词"
+          and rows[0]["theme"] == "")
+    check("moved 行 prompt 为空", st.list_portraits("c2")[0]["prompt"] is None)
+    # 排序决胜：历史重复 seq 行按 created_at/id 稳定
+    st.add_portrait("c1", "portraits/c1/c.png", 444, "2026-11-13", 1, "base")
+    order = [r["file"] for r in st.list_portraits("c1")]
+    check("重复 seq 行序稳定（created_at/id 决胜）",
+          len(order) == 2 and order[0].endswith("b.png"), str(order))
+    st.close()
+
+
 def test_events_and_detail(tmp: Path):
     st, _ = fresh(tmp)
     st.upsert_draw("u1", TODAY, "a_char", 0, False, "阿明", "g1", "一群",
@@ -322,6 +354,7 @@ def main():
                      ("users_and_streak", test_users_and_streak),
                      ("stats", test_stats),
                      ("debug_history", test_debug_history),
+                     ("portraits_seq_meta", test_portraits_seq_and_meta),
                      ("cores", test_cores)):
         with tempfile.TemporaryDirectory() as td:
             print(f"--- {name} ---")

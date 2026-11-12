@@ -491,7 +491,10 @@ class MoeWaifuPlugin(Star):
                 decision = "generate"  # 记录真实发生的决策，别把它记成「库存复用」
 
         if src is None:  # generate / generate_i2i
-            seq = pool_size
+            # v0.15.0：seq 改「历史最大 + 1」——旧实现 seq = 库存数，删过立绘后
+            # count 回退，下一次生成复用旧 seq → 编号重复、同日种子撞车。
+            # pool_size 只留给上方配额判定，不再兼做序号。
+            seq = self._store.next_portrait_seq(char_id)
             seed_int = pool.portrait_seed_int(char_id, date, seq, salt)
             if bool(self._cfg("announce_enabled", True)):
                 await self._send_plain(event, self._summon_line(decision, self._gen_queue))
@@ -518,7 +521,9 @@ class MoeWaifuPlugin(Star):
                 await self._send_plain(event, self._draw_error_text(status, err))
                 return None
             rel_path = draw.archive_portrait(raw_src, self._data_dir, char_id, date, seq, seed_int)
-            self._store.add_portrait(char_id, rel_path, seed_int, date, seq, entry["strategy_type"])
+            # v0.15.0：随档记录提示词（主题在抽卡链恒为随机，无主题 id）
+            self._store.add_portrait(char_id, rel_path, seed_int, date, seq,
+                                     entry["strategy_type"], prompt=prompt_text, theme="")
             src = self._data_dir / rel_path
 
         # 落库与计数（先 upsert 再查同款，含自己）

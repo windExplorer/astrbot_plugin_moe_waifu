@@ -161,9 +161,13 @@ def main():
           all(f'm === "{k}"' in page for k in
               ("chars", "works", "try", "bind", "config")))
 
-    # 10) 交互口径（v0.12.0）：列表最新在前；出卡源用卡片按钮指定（不再用路径下拉）
-    check("立绘/参考图列表默认最新在前",
-          page.count(".slice().reverse()") >= 2)
+    # 10) 交互口径（v0.12.0 建立、v0.15.0 演进）：立绘默认最新在前=galItemsView
+    #     排序收口（newest 默认值，seq 降序 + 归档时间决胜）；参考图列表仍走反转；
+    #     出卡源用卡片按钮指定（不再用路径下拉）
+    check("立绘默认最新在前（galItemsView 收口）",
+          'galSort = Vue.ref("newest")' in page and "galItemsView" in page
+          and 'v-for="it in galItemsView"' in page)
+    check("参考图列表最新在前保留", "galRefs.value = ((res && res.items) || []).slice().reverse();" in page)
     check("出卡源由卡片按钮指定",
           'setDrawSource(it.abs)' in page and 'setDrawSource(r.path)' in page)
     check("出卡源不再用路径下拉", "galDrawOpts" not in page)
