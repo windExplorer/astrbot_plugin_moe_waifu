@@ -32,26 +32,26 @@ _CARD_KEEP_DAYS = 90
 # 试画缓存保留天数（工坊试画成品拷贝，供大图查看；过期回收）
 _TRY_CACHE_KEEP_DAYS = 7
 
-# 生成过程提示（v0.13.0：中性、简洁，不再用拟人化/肉麻的措辞）。
-# 萌绘单张 20~120s，图生图更慢；只说明"在做什么、大概要等"，不额外加戏。
+# 抽卡过程提示（v0.12.2：统一围绕「抽卡」语境的简洁说法，不提绘制细节）。
+# 萌绘单张 20~120s，图生图更慢；只说明「正在抽、大概要等」，不额外加戏。
 _SUMMON_LINES = [
-    "正在准备今日角色立绘，请稍候……",
-    "正在绘制今日角色，马上就好。",
-    "正在调整画面与光影，请稍候。",
-    "立绘生成中，需要一点时间，请稍等。",
-    "正在确认构图与配色，稍后即可查看。",
-    "绘制任务已开始，完成后会直接发送。",
+    "正在为你抽今日角色，请稍候……",
+    "抽卡中，正在确认今日这一签，请稍等。",
+    "正在抽取今日角色，马上就好。",
+    "抽卡进行中，完成后会直接发送。",
+    "今日角色抽取中，稍后即可查看。",
+    "正在准备今日的抽卡结果，请稍候。",
 ]
-# 图生图模板模式的过程提示
+# 图生图模板模式的抽卡提示
 _I2I_LINES = [
-    "正在按参考图重绘今日角色，请稍候……",
-    "正在参考原图绘制今日角色，稍等片刻。",
-    "基于参考图的绘制进行中，完成后会发送。",
+    "正在按参考图抽取今日角色，请稍候……",
+    "抽卡中，正在参考原图确认今日角色，稍等片刻。",
+    "基于参考图的抽取进行中，完成后会发送。",
 ]
-# 排队提示（萌绘生图串行，多人同时请求时告知前面还有几个任务）
+# 排队提示（多人同时抽卡时告知前面还有几个请求）
 _QUEUE_LINES = [
-    "当前有 {n} 个绘制任务在排队，请稍候。",
-    "前面还有 {n} 个任务，完成你的这张后会立即发送。",
+    "当前有 {n} 个抽卡请求在排队，请稍候。",
+    "前面还有 {n} 个抽卡请求，轮到你会立即发送。",
 ]
 
 
@@ -215,12 +215,12 @@ class MoeWaifuPlugin(Star):
 
     def _draw_error_text(self, status: str, err: str) -> str:
         if status == "skipped_no_anima":
-            return ("生成立绘需要萌绘（ComfyUI 绘图）插件：请先安装并配置"
+            return ("抽卡出图需要萌绘（ComfyUI 绘图）插件：请先安装并配置"
                     " astrbot_plugin_comfyui_anima（v7.7.58+）后再试。")
         if status == "timeout":
-            return (f"立绘生成超时（>{int(self._cfg('draw_timeout', 120))}s），"
+            return (f"抽卡出图超时（>{int(self._cfg('draw_timeout', 120))}s），"
                     "萌绘可能正忙，请稍后再试。")
-        return f"立绘生成失败：{err[:120]}。请稍后再试。"
+        return f"抽卡出图失败：{err[:120]}。请稍后再试。"
 
     @staticmethod
     def _summon_line(decision: str, queued: int) -> str:
@@ -295,7 +295,7 @@ class MoeWaifuPlugin(Star):
             # 按当前 nonce 走完整产出流程重出（出图/取图 → 落库 → 渲染）
             key = (uid, date)
             if key in self._inflight:
-                yield event.plain_result("正在生成中，请稍后再查看。")
+                yield event.plain_result("正在抽卡中，请稍后再查看。")
                 return
             self._inflight.add(key)
             try:
@@ -327,7 +327,7 @@ class MoeWaifuPlugin(Star):
             pool.derive_seed(date, uid, salt, 0, self._store.get_epoch(uid)), candidates)
         key = (uid, date)
         if key in self._inflight:
-            yield event.plain_result("正在生成中，请稍后再查看。")
+            yield event.plain_result("正在抽卡中，请稍后再查看。")
             return
         self._inflight.add(key)
         try:
@@ -375,7 +375,7 @@ class MoeWaifuPlugin(Star):
             candidates)
         key = (uid, date)
         if key in self._inflight:
-            yield event.plain_result("正在生成中，请稍后再查看。")
+            yield event.plain_result("正在抽卡中，请稍后再查看。")
             return
         self._inflight.add(key)
         try:
