@@ -63,6 +63,7 @@ ROUTES = """
 /portraits/move_to_ref /refs/move_to_portrait /refs/orphans
 /refs/orphan_delete
 /refs/set_draw_source /overview
+/prompt/pools
 """.split()
 
 STORE_METHODS = """

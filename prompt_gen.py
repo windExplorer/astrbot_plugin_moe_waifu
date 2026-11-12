@@ -33,18 +33,27 @@ except Exception:  # pragma: no cover - 本地平铺调试
 # zh 为空 = 无需提及该项；en 为空 = 文生图不追加 tag。
 
 OUTFITS = [
+    # —— JK / 校园系（campus）——
     {"w": 5, "zh": "水手服JK制服", "en": "sailor school uniform, serafuku"},
-    # —— v0.13.0：JK / 校园系扩充（用户反馈「校园主题每次都是水手服」：
-    #    原来主题子集里只有水手服(权重9)与运动外套(权重5)，等于二选一）——
+    # v0.13.0：JK / 校园系扩充（用户反馈「校园主题每次都是水手服」：
+    # 原来主题子集里只有水手服(权重9)与运动外套(权重5)，等于二选一）
     {"w": 5, "zh": "西装夹克JK制服（格纹百褶裙）", "en": "blazer, school uniform, plaid skirt"},
     {"w": 5, "zh": "针织开衫JK制服（衬衫领结 + 百褶裙）", "en": "cardigan, school uniform, shirt, ribbon, pleated skirt"},
     {"w": 4, "zh": "背带裙JK制服（白衬衫 + 背带）", "en": "suspender skirt, school uniform, shirt"},
     {"w": 4, "zh": "马甲衬衫JK制服", "en": "vest, shirt, school uniform"},
     {"w": 4, "zh": "长袖白衬衫与深色百褶裙（学院风）", "en": "white shirt, pleated skirt, school uniform"},
     {"w": 3, "zh": "冬季呢子校服大衣与围巾", "en": "duffle coat, school uniform, scarf"},
+    {"w": 3, "zh": "校园体操服", "en": "gym uniform, school sportswear"},
+    {"w": 3, "zh": "拉拉队服", "en": "cheerleader outfit"},
+    # —— 婚纱 / 礼服（wedding）——
     {"w": 7, "zh": "婚纱", "en": "wedding dress, bridal veil"},
+    {"w": 4, "zh": "公主蓬蓬婚纱（拖尾与头纱）", "en": "ball gown wedding dress, bridal veil"},
+    {"w": 3, "zh": "鱼尾婚纱", "en": "mermaid wedding dress"},
     {"w": 4, "zh": "吊带礼服", "en": "evening gown, sleeveless dress"},
+    {"w": 4, "zh": "抹胸晚礼服", "en": "strapless evening gown"},
+    {"w": 3, "zh": "短款派对小礼服", "en": "short party dress"},
     {"w": 4, "zh": "秀禾服", "en": "chinese wedding dress, hanfu"},
+    {"w": 3, "zh": "花嫁和服（白无垢）", "en": "shiromuku, wedding kimono"},
     # v0.13.1：旗袍不再写死黑色，颜色交给 OUTFIT_COLORS；款式按常见变体扩充
     {"w": 6, "zh": "旗袍", "en": "qipao, china dress"},
     {"w": 4, "zh": "改良短款旗袍", "en": "short qipao, china dress"},
@@ -54,26 +63,68 @@ OUTFITS = [
     {"w": 3, "zh": "鱼尾摆改良旗袍", "en": "mermaid qipao, china dress"},
     {"w": 3, "zh": "立领盘扣旗袍（双层袖口）", "en": "qipao, mandarin collar, china dress"},
     {"w": 3, "zh": "旗袍配毛披肩", "en": "qipao, fur shawl"},
-    {"w": 6, "zh": "连体泳装", "en": "one-piece swimsuit"},
-    {"w": 4, "zh": "分体泳装", "en": "bikini swimsuit"},
+    # —— 泳装系（swimsuit）。v0.14.0 大扩充：原子集只有 3 项、连体泳装独占
+    #    46% 权重，且「连体竞技泳衣」因叫「泳衣」漏出主题关键词——用户反馈
+    #    「每次换一版都是连体泳衣，比基尼也算啊」——
+    {"w": 5, "zh": "连体泳装", "en": "one-piece swimsuit"},
+    {"w": 5, "zh": "分体比基尼", "en": "bikini"},
+    {"w": 4, "zh": "荷叶边比基尼", "en": "frilled bikini"},
+    {"w": 4, "zh": "运动系比基尼", "en": "sport bikini"},
+    {"w": 3, "zh": "系带比基尼", "en": "side-tie bikini"},
+    {"w": 4, "zh": "连体裙式泳衣", "en": "one-piece swimsuit, swim skirt"},
     {"w": 4, "zh": "连体竞技泳衣", "en": "competition swimsuit, one-piece swimsuit"},
+    {"w": 3, "zh": "长袖防晒泳衣", "en": "rash guard, one-piece swimsuit"},
+    {"w": 3, "zh": "泳装配纱笼罩裙", "en": "swimsuit, sarong"},
     {"w": 3, "zh": "泳装外搭防晒衬衫", "en": "swimsuit, oversized shirt"},
+    # —— 职场 / 通勤（office）。v0.14.0 关键词精确化：原来「西装」「马甲」
+    #    会把 JK 制服吸进职场子集，改用「职业西装/通勤/铅笔裙」等专属词——
     {"w": 7, "zh": "干练的职业西装套裙", "en": "business suit, office lady"},
     {"w": 4, "zh": "西装裤装套装", "en": "business suit, pants suit"},
     {"w": 3, "zh": "马甲与衬衫的通勤装", "en": "vest, shirt, office lady"},
+    {"w": 4, "zh": "白衬衫配铅笔裙", "en": "white shirt, pencil skirt"},
+    {"w": 4, "zh": "高领毛衣配长裤（通勤）", "en": "turtleneck sweater, dress pants"},
+    {"w": 4, "zh": "风衣通勤装", "en": "trench coat, office lady"},
+    {"w": 3, "zh": "条纹衬衫配西裤", "en": "striped shirt, dress pants"},
+    {"w": 3, "zh": "航空制服（空姐装）", "en": "flight attendant uniform"},
+    # —— 和风（kimono）——
     {"w": 6, "zh": "日式浴衣", "en": "yukata, japanese clothes"},
     {"w": 4, "zh": "振袖和服（深色系）", "en": "furisode, japanese clothes"},
+    {"w": 4, "zh": "振袖和服（浅色系）", "en": "furisode, light colored kimono"},
+    {"w": 4, "zh": "访问着和服", "en": "homongi, kimono"},
+    {"w": 3, "zh": "舞妓风和服", "en": "maiko style kimono"},
+    {"w": 4, "zh": "巫女装束（袴）", "en": "miko outfit, hakama"},
+    # —— 女仆（maid）。v0.14.0 前没有任何主题入口，只有随机模式能抽到——
     {"w": 6, "zh": "女仆装", "en": "maid outfit, maid headdress"},
     {"w": 4, "zh": "咖啡厅女仆装（围裙 + 发带）", "en": "maid outfit, apron, maid headdress"},
     {"w": 3, "zh": "和风女仆装", "en": "wa maid, japanese clothes, maid outfit"},
+    {"w": 3, "zh": "维多利亚风长裙女仆装", "en": "victorian maid, long dress, apron"},
+    {"w": 3, "zh": "短袖夏装女仆装", "en": "maid outfit, short sleeves, apron"},
+    # —— 哥特 / 暗黑（gothic）——
+    {"w": 5, "zh": "哥特萝莉装", "en": "gothic lolita dress, frills"},
+    {"w": 4, "zh": "女巫斗篷与尖顶帽", "en": "witch hat, cape, mage outfit"},
+    {"w": 4, "zh": "哥特洋装（黑白蕾丝）", "en": "gothic dress, black and white lace"},
+    {"w": 3, "zh": "哥特朋克裙（皮带与链条）", "en": "gothic punk dress, belts, chains"},
+    {"w": 3, "zh": "吸血鬼风立领长裙", "en": "vampire dress, high collar"},
+    {"w": 3, "zh": "魔法学院长袍", "en": "academy robe, mage outfit"},
+    # —— 居家 / 慵懒（home）——
+    {"w": 4, "zh": "宽松居家睡衣", "en": "pajamas, loungewear"},
+    {"w": 4, "zh": "珊瑚绒睡袍", "en": "bathrobe, fluffy loungewear"},
+    {"w": 4, "zh": "吊带睡裙", "en": "nightgown, camisole"},
+    {"w": 4, "zh": "宽松T恤与居家短裤", "en": "oversized t-shirt, shorts"},
+    {"w": 4, "zh": "连帽卫衣与居家裤", "en": "hoodie, sweatpants"},
+    {"w": 3, "zh": "动物造型的连体家居服", "en": "animal kigurumi, onesie"},
+    # —— 偶像 / 舞台（idol）。v0.14.0 前子集只有打歌服 1 项——
+    {"w": 5, "zh": "演唱会打歌服", "en": "idol costume, stage outfit"},
+    {"w": 4, "zh": "蝴蝶结舞台连衣裙", "en": "idol costume, ribbon dress"},
+    {"w": 4, "zh": "亮片演出服", "en": "sequined stage outfit"},
+    {"w": 3, "zh": "帅气风打歌服（领结与短裤）", "en": "idol costume, bow tie, shorts"},
+    {"w": 3, "zh": "学园偶像演出服", "en": "school idol costume"},
+    # —— 通用（无主题归属，随机模式专属）——
     {"w": 5, "zh": "运动外套与短裤", "en": "track jacket, gym clothes"},
     {"w": 5, "zh": "冬季大衣与围巾", "en": "winter coat, scarf"},
     {"w": 6, "zh": "碎花夏日连衣裙", "en": "floral summer dress"},
-    {"w": 5, "zh": "哥特萝莉装", "en": "gothic lolita dress, frills"},
+    # 以下单条同时被多个主题共享：office（毛衣）与 home（毛衣）
     {"w": 5, "zh": "宽松针织毛衣与长裙", "en": "oversized sweater, long skirt"},
-    {"w": 5, "zh": "演唱会打歌服", "en": "idol costume, stage outfit"},
-    {"w": 4, "zh": "女巫斗篷与尖顶帽", "en": "witch hat, cape, mage outfit"},
-    {"w": 4, "zh": "宽松居家睡衣", "en": "pajamas, loungewear"},
 ]
 
 BACKGROUNDS = [
@@ -89,8 +140,48 @@ BACKGROUNDS = [
     {"w": 5, "zh": "绿意花园（树影间洒落的阳光）", "en": "garden, flowers, dappled sunlight"},
     {"w": 4, "zh": "雨天的窗边（室内）", "en": "rain, window, indoors"},
     {"w": 5, "zh": "暖色调的咖啡馆内景", "en": "cafe, indoors, warm lighting"},
+    {"w": 3, "zh": "咖啡店吧台（蒸汽氤氲）", "en": "coffee shop counter, espresso machine, steam"},
     {"w": 4, "zh": "传统和室榻榻米", "en": "japanese room, tatami"},
     {"w": 4, "zh": "圣诞夜的彩灯街道", "en": "christmas lights, night, festive"},
+    # —— v0.14.0 扩充：此前泳装/校园/职场等主题的背景子集只有 1~3 个，
+    #    「泳装永远海边」即源于此。按主题成组补充，命名自带主题关键词——
+    # 泳装系（海边 / 泳池 / 水上 / 度假）
+    {"w": 5, "zh": "泳池边（躺椅与遮阳伞）", "en": "poolside, beach chair, parasol"},
+    {"w": 4, "zh": "水上乐园（滑梯与浪花）", "en": "water park, water slide, splashing"},
+    {"w": 4, "zh": "海边黄昏（橙色夕阳下的海面）", "en": "beach, sunset, orange sky, ocean"},
+    {"w": 3, "zh": "夏日室内泳池（玻璃穹顶洒光）", "en": "indoor pool, glass ceiling"},
+    {"w": 4, "zh": "度假酒店阳台远眺海面", "en": "resort balcony, ocean view"},
+    # 校园系（天台 / 走廊 / 图书馆 / 体育馆）
+    {"w": 4, "zh": "学校天台（围栏与蓝天）", "en": "school rooftop, fence, blue sky"},
+    {"w": 4, "zh": "放学后的走廊（夕阳斜照）", "en": "school hallway, sunset light"},
+    {"w": 3, "zh": "图书馆书架之间", "en": "library, bookshelves"},
+    {"w": 3, "zh": "室内体育馆", "en": "gymnasium, indoors"},
+    # 婚礼系（教堂 / 拱门 / 宴会）
+    {"w": 5, "zh": "教堂内（彩窗透光）", "en": "church interior, stained glass, light rays"},
+    {"w": 4, "zh": "白花拱门下的婚礼花园", "en": "wedding garden, white flower arch"},
+    {"w": 3, "zh": "宴会厅水晶吊灯下", "en": "banquet hall, chandelier"},
+    # 职场系（办公室 / 写字楼 / 天桥）
+    {"w": 5, "zh": "现代办公室（落地窗外是城市）", "en": "modern office, large window, city view"},
+    {"w": 3, "zh": "写字楼大堂（玻璃幕墙）", "en": "office lobby, glass wall"},
+    {"w": 3, "zh": "傍晚的城市天桥", "en": "city footbridge, dusk"},
+    # 和风系（祭典 / 温泉 / 枯山水）
+    {"w": 5, "zh": "夏日祭典夜晚（灯笼与摊位）", "en": "summer festival, lanterns, food stalls, night"},
+    {"w": 4, "zh": "温泉旅馆回廊", "en": "hot spring inn, wooden corridor"},
+    {"w": 3, "zh": "枯山水庭园", "en": "zen garden, rock garden, japanese garden"},
+    # 哥特系（古堡 / 烛光 / 墓园）
+    {"w": 4, "zh": "月光下的古堡阳台", "en": "moonlight, castle balcony, night"},
+    {"w": 4, "zh": "烛光照亮的暗室书房", "en": "candlelight, dark study room"},
+    {"w": 3, "zh": "迷雾笼罩的墓园小径", "en": "foggy graveyard, path, mist"},
+    # 居家系（客厅 / 卧室）
+    {"w": 4, "zh": "洒满阳光的客厅沙发", "en": "living room, sofa, sunlight through window"},
+    {"w": 3, "zh": "窗边沙发座（绿植与午后阳光）", "en": "window side sofa, plants, afternoon light"},
+    {"w": 3, "zh": "铺着地毯的卧室地板", "en": "bedroom, carpet, cozy"},
+    # 偶像系（舞台 / 直播间）
+    {"w": 6, "zh": "演唱会舞台（追光灯与荧光棒人海）", "en": "concert stage, spotlight, penlight crowd"},
+    {"w": 3, "zh": "电台直播间", "en": "radio studio, microphone"},
+    # 东方系（中式庭院 / 红灯笼）
+    {"w": 4, "zh": "中式庭院（红墙与月门）", "en": "chinese garden, red wall, moon gate"},
+    {"w": 3, "zh": "挂满红灯笼的夜市", "en": "red lanterns, night market"},
 ]
 
 POSES = [
@@ -120,6 +211,12 @@ POSES = [
     {"w": 4, "zh": "弯腰凑近镜头做搞怪鬼脸", "en": "bending forward, playful pose, funny face"},
     {"w": 3, "zh": "伸展双臂伸懒腰", "en": "stretching, arms up, full body"},
     {"w": 3, "zh": "背对镜头回眸", "en": "from behind, looking back at viewer, full body"},
+    # —— v0.14.0 扩充：日常小动作系（全局换新感）——
+    {"w": 4, "zh": "双手比出剪刀手", "en": "v sign, peace sign"},
+    {"w": 4, "zh": "单手叉腰自信站立", "en": "hand on hip, standing, confident"},
+    {"w": 4, "zh": "手里举着冰淇淋", "en": "holding ice cream cone"},
+    {"w": 3, "zh": "撑着伞回头", "en": "holding umbrella, looking back"},
+    {"w": 3, "zh": "坐在窗台上双腿悬空", "en": "sitting on windowsill, legs dangling"},
     # 立绘模板专用（tpl_ 主题用 pose_kw「标准站姿」精确命中）：character sheet 惯例
     # 是双臂自然下垂、正面直视，不摆性格姿势
     {"w": 0, "zh": "双臂自然下垂的标准站姿", "en": "standing, arms at sides, straight-on, full body"},
@@ -151,6 +248,12 @@ EXPRESSIONS = [
     {"w": 5, "zh": "开怀大笑", "en": "laughing, open mouth"},
     {"w": 4, "zh": "傲娇地嘟起嘴", "en": "pout"},
     {"w": 4, "zh": "困倦惺忪", "en": "sleepy"},
+    # —— v0.14.0 扩充 ——
+    {"w": 4, "zh": "星星眼兴奋表情", "en": "star-shaped eyes, excited"},
+    {"w": 4, "zh": "闭眼享受阳光", "en": "closed eyes, peaceful expression"},
+    {"w": 3, "zh": "惊讶地捂住嘴", "en": "surprised, covering mouth"},
+    {"w": 3, "zh": "微微歪头一脸疑惑", "en": "confused, tilting head"},
+    {"w": 3, "zh": "得意地挺起胸膛", "en": "proud, confident smile"},
 ]
 
 # body：大权重保持原样（体型变化对图生图一致性冲击最大），小概率触发用户要的
@@ -197,20 +300,35 @@ THEMES = (
     {"id": "tpl_4view", "label": "【模板】四视图（正/侧/背/¾ · 灰底）",
      "outfit_kw": [], "bg_kw": ["灰"], "pose_kw": ["标准站姿"],
      "expression_kw": ["微笑"], "compose_kw": ["四视图"]},
-    {"id": "swimsuit", "label": "泳装 · 夏日", "outfit_kw": ["泳装"], "bg_kw": ["海边"]},
+    # —— v0.14.0：主题子集全面扩充 + 关键词修正。教训：
+    #    ① swimsuit 原只用「泳装」一词，漏掉池里叫「泳衣」的款式；
+    #    ② office 原「西装」「马甲」两个宽泛词会把 JK 制服吸进职场子集；
+    #    ③ idol 原 outfit 子集只有 1 项（永远打歌服）。
+    #    关键词全部改成池条目命名自带的专属词（命中校验在 tests/test_prompt_gen.py）。
+    {"id": "swimsuit", "label": "泳装 · 夏日",
+     "outfit_kw": ["泳装", "泳衣", "比基尼", "纱笼"], "bg_kw": ["海边", "泳池", "水上", "度假"]},
     {"id": "campus", "label": "校园 · JK",
-     "outfit_kw": ["水手服", "西装夹克", "针织开衫", "背带", "马甲", "百褶裙", "运动外套"],
-     "bg_kw": ["教室", "樱花"]},
+     "outfit_kw": ["水手服", "西装夹克", "针织开衫", "背带", "马甲衬衫JK", "百褶裙",
+                   "运动外套", "校服", "体操服", "拉拉队"],
+     "bg_kw": ["教室", "樱花", "天台", "走廊", "图书馆", "体育馆"]},
     {"id": "wedding", "label": "婚纱 · 典礼",
-     "outfit_kw": ["婚纱", "礼服", "秀禾"], "bg_kw": ["纯白", "浅粉"]},
+     "outfit_kw": ["婚纱", "礼服", "秀禾", "白无垢"], "bg_kw": ["纯白", "浅粉", "教堂", "拱门", "宴会"]},
     {"id": "office", "label": "职场 · 通勤",
-     "outfit_kw": ["西装", "毛衣", "马甲"], "bg_kw": ["咖啡馆", "霓虹"]},
+     "outfit_kw": ["职业西装", "西装裤装", "通勤", "铅笔裙", "西裤", "毛衣", "航空制服"],
+     "bg_kw": ["咖啡馆", "霓虹", "办公室", "写字楼", "天桥"]},
     {"id": "kimono", "label": "和风 · 浴衣",
-     "outfit_kw": ["浴衣", "和服", "振袖"], "bg_kw": ["和室", "樱花"]},
-    {"id": "gothic", "label": "暗黑 · 哥特", "outfit_kw": ["哥特", "女巫"], "bg_kw": ["霓虹", "雨"]},
-    {"id": "home", "label": "居家 · 慵懒", "outfit_kw": ["睡衣", "毛衣"], "bg_kw": ["雨", "和室", "咖啡馆"]},
-    {"id": "idol", "label": "偶像 · 舞台", "outfit_kw": ["打歌服"], "bg_kw": ["圣诞", "霓虹", "星空"]},
-    {"id": "party", "label": "旗袍 · 东方", "outfit_kw": ["旗袍"], "bg_kw": ["和室", "樱花", "花园"]},
+     "outfit_kw": ["浴衣", "和服", "振袖", "访问着", "巫女"], "bg_kw": ["和室", "樱花", "祭典", "温泉", "枯山水"]},
+    {"id": "maid", "label": "女仆 · 咖啡厅",
+     "outfit_kw": ["女仆"], "bg_kw": ["咖啡馆", "咖啡店", "客厅", "沙发"]},
+    {"id": "gothic", "label": "暗黑 · 哥特",
+     "outfit_kw": ["哥特", "女巫", "吸血鬼", "魔法学院"], "bg_kw": ["霓虹", "雨", "古堡", "烛光", "墓园"]},
+    {"id": "home", "label": "居家 · 慵懒",
+     "outfit_kw": ["睡衣", "睡袍", "睡裙", "T恤", "卫衣", "家居服", "毛衣"],
+     "bg_kw": ["雨", "和室", "咖啡馆", "客厅", "卧室"]},
+    {"id": "idol", "label": "偶像 · 舞台",
+     "outfit_kw": ["打歌服", "舞台", "演出服"], "bg_kw": ["圣诞", "霓虹", "星空", "演唱会", "直播间"]},
+    {"id": "party", "label": "旗袍 · 东方",
+     "outfit_kw": ["旗袍"], "bg_kw": ["和室", "樱花", "绿意花园", "中式庭院", "红灯笼"]},
 )
 
 
@@ -233,10 +351,8 @@ def apply_theme(picks: dict, seed_int: int, theme: dict | None) -> dict:
     """
     if not theme:
         return picks
-    for dim, kw_key in (("outfit", "outfit_kw"), ("background", "bg_kw"),
-                        ("pose", "pose_kw"), ("compose", "compose_kw"),
-                        ("expression", "expression_kw")):
-        kws = [str(k).strip() for k in (theme.get(kw_key) or []) if str(k).strip()]
+    for dim in _THEME_KW_KEYS:
+        kws = _theme_kws(dim, theme)
         if not kws:
             continue
         subset = [it for it in DIMS[dim]
@@ -258,6 +374,64 @@ def _sub(seed_int: int, tag: str, modulus: int) -> int:
     raw = f"{int(seed_int)}|{tag}".encode("utf-8")
     digest = hashlib.sha256(raw).digest()
     return int.from_bytes(digest[:8], "big") % modulus
+
+
+# ---------- 维度抽签（v0.14.0 提取：全池 / 主题子集两条路径共用） ----------
+
+# 主题的维度关键词键名。⚠️ background 是历史沿革的 bg_kw，别写错。
+_THEME_KW_KEYS = {"outfit": "outfit_kw", "background": "bg_kw", "pose": "pose_kw",
+                  "compose": "compose_kw", "expression": "expression_kw"}
+
+
+def _theme_kws(dim: str, theme: dict | None) -> list:
+    """该主题对该维度配置的关键词列表（无约束主题/维度 → 空表）。"""
+    key = _THEME_KW_KEYS.get(dim)
+    if not key or not theme:
+        return []
+    return [str(k).strip() for k in (theme.get(key) or []) if str(k).strip()]
+
+
+def _pick_dim(dim: str, seed_int: int, theme: dict | None = None,
+              non_empty_only: bool = False) -> dict:
+    """单维度抽签：主题带该维度关键词 → 子集内摇（tag 混入主题 id，与
+    apply_theme 历史行为逐位一致）；否则全池摇。non_empty_only 用于「显式启用」
+    默认沉默的维度（compose/body）：子集内没有非空项时才回落全池。"""
+    items = DIMS[dim]
+    kws = _theme_kws(dim, theme)
+    if kws:
+        subset = [it for it in items
+                  if any(kw in str(it.get("zh") or "") for kw in kws)]
+        if subset:
+            return _weighted_pick(
+                subset, _sub(seed_int, f"{dim}@{theme.get('id')}", 2 ** 30))
+    if non_empty_only:
+        ne = [it for it in items if str(it.get("zh") or "").strip()]
+        if ne:
+            items = ne
+    return _weighted_pick(items, _sub(seed_int, dim, 2 ** 30))
+
+
+def _fixed_item(dim: str, zh: str) -> dict:
+    """锁定项：zh 精确匹配池内条目拿英文 tag；池外自定义短语用 zh 兜底 en。"""
+    zh = str(zh or "").strip()[:80]
+    if not zh:
+        return {"w": 0, "zh": "", "en": ""}
+    en = ""
+    for it in DIMS[dim]:
+        if str(it.get("zh") or "") == zh:
+            en = str(it.get("en") or "")
+            break
+    return {"w": 0, "zh": zh, "en": en or zh}
+
+
+def dim_pool_options() -> dict:
+    """预览面板维度下拉用：每个维度池的非空中文短语（按权重降序）。"""
+    out = {}
+    for dim, items in DIMS.items():
+        ne = [it for it in items if str(it.get("zh") or "").strip()]
+        ne.sort(key=lambda it: -int(it.get("w", 1)))
+        out[dim] = [str(it.get("zh") or "") for it in ne]
+    return out
 
 
 # 服装配色（v0.13.1）：款式池里不再写死颜色，颜色按种子单独抽，再拼到款名前。
@@ -291,22 +465,8 @@ def _weighted_pick(items: list, r: int) -> dict:
     return items[-1]
 
 
-def pick_variations(seed_int: int, theme: dict | None = None,
-                    outfit_override: str = "") -> dict:
-    """按种子从各维度池确定性挑选（纯函数，可测）。返回 {维度: 条目}。
-
-    theme 传入主题预设时，outfit / background 在主题子集内重摇。
-    outfit_override 非空 = 用户指定穿搭（预览面板「穿搭」输入框）：
-    整体覆盖 outfit 维度（zh/en 同文——任意自定义服装没有池内英文对照，
-    LLM 通道与文生图 caption 都能吃中文，danbooru tag 串为次优兜底）。
-    空串 = 不干预（主题子集重摇或全池随机）。
-    """
-    picks = {tag: _weighted_pick(items, _sub(seed_int, tag, 2 ** 30))
-             for tag, items in DIMS.items()}
-    picks = apply_theme(picks, seed_int, theme)
-    # v0.13.1：服装配色按种子独立抽（款式池已不含颜色），拼到款名前；
-    # 空项 = 保留款式本来配色。用户显式指定穿搭时不再叠颜色前缀。
-    color = _weighted_pick(OUTFIT_COLORS, _sub(seed_int, "outfit_color", 2 ** 30))
+def _apply_outfit_color(picks: dict, color: dict) -> None:
+    """把配色条目拼到款式前（zh 前缀 / en 前置 tag）；空配色或空款式不拼。"""
     base = picks.get("outfit") or {}
     if str(color.get("zh") or "") and str(base.get("zh") or ""):
         picks["outfit"] = {
@@ -314,10 +474,87 @@ def pick_variations(seed_int: int, theme: dict | None = None,
             "zh": f"{color['zh']}{base['zh']}",
             "en": f"{color['en']}, {base['en']}",
         }
+
+
+def pick_variations(seed_int: int, theme: dict | None = None,
+                    outfit_override: str = "") -> dict:
+    """按种子从各维度池确定性挑选（纯函数，可测）。返回 {维度: 条目}。
+
+    theme 传入主题预设时，约束维度在主题子集内重摇（_pick_dim 与历史
+    「先全池再 apply_theme 重摇」逐位等价）。
+    outfit_override 非空 = 用户指定穿搭（预览面板「穿搭」输入框）：
+    整体覆盖 outfit 维度（zh/en 同文——任意自定义服装没有池内英文对照，
+    LLM 通道与文生图 caption 都能吃中文，danbooru tag 串为次优兜底）。
+    空串 = 不干预（主题子集重摇或全池随机）。
+    """
+    picks = {tag: _pick_dim(tag, seed_int, theme) for tag in DIMS}
+    # plain_dims：列出的维度直接置空（机制保留，当前无主题使用）
+    for dim in ((theme or {}).get("plain_dims") or []):
+        if str(dim) in DIMS:
+            picks[str(dim)] = {"w": 0, "zh": "", "en": ""}
+    # v0.13.1：服装配色按种子独立抽（款式池已不含颜色），拼到款名前；
+    # 空项 = 保留款式本来配色。用户显式指定穿搭时不再叠颜色前缀。
+    color = _weighted_pick(OUTFIT_COLORS, _sub(seed_int, "outfit_color", 2 ** 30))
+    _apply_outfit_color(picks, color)
     text = str(outfit_override or "").strip().strip("。，,")[:80]
     if text:
         picks["outfit"] = {"w": 0, "zh": text, "en": text}
     return picks
+
+
+def apply_dim_state(picks: dict, seed_int: int, dim_state: dict | None,
+                    theme: dict | None = None) -> dict:
+    """预览面板的维度级控制（v0.14.0）：单独重摇 / 锁定 / 删除 / 启用，纯函数。
+
+    dim_state 字段（全部可选，未知维度与字段忽略）：
+    - attempts: {dim: n}  n>0 的维度用 seed_int + n*7919 重摇（主题子集内；
+                          outfit 重摇时配色同种子重抽，避免「换款式不换色」）
+    - enabled: [dim]      显式启用默认沉默的维度（compose/body）：若当前为空项，
+                          从该维度非空项里重挑（主题子集内）
+    - fixed: {dim: zh}    锁定为指定中文短语（en 从池内按 zh 反查，查不到用 zh
+                          兜底；不叠配色前缀——显式选定值所见即所得）
+    - disabled: [dim]     本轮不提及该维度（置空，提示词链路自动跳过）
+    优先级（后覆盖前）：attempts < enabled < fixed < disabled——用户显式操作
+    都优先于种子随机。调用方须在 force_single_view 之后调用：面板显式启用的
+    compose 应能覆盖图生图的强制单图（用户意图优先，v0.13.3 只拦「随机命中」）。
+    """
+    st = dim_state if isinstance(dim_state, dict) else {}
+    out = dict(picks)
+    fixed = st.get("fixed") if isinstance(st.get("fixed"), dict) else {}
+    attempts = st.get("attempts") if isinstance(st.get("attempts"), dict) else {}
+    enabled = st.get("enabled") if isinstance(st.get("enabled"), list) else []
+    disabled = st.get("disabled") if isinstance(st.get("disabled"), list) else []
+    for dim, n in attempts.items():
+        dim = str(dim)
+        if dim not in DIMS or dim in fixed:
+            continue
+        try:
+            n = int(n)
+        except (TypeError, ValueError):
+            continue
+        if n <= 0:
+            continue
+        sub_seed = (seed_int + n * 7919) % (2 ** 31)
+        out[dim] = _pick_dim(dim, sub_seed, theme)
+        if dim == "outfit":
+            color = _weighted_pick(
+                OUTFIT_COLORS, _sub(sub_seed, "outfit_color", 2 ** 30))
+            _apply_outfit_color(out, color)
+    for dim in enabled:
+        dim = str(dim)
+        if dim not in DIMS or dim in fixed:
+            continue
+        if not str((out.get(dim) or {}).get("zh") or "").strip():
+            out[dim] = _pick_dim(dim, seed_int, theme, non_empty_only=True)
+    for dim, zh in fixed.items():
+        dim = str(dim)
+        if dim in DIMS:
+            out[dim] = _fixed_item(dim, zh)
+    for dim in disabled:
+        dim = str(dim)
+        if dim in DIMS:
+            out[dim] = {"w": 0, "zh": "", "en": ""}
+    return out
 
 
 def _compose_is_multi(picks: dict) -> bool:
@@ -340,12 +577,15 @@ def force_single_view(picks: dict) -> dict:
     return out
 
 
+# 维度展示顺序（预览面板 chip 与变化短语列表共用；v0.14.0 提取为常量单一来源）
+DIM_ORDER = (("构图视图", "compose"), ("服装", "outfit"), ("背景与光照", "background"),
+             ("姿势动作", "pose"), ("表情", "expression"), ("体型", "body"))
+
+
 def variation_zh_list(picks: dict) -> list:
     """本轮要改的中文维度短语（跳过「保持不变」的空项），LLM 元提示用。"""
-    order = [("构图视图", "compose"), ("服装", "outfit"), ("背景与光照", "background"),
-             ("姿势动作", "pose"), ("表情", "expression"), ("体型", "body")]
     out = []
-    for label, tag in order:
+    for label, tag in DIM_ORDER:
         zh = str((picks.get(tag) or {}).get("zh") or "").strip()
         if zh:
             out.append((label, zh))
@@ -643,7 +883,8 @@ def _t2i_local_of(style: str, entry: dict, picks: dict, custom: str = "") -> tup
 
 async def build_generation_prompt(context, cfg: dict, entry: dict,
                                   seed_int: int, theme_id: str = "",
-                                  custom: str = "", outfit: str = "") -> tuple:
+                                  custom: str = "", outfit: str = "",
+                                  dim_state: dict | None = None) -> tuple:
     """产出生图提示词。返回 (prompt, source)；source ∈ llm / local / static。
 
     绝不抛异常——LLM 链路任何失败都回落本地模板（提示词不是阻塞出卡的理由）。
@@ -653,6 +894,8 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
     theme_id：主题预设（试画台预览用；random/空 = 纯种子随机）。
     custom：用户自填的附加要求（融入指令/描述）。
     outfit：用户指定穿搭（预览面板「穿搭」框，空 = 按种子/主题随机）。
+    dim_state：预览面板维度级控制（v0.14.0，见 apply_dim_state；抽卡主链路
+    不传 = 纯种子决定论不变）。
     """
     theme = get_theme(theme_id)
     try:
@@ -661,6 +904,7 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
             if not bool(cfg.get("variations_enabled", True)):
                 return build_prompt_tags(entry), "static"
             picks = pick_variations(seed_int, theme, outfit)
+            picks = apply_dim_state(picks, seed_int, dim_state, theme)
             style = detect_t2i_style(context, cfg.get("draw_workflow", ""))
             if not bool(cfg.get("prompt_llm_enabled", True)) or style == "danbooru":
                 return _t2i_local_of(style, entry, picks, custom)
@@ -698,6 +942,9 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
         # 别让 COMPOSE 池随机命中三/四视图混进编辑指令（见 force_single_view）
         if not (theme and theme.get("compose_kw")):
             picks = force_single_view(picks)
+        # v0.14.0：维度级控制在强制单图之后——面板显式启用/锁定的 compose
+        # 是用户意图，应能覆盖「随机命中被拦」的默认行为
+        picks = apply_dim_state(picks, seed_int, dim_state, theme)
         if not bool(cfg.get("prompt_llm_enabled", True)):
             return build_local_instruction(entry, picks, custom), "local"
         provider = await _resolve_provider(context, cfg.get("prompt_llm_provider", ""))
@@ -731,6 +978,7 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
                 picks = pick_variations(seed_int, theme, outfit)
                 if not (theme and theme.get("compose_kw")):
                     picks = force_single_view(picks)
+                picks = apply_dim_state(picks, seed_int, dim_state, theme)
                 return (build_local_instruction(entry, picks, custom), "local")
             return build_prompt_tags(entry), "static"
         except Exception:

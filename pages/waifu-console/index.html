@@ -32,6 +32,20 @@
     max-height: 320px; object-fit: cover; object-position: 50% 12%; display: block; }
   .gal-meta { font-size: 11px; opacity: .65; padding: 4px 8px; }
   .bind-tip { font-size: 12px; opacity: .62; margin-top: 8px; }
+  /* v0.14.0：生成立绘弹窗的维度 chip（点值下拉=单独随机/选定值锁定，×=移除） */
+  .dim-chip-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .dim-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+    font-size: 12px; line-height: 1.6; padding: 2px 9px; border-radius: 999px;
+    background: rgba(150,90,130,.09); border: 1px solid rgba(150,90,130,.20); }
+  .dim-chip-label { opacity: .55; flex: none; }
+  .dim-chip-val { cursor: pointer; min-width: 0; word-break: break-all; }
+  .dim-chip-val:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .dim-chip-static { cursor: default; }
+  .dim-chip-static:hover { text-decoration: none; }
+  .dim-chip-pin { font-size: 10px; flex: none; }
+  .dim-chip-x { cursor: pointer; opacity: .4; flex: none; font-size: 14px; line-height: 1;
+    padding: 0 2px; }
+  .dim-chip-x:hover { opacity: 1; color: #d63384; }
   .work-card { cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; }
   .work-card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(150,90,130,.14); }
   /* v0.6.2：作品卡悬停「进入详情」指示（卡片可点但此前没有任何视觉提示） */
@@ -1788,7 +1802,7 @@
           <span class="bind-tip" style="margin-top: 0;">主题</span>
           <n-select v-model:value="galTheme" :options="themeOpts" size="small"
                     style="width: 160px;"
-                    @update:value="galAttempt = 0; genPromptPreview()"></n-select>
+                    @update:value="galAttempt = 0; resetGalDimCtl(); genPromptPreview()"></n-select>
           <n-input v-model:value="galOutfit" size="small" clearable
                    placeholder="穿搭（可选，留空 = 随机）"
                    style="width: 200px;"
@@ -1797,14 +1811,36 @@
                    placeholder="自定义附加要求（可选，如：红色蝴蝶结）"
                    style="width: 280px;"></n-input>
           <n-button size="small" :loading="galPromptLoading"
-                    @click="galAttempt = 0; genPromptPreview()">重新生成</n-button>
+                    @click="galAttempt = 0; resetGalDimCtl(); genPromptPreview()">重新生成</n-button>
           <n-button size="small" :disabled="galPromptLoading"
                     @click="galAttempt++; genPromptPreview()">换一版</n-button>
         </div>
-        <div v-if="galDims.length > 0">
-          <n-tag v-for="d in galDims" :key="d.label" size="small" :bordered="false"
-                 style="margin: 0 6px 6px 0;">{{ d.label }}：{{ d.zh }}</n-tag>
+        <!-- v0.14.0：维度 chip 可交互——点值弹下拉（🎲 单独随机一项 / 从池里
+             选定值并 📌 锁定）、× 移除该维度（本轮提示词不提及）、
+             「＋ 添加维度」把构图视图 / 体型或刚移除的维度加回来 -->
+        <div class="dim-chip-row" v-if="galDimsVisible.length > 0">
+          <div v-for="d in galDimsVisible" :key="d.dim" class="dim-chip">
+            <span class="dim-chip-label">{{ d.label }}</span>
+            <n-popselect v-if="d.dim !== 'outfit' || !galOutfit"
+                         :value="d.fixed ? d.zh : null"
+                         :options="galDimOpts(d.dim)" size="small" trigger="click"
+                         @update:value="v => onDimPick(d.dim, v)">
+              <span class="dim-chip-val"
+                    :title="d.fixed ? '已锁定（下拉可改选或转随机）' : '点击：单独随机一项，或从池里选定值锁定'">{{ d.zh }}</span>
+            </n-popselect>
+            <span v-else class="dim-chip-val dim-chip-static"
+                  title="已由上方「穿搭」输入框指定，本维度按输入框内容出图">{{ d.zh }}</span>
+            <span v-if="d.fixed" class="dim-chip-pin" title="已锁定">📌</span>
+            <span v-if="d.dim !== 'outfit' || !galOutfit" class="dim-chip-x"
+                  title="移除：本轮提示词不提及该维度（可随时在「＋ 添加维度」里加回）"
+                  @click="removeGalDim(d.dim)">×</span>
+          </div>
+          <n-dropdown v-if="galHiddenDims.length > 0" trigger="click"
+                      :options="galHiddenDims" @select="addGalDim">
+            <n-button size="tiny" quaternary type="primary">＋ 添加维度</n-button>
+          </n-dropdown>
         </div>
+        <div v-else class="bind-tip" style="margin-top: 0;">本轮各维度保持不变；点「＋ 添加维度」可加入构图视图 / 体型等维度</div>
         <n-input v-model:value="galPrompt" type="textarea" :rows="7"
                  placeholder="提示词（可直接修改，生成时按这里的内容出图）"></n-input>
         <div class="bind-tip">
@@ -3625,10 +3661,94 @@
       var galAttempt = Vue.ref(0);
       var galPrompt = Vue.ref("");
       var galPromptSource = Vue.ref("");
+      // v0.14.0：dims 从 dim_control 取全量六维 [{dim,label,zh,fixed,off}]
+      //（zh 空 = 本轮不提及/未启用，chip 不展示、进「＋ 添加维度」菜单）
       var galDims = Vue.ref([]);
       var galPromptLoading = Vue.ref(false);
       var galPromptOpen = Vue.ref(false);
       var galPromptConfirmed = Vue.ref(false);
+      // v0.14.0 维度级控制：单独重摇(attempts) / 锁定(fixed) / 移除(disabled) /
+      // 启用(enabled)，随 preview 请求发往 prompt_gen.apply_dim_state
+      var galDimAttempts = Vue.ref({});
+      var galDimFixed = Vue.ref({});
+      var galDimDisabled = Vue.ref([]);
+      var galDimEnabled = Vue.ref([]);
+      var galPools = Vue.ref(null);    // dim → [zh...]，弹窗首开拉一次
+      var galDimsVisible = Vue.computed(function () {
+        return (galDims.value || []).filter(function (d) { return d && d.zh; });
+      });
+      var galHiddenDims = Vue.computed(function () {
+        return (galDims.value || [])
+          .filter(function (d) { return d && !d.zh; })
+          .map(function (d) { return { label: "＋ " + d.label, key: d.dim }; });
+      });
+      function galDimOpts(dim) {
+        // 下拉首项 = 单独随机；其余为该维度池的非空短语（按权重降序）
+        var opts = [{ label: "🎲 单独随机一项", value: "__reroll__" }];
+        var pool = (galPools.value && galPools.value[dim]) || [];
+        pool.forEach(function (zh) { opts.push({ label: zh, value: zh }); });
+        return opts;
+      }
+      function galDimStatePayload() {
+        return {
+          attempts: Object.assign({}, galDimAttempts.value),
+          fixed: Object.assign({}, galDimFixed.value),
+          disabled: galDimDisabled.value.slice(),
+          enabled: galDimEnabled.value.slice()
+        };
+      }
+      function resetGalDimCtl() {
+        galDimAttempts.value = {};
+        galDimFixed.value = {};
+        galDimDisabled.value = [];
+        galDimEnabled.value = [];
+      }
+      function onDimPick(dim, v) {
+        if (!dim || !v) return;
+        if (v === "__reroll__") {
+          var f = Object.assign({}, galDimFixed.value); delete f[dim];
+          galDimFixed.value = f;
+          var a = Object.assign({}, galDimAttempts.value);
+          a[dim] = (Number(a[dim]) || 0) + 1;
+          galDimAttempts.value = a;
+        } else {
+          var f2 = Object.assign({}, galDimFixed.value);
+          f2[dim] = String(v);
+          galDimFixed.value = f2;
+          var a2 = Object.assign({}, galDimAttempts.value); delete a2[dim];
+          galDimAttempts.value = a2;
+        }
+        genPromptPreview();
+      }
+      function removeGalDim(dim) {
+        if (!dim) return;
+        if (galDimFixed.value[dim]) {
+          var f = Object.assign({}, galDimFixed.value); delete f[dim];
+          galDimFixed.value = f;
+        }
+        if (galDimAttempts.value[dim]) {
+          var a = Object.assign({}, galDimAttempts.value); delete a[dim];
+          galDimAttempts.value = a;
+        }
+        if (galDimDisabled.value.indexOf(dim) < 0) {
+          galDimDisabled.value = galDimDisabled.value.concat([dim]);
+        }
+        genPromptPreview();
+      }
+      function addGalDim(dim) {
+        if (!dim) return;
+        galDimDisabled.value = galDimDisabled.value.filter(function (d) { return d !== dim; });
+        if (galDimEnabled.value.indexOf(dim) < 0) {
+          galDimEnabled.value = galDimEnabled.value.concat([dim]);
+        }
+        genPromptPreview();
+      }
+      async function loadGalPools() {
+        try {
+          var res = await apiGet("prompt/pools");
+          galPools.value = (res && res.pools) || {};
+        } catch (e) { galPools.value = null; /* 下次打开重试；下拉仍有随机项 */ }
+      }
       function galPreviewOverride() {
         // 预览用 override：ref 不参与提示词生成（文本层面只看画法/工作流/强度）
         if (galMode.value !== "img2img") return null;
@@ -3646,9 +3766,11 @@
           var res = await apiPost("prompt/preview", {
             id: galCharId.value, theme: galTheme.value, outfit: galOutfit.value,
             custom: galCustom.value,
-            attempt: galAttempt.value, override: galPreviewOverride()
+            attempt: galAttempt.value, override: galPreviewOverride(),
+            dim_state: galDimStatePayload()
           });
-          galDims.value = (res && res.dims) || [];
+          var dc = (res && res.dim_control) || null;
+          galDims.value = dc ? (dc.dims || []) : ((res && res.dims) || []);
           galPrompt.value = (res && res.prompt) || "";
           galPromptSource.value = (res && res.source) || "";
         } catch (e) { /* 已提示；prompt 留空禁止确认 */ } finally {
@@ -3658,6 +3780,8 @@
       function openPromptModal() {
         if (!galCharId.value) return;
         galPromptOpen.value = true;
+        resetGalDimCtl();
+        if (!galPools.value) { loadGalPools(); }
         if (!String(galPrompt.value || "").trim()) { genPromptPreview(); }  // 首开自动出一版
       }
       function generateFromModal() {
@@ -4936,6 +5060,11 @@
         galPromptOpen: galPromptOpen, galPromptConfirmed: galPromptConfirmed,
         openPromptModal: openPromptModal, generateFromModal: generateFromModal,
         genPromptPreview: genPromptPreview,
+        // v0.14.0：维度 chip 交互（重摇/锁定/移除/添加）
+        galDimsVisible: galDimsVisible, galHiddenDims: galHiddenDims,
+        galDimOpts: galDimOpts, onDimPick: onDimPick,
+        removeGalDim: removeGalDim, addGalDim: addGalDim,
+        resetGalDimCtl: resetGalDimCtl, loadGalPools: loadGalPools,
         bindText: bindText, parsedBind: parsedBind, bindSaving: bindSaving,
         bindRows: bindRows, bindPackOpts: bindPackOpts, bindRawOpen: bindRawOpen,
         bindLoading: bindLoading, loadBindPools: loadBindPools, onBindRawInput: onBindRawInput,

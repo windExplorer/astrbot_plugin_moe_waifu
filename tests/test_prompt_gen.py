@@ -124,12 +124,128 @@ check("主题关键词全部命中池", True)
 
 p_rand = prompt_gen.pick_variations(12345)
 p_th = prompt_gen.pick_variations(12345, sw)
-check("主题后服装在泳装子集", "泳装" in p_th["outfit"]["zh"])
-check("主题后背景在海边子集", "海边" in p_th["background"]["zh"])
+# v0.14.0 泳装子集含比基尼系（zh 不含「泳装」二字），判定改为子集成员匹配——
+# 服装可能带颜色前缀（v0.13.1 独立配色），只要款式部分落在主题子集即可
+
+
+def _in_subset(zh: str, kws: list, dim: str) -> bool:
+    return any(z and z in str(zh or "")
+               for z in (str(it.get("zh") or "") for it in prompt_gen.DIMS[dim])
+               if any(kw in z for kw in kws))
+
+
+check("主题后服装在泳装子集", _in_subset(p_th["outfit"]["zh"], sw["outfit_kw"], "outfit"))
+check("主题后背景在海边子集", _in_subset(p_th["background"]["zh"], sw["bg_kw"], "background"))
 check("主题不影响其它维度", p_th["pose"] == p_rand["pose"]
       and p_th["compose"] == p_rand["compose"])
 check("主题决定论", prompt_gen.pick_variations(12345, sw) == p_th)
-check("随机模式与主题版不同（子集过滤生效）", p_th["outfit"] != p_rand["outfit"])
+# 随机模式与主题版不同：单种子可能撞同一项，多种子扫描至少出现差异（子集过滤生效）
+_diff = any(prompt_gen.pick_variations(s)["outfit"] != prompt_gen.pick_variations(s, sw)["outfit"]
+            for s in range(50))
+check("随机模式与主题版不同（子集过滤生效）", _diff)
+
+# ---------- v0.14.0 主题子集多样性（用户反馈「泳装永远连体泳衣」的回归守卫） ----------
+# 泳装子集 >= 8 款且比基尼至少 3 款；背景 >= 4 项
+_sw_outfits = [it for it in prompt_gen.OUTFITS
+               if any(kw in str(it.get("zh") or "") for kw in sw["outfit_kw"])]
+_sw_bikini = [it for it in _sw_outfits if "比基尼" in str(it.get("zh") or "")]
+check("泳装主题款式池 >= 8", len(_sw_outfits) >= 8)
+check("泳装主题比基尼 >= 3 款", len(_sw_bikini) >= 3)
+_sw_bgs = [it for it in prompt_gen.BACKGROUNDS
+           if any(kw in str(it.get("zh") or "") for kw in sw["bg_kw"])]
+check("泳装主题背景池 >= 4 项", len(_sw_bgs) >= 4)
+# 每个内容主题的 outfit 子集 >= 5 款、background 子集 >= 4 项（模板主题不设服装约束）
+for t in prompt_gen.THEMES:
+    if t["id"] == "random" or str(t["id"]).startswith("tpl_"):
+        continue
+    n_outfit = len([it for it in prompt_gen.OUTFITS
+                    if any(kw in str(it.get("zh") or "") for kw in (t.get("outfit_kw") or []))])
+    n_bg = len([it for it in prompt_gen.BACKGROUNDS
+                if any(kw in str(it.get("zh") or "") for kw in (t.get("bg_kw") or []))])
+    if n_outfit:
+        check(f"主题 {t['id']} 服装子集 >= 5 款", n_outfit >= 5)
+        check(f"主题 {t['id']} 背景子集 >= 4 项", n_bg >= 4)
+check("所有内容主题子集达标", True)
+# 职场子集不得混入 JK 制服（v0.14.0 修「西装/马甲」关键词泄漏）
+office = prompt_gen.get_theme("office")
+_of_outfits = [it for it in prompt_gen.OUTFITS
+               if any(kw in str(it.get("zh") or "") for kw in office["outfit_kw"])]
+check("职场子集无 JK 泄漏", not any("JK" in str(it.get("zh") or "") for it in _of_outfits))
+# 泳装主题换一版分布：200 种子里款式 >= 5 种（原来 3 款二选一）
+_sw_zh = set()
+for s in range(200):
+    _o = prompt_gen.pick_variations(s, sw)["outfit"]["zh"]
+    for it in _sw_outfits:
+        if str(it.get("zh") or "") and str(it.get("zh")) in _o:
+            _sw_zh.add(str(it.get("zh")))
+            break
+check("泳装主题 200 种子款式 >= 5 种", len(_sw_zh) >= 5)
+
+# ---------- apply_dim_state：维度级重摇 / 锁定 / 删除 / 启用（v0.14.0） ----------
+base = prompt_gen.pick_variations(42, sw)
+# 锁定：fixed 覆盖主题子集结果，en 从池内反查
+fx = prompt_gen.apply_dim_state(base, 42, {"fixed": {"outfit": "分体比基尼"}}, sw)
+check("维度锁定生效", fx["outfit"]["zh"] == "分体比基尼" and fx["outfit"]["en"] == "bikini")
+check("维度锁定不影响其它维度", fx["pose"] == base["pose"] and fx["background"] == base["background"])
+check("维度锁定决定论", prompt_gen.apply_dim_state(
+    base, 42, {"fixed": {"outfit": "分体比基尼"}}, sw) == fx)
+# 锁定后 outfit 不带颜色前缀（所见即所得）
+check("锁定款不叠配色", prompt_gen.apply_dim_state(
+    base, 42, {"fixed": {"outfit": "旗袍"}}, None)["outfit"]["zh"] == "旗袍")
+# 池外短语：en 兜底为 zh
+fx2 = prompt_gen.apply_dim_state(base, 42, {"fixed": {"pose": "倒立旋转"}}, None)
+check("池外锁定 en 兜底 zh", fx2["pose"]["zh"] == "倒立旋转" and fx2["pose"]["en"] == "倒立旋转")
+# 单独重摇：attempts 改变该维度，其它维度不动；多次 attempt 会出不同结果
+rer = prompt_gen.apply_dim_state(base, 42, {"attempts": {"pose": 1}}, sw)
+check("单独重摇该维度可变", True)  # 占位，实际断言在下一行组合
+_rer_diff = any(prompt_gen.apply_dim_state(base, 42, {"attempts": {"pose": n}}, sw)["pose"]
+                != base["pose"] for n in range(1, 30))
+check("单独重摇 30 次内出现过差异", _rer_diff)
+_others_same = all(prompt_gen.apply_dim_state(base, 42, {"attempts": {"pose": n}}, sw)["background"]
+                   == base["background"] for n in range(1, 30))
+check("单独重摇不动其它维度", _others_same)
+check("attempt=0 不干预", prompt_gen.apply_dim_state(
+    base, 42, {"attempts": {"pose": 0}}, sw) == base)
+# outfit 重摇时配色同种子重抽（款变色调也变，不会永远同一前缀）
+_colors = set()
+for n in range(1, 60):
+    _o = prompt_gen.apply_dim_state(base, 42, {"attempts": {"outfit": n}}, sw)["outfit"]["zh"]
+    for it in prompt_gen.OUTFIT_COLORS:
+        c = str(it.get("zh") or "")
+        if c and _o.startswith(c):
+            _colors.add(c)
+            break
+check("outfit 重摇配色随之变化（出现过 >= 3 色）", len(_colors) >= 3)
+# 删除维度：disabled 置空，提示词链路自动跳过
+dis = prompt_gen.apply_dim_state(base, 42, {"disabled": ["pose", "expression"]}, sw)
+check("删除维度置空", dis["pose"]["zh"] == "" and dis["expression"]["zh"] == "")
+check("删除维度后短语列表跳过", all(t != "姿势动作" for t, _ in prompt_gen.variation_zh_list(dis)))
+# 启用默认沉默维度：body/compose 从非空项里挑
+en = prompt_gen.apply_dim_state(base, 42, {"enabled": ["body"]}, sw)
+check("启用维度保证非空", en["body"]["zh"] != "")
+# 优先级：disabled > fixed > attempts
+pri = prompt_gen.apply_dim_state(
+    base, 42, {"fixed": {"pose": "双手比出剪刀手"}, "attempts": {"pose": 1}}, sw)
+check("fixed 优先于 attempts", pri["pose"]["zh"] == "双手比出剪刀手")
+pri2 = prompt_gen.apply_dim_state(
+    base, 42, {"fixed": {"pose": "双手比出剪刀手"}, "disabled": ["pose"]}, sw)
+check("disabled 优先于 fixed", pri2["pose"]["zh"] == "")
+# 非法输入不抛异常
+check("非法 dim_state 安全", prompt_gen.apply_dim_state(
+    base, 42, {"attempts": {"pose": "abc"}, "fixed": {"nope": "x"}}, sw) is not None)
+# 显式启用 compose 可覆盖图生图强制单图（用户意图优先）
+_comp = prompt_gen.apply_dim_state(
+    prompt_gen.force_single_view(base), 42, {"enabled": ["compose"]}, None)
+check("显式启用 compose 覆盖强制单图", _comp["compose"]["zh"] != "")
+
+# ---------- dim_pool_options：维度下拉选项（v0.14.0） ----------
+pools = prompt_gen.dim_pool_options()
+check("下拉池覆盖六维", set(pools.keys()) == set(prompt_gen.DIMS.keys()))
+check("服装下拉无空项且降序", "" not in pools["outfit"]
+      and len(pools["outfit"]) >= 50
+      and int(next(it["w"] for it in prompt_gen.OUTFITS
+                   if it["zh"] == pools["outfit"][0])) >= int(next(it["w"] for it in prompt_gen.OUTFITS
+                                                                  if it["zh"] == pools["outfit"][-1])))
 
 # ---------- 立绘模板主题 + 全身姿势池（v0.7.0；v0.7.4 起模板恢复随机穿搭） ----------
 tpl3 = prompt_gen.get_theme("tpl_3view")

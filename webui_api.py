@@ -1344,7 +1344,11 @@ async def h_prompt_preview(plugin) -> dict:
     """生成提示词预览（不绘图）：返回维度标签 + 最终提示词文本。
 
     attempt 用于「换一版」：混进种子做预览层扰动（不影响抽卡主链路的决定论）。
+    dim_state（v0.14.0）：维度级控制 {attempts, fixed, disabled, enabled}——
+    面板每个维度 chip 可单独重摇/锁定/移除/启用，见 prompt_gen.apply_dim_state。
     用户确认后的提示词文本经 jobs/start 的 prompt 字段直通出图。
+    响应 dims 字段保持旧形状（非空维度 [{label, zh}]，试画台只读展示用），
+    全量维度状态另放 dim_control（生成立绘弹窗的可交互 chip 用）。
     """
     body = await _body()
     cid = str(body.get("id") or "").strip()
@@ -1363,6 +1367,21 @@ async def h_prompt_preview(plugin) -> dict:
         attempt = max(0, int(body.get("attempt") or 0))
     except (TypeError, ValueError):
         attempt = 0
+    dim_state = body.get("dim_state") if isinstance(body.get("dim_state"), dict) else {}
+    # 穿搭输入框非空时 outfit 由 override 接管（pick_variations 末段覆盖），
+    # 维度级重摇/锁定对 outfit 不生效——避免「面板锁了款、输入框又盖掉」的歧义
+    if outfit:
+        dim_state = dict(dim_state)
+        fixed = dict(dim_state.get("fixed") or {})
+        fixed.pop("outfit", None)
+        attempts = dict(dim_state.get("attempts") or {})
+        attempts.pop("outfit", None)
+        dim_state["fixed"] = fixed
+        dim_state["attempts"] = attempts
+        dim_state["disabled"] = [d for d in (dim_state.get("disabled") or [])
+                                 if d != "outfit"]
+        dim_state["enabled"] = [d for d in (dim_state.get("enabled") or [])
+                                if d != "outfit"]
     date = plugin._today()
     salt = str(plugin._cfg("salt", "moe-waifu"))
     seq = plugin._store.count_portraits(cid) if plugin._store else 0
@@ -1371,18 +1390,44 @@ async def h_prompt_preview(plugin) -> dict:
         seed_int = (seed_int + attempt * 7919) % (2 ** 31)
     cfg = plugin._draw_cfg()
     prompt_text, source = await prompt_gen.build_generation_prompt(
-        plugin.context, cfg, entry, seed_int, theme_id, custom, outfit
+        plugin.context, cfg, entry, seed_int, theme_id, custom, outfit, dim_state
     )
-    picks = prompt_gen.pick_variations(seed_int, prompt_gen.get_theme(theme_id),
-                                       outfit)
+    # dims 展示与提示词文本必须同源同序：镜像 build_generation_prompt 内部的
+    # picks 计算链（全池→主题子集→图生图强制单图→维度级控制），两处改动要同步
+    theme = prompt_gen.get_theme(theme_id)
+    picks = prompt_gen.pick_variations(seed_int, theme, outfit)
+    if str(entry.get("strategy_type") or "base") == "img2img" \
+            and not (theme and theme.get("compose_kw")):
+        picks = prompt_gen.force_single_view(picks)
+    picks = prompt_gen.apply_dim_state(picks, seed_int, dim_state, theme)
     dims = [{"label": label, "zh": zh}
             for label, zh in prompt_gen.variation_zh_list(picks)]
     body_zh = str((picks.get("body") or {}).get("zh") or "").strip()
     style = ""
     if str(entry.get("strategy_type") or "base") != "img2img":
         style = prompt_gen.detect_t2i_style(plugin.context, cfg.get("draw_workflow", ""))
+    # v0.14.0：全量维度状态（生成立绘弹窗 chip 渲染 + 增删维度菜单用）
+    fixed_map = dim_state.get("fixed") if isinstance(dim_state.get("fixed"), dict) else {}
+    disabled = set(dim_state.get("disabled") or [])
+    dim_control = {
+        "dims": [{"dim": tag, "label": label,
+                  "zh": str((picks.get(tag) or {}).get("zh") or "").strip(),
+                  "fixed": tag in fixed_map, "off": tag in disabled}
+                 for label, tag in prompt_gen.DIM_ORDER],
+        "seed": seed_int, "attempt": attempt,
+    }
     return ok({"prompt": prompt_text, "source": source, "style": style,
-               "dims": dims, "body": body_zh, "seed": seed_int, "attempt": attempt})
+               "dims": dims, "body": body_zh, "seed": seed_int, "attempt": attempt,
+               "dim_control": dim_control})
+
+
+async def h_prompt_pools(plugin) -> dict:
+    """维度池下拉选项（v0.14.0）：每个维度池的非空中文短语，按权重降序。
+
+    生成立绘弹窗打开时拉一次即可（池是静态数据），供「点击 chip 选定值 /
+    单独随机」用；不含配色（配色跟随种子随机，锁定款式时不叠色）。
+    """
+    return ok({"pools": prompt_gen.dim_pool_options()})
 
 
 async def h_workflows(plugin) -> dict:
@@ -2348,6 +2393,7 @@ def register(plugin) -> None:
         ("/llm_providers", h_llm_providers, ["GET"]),
         ("/themes", h_themes, ["GET"]),
         ("/prompt/preview", h_prompt_preview, ["POST"]),
+        ("/prompt/pools", h_prompt_pools, ["GET"]),
         ("/pools/save_entry", h_save_entry, ["POST"]),
         ("/pools/delete_entry", h_delete_entry, ["POST"]),
         ("/pools/set_pack", h_set_pack, ["POST"]),
