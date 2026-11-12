@@ -183,15 +183,56 @@ def _base_kwargs(cfg: dict, prompt: str, seed_int: int,
     return kwargs
 
 
+def _ref_path(raw, data_dir=None) -> str:
+    """把一条参考图引用解析成可直接交给萌绘的绝对路径 / URL，失效返回空串。
+
+    工坊里 refs 混着三种形态：绝对路径（上传）、相对 data 目录的
+    `refs/xxx.png`（立绘→参考图、绑定）、URL。旧代码用 `Path(ref).exists()`
+    按**进程 CWD** 判断，相对路径在 AstrBot 里永远找不到；而规划器又只查
+    「字符串非空」，于是「没绑图生图源」的签被规划成图生图、发了图生图
+    台词，最后在 generate_portrait 里找不到参考图。这里统一口径。
+    """
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    if re.match(r"^[a-zA-Z]+://", s):   # URL 交给萌绘，本地不校验
+        return s
+    p = Path(s)
+    if not p.is_absolute() and data_dir:
+        p = Path(data_dir) / p
+    try:
+        return str(p.resolve()) if p.is_file() else ""
+    except OSError:
+        return ""
+
+
+def usable_refs(strategy: dict, data_dir=None) -> list:
+    """策略里**真实可用**的参考图（主参考优先、去重），已解析成绝对路径 / URL。"""
+    if not isinstance(strategy, dict):
+        return []
+    raw_refs = strategy.get("refs")
+    raws = [strategy.get("ref")] + (
+        list(raw_refs) if isinstance(raw_refs, list) else [])
+    out = []
+    for raw in raws:
+        p = _ref_path(raw, data_dir)
+        if p and p not in out:
+            out.append(p)
+    return out
+
+
 async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
                             event=None, prompt: str | None = None):
     """按角色策略生成立绘。返回 (本地路径|None, status, error, duration_ms)。
 
+    ⚠️ 所有分支必须返回**4 元组**：调用方一律 `a, b, c, d = await ...`，
+    少一个元素就是 `not enough values to unpack`（v0.9.9 实测事故）。
     event 传真实指令事件（萌绘内部会用到会话上下文；WebUI 试画等无事件场景留 None，
     由调用方自行兜底）。status：ok / skipped_no_anima / timeout / error。失败时路径
     为 None——调用方必须报错不出卡，绝不做无图降级（PRD 铁律 1）。
     prompt：v0.5.6 起由调用方经 prompt_gen 预生成（LLM 编辑指令 / 含变化维度的
     tags）；留 None 时回落本地 tags 拼装（build_prompt，兼容旧路径）。
+    cfg["data_dir"]：参考图里相对路径（refs/xxx.png）的解析基准。
     """
     prompt = str(prompt or "").strip() or build_prompt(entry)
     stype = str(entry.get("strategy_type") or "base")
@@ -205,20 +246,20 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
         handler = _get_tool_handler(context, tool_name)
         if handler is None:
             return None, _STATUS_NO_ANIMA, "未安装萌绘（comfyui_img2img 工具不存在）", 0
-        # 参考图三级解析（v0.5.0 多参考图）：主参考 strategy.ref →
-        # strategy.refs 里按种子随机选一张（同种子同图，不破坏同款确定性）→ 无图报错
-        ref = str(strategy.get("ref") or "").strip()
-        if not ref:
-            ref = pick_ref(strategy.get("refs"), seed_int)
+        # 参考图解析（v0.9.9）：主参考 strategy.ref 优先 → refs 按种子确定性选；
+        # 统一经 usable_refs 解析成绝对路径 / URL（相对路径按 cfg["data_dir"] 找），
+        # 与 has_template_ref 的规划判定完全同口径，杜绝「说有图、画时找不到」。
+        data_dir = cfg.get("data_dir") or None
+        main_ref = _ref_path(strategy.get("ref"), data_dir)
+        refs = usable_refs(strategy, data_dir)
+        ref = main_ref or (refs[int(seed_int) % len(refs)] if refs else "")
         if not ref:
             return None, "error", (
-                "img2img 策略没有可用参考图：请在工坊给该角色上传参考图，"
-                "或填 strategy.ref")
+                "图生图没有可用参考图（文件不存在或已被清理）：请在工坊重新上传，"
+                "或把该角色的画法改回文生图"), 0
         image = ref
-        if not re.match(r"^[a-zA-Z]+://", ref):  # 非协议开头 → 视为本地路径
-            if not Path(ref).exists():
-                return None, "error", f"参考图文件不存在：{ref}", 0
-            image = str(Path(ref).resolve())
+        if not re.match(r"^[a-zA-Z]+://", image) and not Path(image).is_file():
+            return None, "error", f"参考图文件不存在：{image}", 0
         # img2img 不带 workflow（那是文生图槽位）；图生图工作流三级解析：
         # 条目 strategy.img2img_workflow → 全局配置 img2img_workflow → 留空（萌绘默认）
         kwargs = _base_kwargs(cfg, prompt, seed_int,
@@ -286,16 +327,12 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
     return str(first), "ok", "", duration
 
 
-def pick_ref(refs, seed_int: int) -> str:
-    """从参考图列表按种子选一张（确定性随机：同种子同图；文件已删的自动跳过）。
+def pick_ref(refs, seed_int: int, data_dir=None) -> str:
+    """从参考图列表按种子选一张（确定性随机：同种子同图；失效的自动跳过）。
 
-    refs 元素允许绝对路径或 data 相对路径；只回传真实存在的文件。
+    refs 元素允许绝对路径、相对 data 目录路径或 URL；只回传真实可用的条目。
     """
-    candidates = []
-    for p in refs if isinstance(refs, list) else []:
-        p = str(p or "").strip()
-        if p and Path(p).exists():
-            candidates.append(p)
+    candidates = usable_refs({"refs": refs}, data_dir)
     if not candidates:
         return ""
     return candidates[int(seed_int) % len(candidates)]
@@ -398,13 +435,16 @@ def decision_of(char_id: str, date_str: str, today_row: dict | None,
     return "from_pool"
 
 
-def has_template_ref(entry: dict) -> bool:
-    """角色是否绑定了可用的图生图模板图（strategy.ref 或 refs 任一非空）。"""
+def has_template_ref(entry: dict, data_dir=None) -> bool:
+    """角色是否绑定了**真实可用**的图生图模板图（文件存在 / URL）。
+
+    v0.9.9 前只查「字符串非空」：工坊把相对路径 `refs/xxx.png` 或已被清掉的
+    图留在 refs 里时，规划器会误以为有模板图 → 决策 generate_i2i → 误发
+    「照着官方图精心重绘」提示 → 生图时找不到参考图。判定必须和真正出图时
+    的 usable_refs 同口径，相对路径按 data_dir 解析。
+    """
     st = entry.get("strategy") or {}
-    if str(st.get("ref") or "").strip():
-        return True
-    refs = st.get("refs")
-    return isinstance(refs, list) and any(str(x).strip() for x in refs)
+    return bool(usable_refs(st, data_dir))
 
 
 def plan_source(mode: str, pool_size: int, quota: int, has_ref: bool,

@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 """萌萌今日老婆 · Pillow 竖版立绘卡渲染（纯 Pillow，无 astrbot 依赖，可独立测试）。
 
-版式 v2（v0.9.7，按用户反馈重做）：
-- 档位可视化但不写字：S=金色五角星 / A=紫色菱形 / B=蓝色圆环 / C=灰圆点，
-  右上角档位徽章 + 档位色内描边 + 档位色点缀（强调条/统计圆点）——
-  不同档位的卡一眼能分辨；分类（动漫/游戏等）不再上卡。
-- 字体：名字用等线 Bold（比楷体/雅黑软润），印象语用等线，统计/日期用雅黑；
-  字体不打包、多级查找、找不到回落默认。
-- 印象语按字数自适应字号（短句大字、长句小字），最多 3 行，放不下打省略号。
+版式 v3（v0.9.9，按用户反馈重做边框与布局）：
+- 档位色宽边框：S 金 / A 紫 / B 蓝 / C 灰，14px 宽 + 纵向柔和渐变 +
+  高斯泛光 + 内侧高光环，不同档位一眼能分辨；无档位回落角色应援色。
+- 顶部标题胶囊与外框呼应：档位色柔光 + 档位色描边 + 深色玻璃底 +
+  左侧档位色圆点（不再是突兀的灰胶囊 + 右挂小黄点）。
+- 底部布局：名字左侧档位色竖条、独立细分隔线（不再紧贴名字像下划线）、
+  作品眉标与名字拉开间距、各行间距统一、底部留白。
+- 档位徽章（S 星 / A 菱 / B 环 / C 点）、字体、印象语自适应字号沿用 v2。
 只有拿到立绘才会渲染（PRD 铁律 1：不存在无图版式）。
 """
 from __future__ import annotations
@@ -15,10 +16,12 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 CARD_W, CARD_H = 700, 1200
-_CARD_RADIUS = 26  # 圆角卡片
+_CARD_RADIUS = 30       # 圆角卡片
+_FRAME_W = 14           # 档位色宽边框
+_FRAME_GLOW = 16        # 边框泛光半径
 
 # 常见 CJK 字体候选（正文/小字；Windows 在前，Linux/Docker Noto/文泉驿在后）
 _BODY_FONT_CANDIDATES = [
@@ -145,13 +148,13 @@ def _cover_fit(img: Image.Image, w: int, h: int) -> Image.Image:
 
 def _bottom_gradient(w: int, h: int, rgb: tuple) -> Image.Image:
     """自下而上的遮罩：底部≈角色色加深不透明，向上渐隐。"""
-    top_alpha, bottom_alpha = 0, 246
+    top_alpha, bottom_alpha = 0, 250
     ramp = Image.new("L", (1, h))
     for y in range(h):
         t = y / max(1, h - 1)
         ramp.putpixel((0, y), int(top_alpha + (bottom_alpha - top_alpha) * (t ** 1.6)))
     alpha = ramp.resize((w, h))
-    end = _shade(rgb, 0.28)          # 底部深色化，保证白字对比
+    end = _shade(rgb, 0.24)          # 底部再压深一档：文字不压在人物轮廓上抢眼
     layer = Image.new("RGB", (w, h), end)
     layer.putalpha(alpha)
     return layer
@@ -207,6 +210,57 @@ def _tier_emblem(draw: ImageDraw.ImageDraw, tier: str, rgb: tuple,
     else:
         rr = max(6, r * 0.6)
         draw.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), fill=(*rgb, 235))
+
+
+def _frame_layers(w: int, h: int, rgb: tuple):
+    """档位色宽边框：纵向柔和渐变 + 泛光 + 内侧高光环。
+
+    Pillow 的 Draw 画不了渐变描边：先用 L 图做环带 mask，再用 1px 宽的纵向
+    色带 resize 出渐变、把环带 mask 当 alpha；泛光由环带高斯模糊得到。
+    三层都带 alpha，调用方必须逐层 Image.alpha_composite（Draw 直写不混合）。
+    """
+    ring = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(ring).rounded_rectangle(
+        (0, 0, w - 1, h - 1), radius=_CARD_RADIUS, outline=255, width=_FRAME_W)
+    top, bottom = _tint(rgb, 0.5), _shade(rgb, 0.6)
+    ramp = Image.new("RGB", (1, h))
+    for y in range(h):
+        t = y / max(1, h - 1)
+        ramp.putpixel((0, y), tuple(
+            int(top[i] + (bottom[i] - top[i]) * t) for i in range(3)))
+    frame = ramp.resize((w, h)).convert("RGBA")
+    frame.putalpha(ring)
+
+    glow = frame.filter(ImageFilter.GaussianBlur(_FRAME_GLOW))
+    glow.putalpha(glow.getchannel("A").point(lambda a: int(a * 0.62)))
+
+    inner = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(inner).rounded_rectangle(
+        (_FRAME_W + 2, _FRAME_W + 2, w - 3 - _FRAME_W, h - 3 - _FRAME_W),
+        radius=max(2, _CARD_RADIUS - _FRAME_W - 2), outline=255, width=2)
+    hi = Image.new("RGBA", (w, h), (255, 255, 255, 0))
+    hi.putalpha(inner.point(lambda a: int(a * 0.4)))
+    return frame, glow, hi
+
+
+def _pill_glow(size, box, rgb):
+    """标题胶囊的档位色柔光（独立图层 + 高斯模糊，真混合）。"""
+    g = Image.new("RGBA", size, (0, 0, 0, 0))
+    ImageDraw.Draw(g).rounded_rectangle(
+        box, radius=(box[3] - box[1]) // 2, fill=(*rgb, 190))
+    return g.filter(ImageFilter.GaussianBlur(13))
+
+
+def _title_pill(draw, box, text, font, rgb) -> None:
+    """标题胶囊：深色玻璃底 + 档位色描边 + 左侧档位色圆点 + 白字。"""
+    x0, y0, x1, y1 = box
+    draw.rounded_rectangle(box, radius=(y1 - y0) // 2,
+                           fill=(14, 16, 24, 190), outline=(*rgb, 225), width=2)
+    cy = (y0 + y1) // 2
+    draw.ellipse((x0 + 14, cy - 7, x0 + 28, cy + 7), outline=(*rgb, 120), width=1)
+    draw.ellipse((x0 + 17, cy - 4, x0 + 25, cy + 4), fill=(*rgb, 255))
+    draw.text((x0 + 36, y0 + (y1 - y0 - font.size) // 2 - 1), text,
+              font=font, fill=(255, 255, 255, 245))
 
 
 def _shadow_text(draw, xy, text, font, fill=(255, 255, 255), alpha=255) -> None:
@@ -265,95 +319,92 @@ def render_card(portrait_path, entry: dict, *, date_str: str, same_count: int = 
     canvas = _cover_fit(Image.open(src), CARD_W, CARD_H).convert("RGBA")
 
     # 顶部压暗（标题可读性）+ 底部渐变遮罩（角色色系）
-    canvas.alpha_composite(_top_scrim(CARD_W, 190))
-    overlay = _bottom_gradient(CARD_W, 620, rgb)
-    canvas.alpha_composite(overlay, (0, CARD_H - 620))
+    canvas.alpha_composite(_top_scrim(CARD_W, 210))
+    overlay = _bottom_gradient(CARD_W, 680, rgb)
+    canvas.alpha_composite(overlay, (0, CARD_H - 680))
 
-    # ⚠️ 所有装饰画在独立透明层上，最后 alpha_composite 合成。不要直接在 RGBA
-    # 画布上用 ImageDraw 画半透明——Pillow 的 Draw 无论默认还是 "RGBA" 模式都是
-    # 直写像素（ink 连 RGB 带 alpha 一起覆盖、不混合），convert("RGB") 丢掉
-    # alpha 后半透明白会全部变成实心白块（重抽标白字被吞掉的根因，已实测）。
-    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer)
+    # ⚠️ 所有装饰画在独立透明层上，最后 alpha_composite 合成。Pillow 的 Draw
+    # 无论默认还是 "RGBA" 模式都直写像素（ink 连 RGB 带 alpha 覆盖、不混合），
+    # 所以半透明/泛光层必须先用 Image.alpha_composite 逐层叠好，再拿 Draw 画实体。
     body_s = load_font(22, data_dir=data_dir)
     body_xs = load_font(20, data_dir=data_dir)
     name_f = load_font(64, style="name", data_dir=data_dir)
+    title_f = load_font(26, data_dir=data_dir)
 
-    # ---- 自底向上的内容布局 ----
-    bottom = CARD_H - 36
+    # 档位色边框（宽 + 柔和渐变 + 泛光 + 内高光）与标题胶囊柔光
+    tt = "今日老婆"
+    pill = (30, 30, 30 + int(title_f.getlength(tt)) + 62, 30 + title_f.size + 28)
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    frame, glow, hi = _frame_layers(CARD_W, CARD_H, t_rgb)
+    for extra in (glow, frame, hi, _pill_glow(canvas.size, pill, t_rgb)):
+        layer = Image.alpha_composite(layer, extra)
+    draw = ImageDraw.Draw(layer)
+
+    # 顶部左：档位色标题胶囊（呼应外框；♥ 字形多数 CJK 字体缺字，不用）
+    _title_pill(draw, pill, tt, title_f, t_rgb)
+    # 顶部右：档位徽章（不写字：S 星 / A 菱 / B 环 / C 点）
+    _tier_emblem(draw, tier, t_rgb, CARD_W - 58, 58)
+
+    # ---- 自底向上的内容布局（v0.9.9：间距统一、分隔线不再贴着名字）----
+    bottom = CARD_H - 52
     # 最底行：日期（左）+ 重抽标（右，玻璃描边）
-    draw.text((46, bottom - body_xs.size), f"{date_str}",
-              font=body_xs, fill=(255, 255, 255, 170))
+    draw.text((48, bottom - body_xs.size), f"{date_str}",
+              font=body_xs, fill=(255, 255, 255, 175))
     if rerolled:
         rt = "重抽"
         tw = draw.textlength(rt, font=body_xs)
-        bx = CARD_W - 46 - tw - 28
+        bx = CARD_W - 48 - tw - 28
         draw.rounded_rectangle(
-            (bx, bottom - body_xs.size - 7, CARD_W - 46, bottom + 9),
+            (bx, bottom - body_xs.size - 7, CARD_W - 48, bottom + 9),
             radius=14, fill=(255, 255, 255, 40), outline=(255, 255, 255, 130), width=1,
         )
         draw.text((bx + 14, bottom - body_xs.size), rt,
                   font=body_xs, fill=(255, 255, 255, 235))
-    bottom -= body_xs.size + 18
+    bottom -= body_xs.size + 20
 
     # 统计行：档位色小圆点 + 文案
     stats = f"今日同款 {max(1, same_count)} 人 · 第 {max(1, total_count)} 次抽到她"
     dot_r = 4
     dot_y = bottom - body_s.size // 2 - 2
-    draw.ellipse((46, dot_y - dot_r, 46 + dot_r * 2, dot_y + dot_r), fill=(*t_rgb, 255))
-    _shadow_text(draw, (46 + dot_r * 2 + 12, bottom - body_s.size), stats, body_s, alpha=205)
-    bottom -= body_s.size + 18
+    draw.ellipse((48, dot_y - dot_r, 48 + dot_r * 2, dot_y + dot_r), fill=(*t_rgb, 255))
+    _shadow_text(draw, (48 + dot_r * 2 + 12, bottom - body_s.size), stats, body_s, alpha=210)
+    bottom -= body_s.size + 20
 
     # 印象语（字数自适应字号，最多 2~3 行）
     quote = str(entry.get("quote") or "").strip()
     if quote:
-        qf, qlines = _quote_layout(quote, data_dir, CARD_W - 96)
+        qf, qlines = _quote_layout(quote, data_dir, CARD_W - 100)
         for line in reversed(qlines):
-            _shadow_text(draw, (48, bottom - qf.size), line, qf, alpha=242)
+            _shadow_text(draw, (50, bottom - qf.size), line, qf, alpha=242)
             bottom -= qf.size + 10
-        bottom -= 14
+        bottom -= 18
 
-    # 档位色强调条（名字与印象语之间的分隔点缀）
-    draw.rounded_rectangle((46, bottom - 5, 46 + 64, bottom), radius=3, fill=(*t_rgb, 235))
-    bottom -= 22
+    # 独立细分隔线：与名字拉开距离，不再像给名字画下划线
+    draw.rounded_rectangle((48, bottom - 3, 48 + 76, bottom),
+                           radius=2, fill=(*t_rgb, 215))
+    bottom -= 28
 
-    # 名字（软润字体）+ 作品（小字，位于名字上方）
+    # 名字（软润字体）+ 左侧档位色竖条
     name = str(entry.get("name") or "")
-    _shadow_text(draw, (44, bottom - name_f.size), name, name_f)
-    bottom -= name_f.size + 4
+    draw.rounded_rectangle((46, bottom - name_f.size + 8, 52, bottom - 8),
+                           radius=3, fill=(*t_rgb, 240))
+    _shadow_text(draw, (62, bottom - name_f.size), name, name_f)
+    bottom -= name_f.size + 16
+    # 作品眉标：档位色小点 + 小字，与名字留足呼吸
     series = str(entry.get("series") or "").strip()
     if series:
-        _shadow_text(draw, (48, bottom - body_s.size), series, body_s, alpha=200)
+        draw.ellipse((50, bottom - body_s.size + 8, 57, bottom - body_s.size + 15),
+                     fill=(*t_rgb, 220))
+        _shadow_text(draw, (66, bottom - body_s.size), series, body_s, alpha=205)
 
-    # 顶部左：标题玻璃胶囊（♥ 字形多数 CJK 字体缺字，会渲染成方块，不用）
-    title_f = load_font(26, data_dir=data_dir)
-    tt = "今日老婆"
-    tw = draw.textlength(tt, font=title_f)
-    draw.rounded_rectangle((30, 30, 30 + tw + 44, 30 + title_f.size + 24),
-                           radius=18, fill=(10, 12, 18, 150),
-                           outline=(255, 255, 255, 90), width=1)
-    draw.text((52, 42), tt, font=title_f, fill=(255, 255, 255, 240))
-    draw.ellipse((30 + tw + 44 - 20, 30 + title_f.size + 8,
-                  30 + tw + 44 - 10, 30 + title_f.size + 18), fill=(*t_rgb, 255))
-
-    # 顶部右：档位徽章（不写字：S 星 / A 菱 / B 环 / C 点，档位色）
-    _tier_emblem(draw, tier, t_rgb, CARD_W - 52, 54)
-
-    # 内描边（档位有专属色时随档位色，否则细白线）
-    border_alpha = 130 if tier else 80
-    draw.rounded_rectangle((1, 1, CARD_W - 2, CARD_H - 2), radius=_CARD_RADIUS - 1,
-                           outline=(*t_rgb, border_alpha) if tier
-                           else (255, 255, 255, border_alpha), width=2)
-
-    # 圆角卡片：圆角外像素透明
+    # 圆角卡片：合成后统一裁圆角（泛光溢出圆角外的部分一并裁掉）
     mask = Image.new("L", (CARD_W, CARD_H), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, CARD_W - 1, CARD_H - 1),
                                            radius=_CARD_RADIUS, fill=255)
-    canvas.putalpha(mask)
-
     out = Path(out_path) if out_path else src.with_name(f"card_{src.stem}.png")
     out.parent.mkdir(parents=True, exist_ok=True)
     canvas.alpha_composite(layer)  # 装饰层真混合（半透明/阴影/胶囊都靠它）
+    canvas.putalpha(mask)
     canvas.save(out, "PNG", optimize=True)
     return str(out)
 

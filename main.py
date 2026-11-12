@@ -198,6 +198,8 @@ class MoeWaifuPlugin(Star):
             "prompt_llm_provider": self._cfg("prompt_llm_provider", ""),
             "prompt_llm_timeout": self._cfg("prompt_llm_timeout", 30),
             "variations_enabled": self._cfg("variations_enabled", True),
+            # 参考图里相对路径（refs/xxx.png）的解析基准：draw 侧按 CWD 找不到
+            "data_dir": str(self._data_dir) if self._data_dir else "",
         }
 
     def _load_packs(self) -> list:
@@ -429,12 +431,21 @@ class MoeWaifuPlugin(Star):
             i2i_prob = int(i2i_prob)
         except (TypeError, ValueError):
             i2i_prob = 50
+        # 参考图是否可用必须按「文件真实存在」判定（v0.9.9）：工坊会把
+        # `refs/xxx.png` 这类相对 data 目录的路径写进 refs，只查字符串非空会
+        # 让「没绑图生图源」的签被规划成 generate_i2i，先发图生图台词、
+        # 再在 generate_portrait 里找不到参考图直接抛异常。
+        data_dir = str(self._data_dir) if self._data_dir else ""
         decision = draw.decision_of(char_id, date, today_row, pool_size, quota)
         if decision == "generate":
             decision = draw.plan_source(mode, pool_size, quota,
-                                        draw.has_template_ref(entry),
+                                        draw.has_template_ref(entry, data_dir),
                                         pool.sub_int(seed_bytes, "genmode", 100),
                                         i2i_prob)
+        # 二次确认（文件可能在规划后被清理）：没有可用模板图就不发图生图提示、
+        # 不临时转画法，回退按角色原画法生成。
+        if decision == "generate_i2i" and not draw.has_template_ref(entry, data_dir):
+            decision = "generate"
         if decision == "generate_i2i" \
                 and str(entry.get("strategy_type") or "base") != "img2img":
             # 该签决定走模板图生图：把 base/lora 条目临时转成 img2img 画法

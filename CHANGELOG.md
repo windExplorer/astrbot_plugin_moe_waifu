@@ -2,6 +2,51 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.9.9 (2026-11-12)
+
+修复「没绑图生图源却播图生图台词 + waifu_cmd 解包崩溃」，卡片版式 v3
+（宽边框 / 标题胶囊 / 底部布局）（版本 v0.9.8 -> v0.9.9）。
+
+- **现象（用户）**：`/今日老婆` 报「在调用插件 astrbot_plugin_moe_waifu 的处理函数
+  waifu_cmd 时出现异常：not enough values to unpack (expected 4, got 3)」；
+  全局明明没有角色指定图生图源，却先收到「正在照着官方图精心重绘你的老婆，
+  细节控狂喜……」。另外左上角「今日老婆」胶囊样式丑、边框几乎看不见；
+  名字下方的黄色强调条贴着名字像下划线，作品名与名字挤在一起。
+- **根因（三处串成一条链）**：
+  1. `webui_api._copy_into_refs` / 立绘转参考图会把 `refs/xxx.png` 这种**相对 data
+     目录**的路径写进 `strategy.refs`，而 `draw.pick_ref` 用 `Path(p).exists()`
+     按**进程 CWD** 判断——AstrBot 里永远找不到；参考图文件被清掉后同理。
+  2. `draw.has_template_ref` 只查「字符串非空」，上面这些失效 / 相对路径被当成
+     「已绑模板图」→ `plan_source` 决策 `generate_i2i` → `_summon_line` 播图生图
+     台词 → `_produce` 用 `effective_entry` 把 base 条目临时转成 img2img 画法。
+  3. `generate_portrait` 的「img2img 无可用参考图」分支
+     `return None, "error", (...)` **只有 3 个元素**，而调用方是
+     `raw_src, status, err, dur = await ...` → 解包抛异常，AstrBot 把整个 handler
+     标成 waifu_cmd 出错。
+- **修复（后端）**
+  - `draw.py` 新增 `_ref_path` / `usable_refs`：统一把 ref / refs 解析成绝对路径或
+    URL，相对路径按 `cfg["data_dir"]` 解析、失效文件直接过滤；`has_template_ref`
+    改为「文件真实存在 / URL」判定，`pick_ref` 与出图共用同一份口径。
+    `main._draw_cfg()` 注入 `data_dir`，`_produce`、工坊「模拟抽签」与
+    `jobs/start` 的缺图守卫全部改用新判定；`_produce` 另加一层二次确认，
+    规划后参考图失效就回退普通生成，不再播误导台词、不临时转画法。
+  - `generate_portrait` 缺参考图分支补齐第 4 个元素（`0`），docstring 写死
+    「所有分支必须返回 4 元组」的约束；错误文案改成「文件不存在或已被清理」，
+    直接告诉用户去工坊重新上传或改回文生图。
+- **修复（卡片 · `card.py` 版式 v3）**
+  - 档位色宽边框：`_frame_layers` 用环带 mask + 纵向渐变（上亮下深）做 14px
+    S/A/B/C 专属色边框，叠高斯泛光与内侧高光环；无档位回落角色应援色。
+    圆角 26→30，半透明层一律 `Image.alpha_composite` 真混合，最后统一裁圆角。
+  - 标题胶囊重做：档位色描边 + 柔光（独立模糊层）+ 左侧档位色圆点，去掉原来
+    右挂的小黄点；右上角档位徽章同步内移避让宽边框。
+  - 布局：底部起始 36→52 留白、各行间距统一；黄色强调条从「紧贴名字的粗短条」
+    改成独立细分隔线并拉开 28px，名字左侧加档位色竖条、作品名改带色点的眉标
+    并与名字拉开 16px；底部遮罩 620→680px 且再压深一档，文字不压在人物轮廓上。
+- **守卫**：`test_draw.py` 的 `has_template_ref` 一节重写为 13 项（相对 data 路径 /
+  URL / 失效文件、`pick_ref` 解析、img2img 缺图恒返回 4 元组、相对参考图确实以
+  绝对路径交给萌绘）；`test_card.py` 新增 3 项（S/A/B/C 边框颜色互不相同、
+  边框确实覆盖边缘、圆角外透明）。13 个自检脚本全过，四档位卡片实渲染目视通过。
+
 ## v0.9.8 (2026-11-12)
 
 修复工坊「分群绑定」页签点一次多一份表单、内容泄漏到其它页签的复发 bug

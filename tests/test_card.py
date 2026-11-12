@@ -56,4 +56,20 @@ with tempfile.TemporaryDirectory() as td:
     lines = card._wrap("这是一段特别长的印象语" * 20, card.load_font(27), card.CARD_W - 92)
     check("折行不超过两行", len(lines) == 2 and lines[1].endswith("…"))
 
+    # 档位色宽边框（v0.9.9）：四档位各有专属色，边框确实覆盖卡片边缘
+    frame_px = {}
+    for t in ("S", "A", "B", "C"):
+        p = td / f"frame_{t}.png"
+        card.render_card(portrait, dict(ENTRY, tier=t), date_str="2026-11-12",
+                         out_path=p)
+        with Image.open(p) as im:
+            frame_px[t] = im.convert("RGB").getpixel((6, 600))
+    check("S/A/B/C 边框颜色互不相同", len(set(frame_px.values())) == 4)
+    with Image.open(out) as im:
+        rgba = im.convert("RGBA")
+        inside = rgba.getpixel((40, 600))
+        corner = rgba.getpixel((0, 0))
+    check("宽边框与画面内侧不同色", frame_px["S"][:3] != inside[:3])
+    check("圆角外像素透明", corner[3] == 0)
+
 print("test_card: ALL OK")

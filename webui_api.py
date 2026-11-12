@@ -797,12 +797,11 @@ async def h_job_start(plugin) -> dict:
     if override:
         entry = draw.effective_entry(entry, override)
         if entry["strategy_type"] == "img2img":
-            # 主参考或参考图库任一有图即可（v0.7.2：补一张带工作流 override 的
-            # img2img 条目走 refs[] 随机，不再误报缺参考图）
+            # 主参考或参考图库任一**真实可用**即可（v0.7.2：补一张带工作流
+            # override 的 img2img 条目走 refs[] 随机；v0.9.9：与出图同口径，
+            # 相对 data 目录的路径/失效文件不能再混过这道检查）
             st_now = entry.get("strategy") or {}
-            has_ref = str(st_now.get("ref") or "").strip() or [
-                r for r in (st_now.get("refs") or []) if str(r or "").strip()]
-            if not has_ref:
+            if not draw.has_template_ref({"strategy": st_now}, plugin._data_dir):
                 return err("图生图重绘需要参考图：先上传图片或填 URL / 本地路径")
     # 预览确认过的提示词直通（v0.5.9）：非空时不再走 prompt_gen，按原文出图
     prompt_override = str(body.get("prompt") or "").strip()[:2000]
@@ -1805,8 +1804,9 @@ def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
     except (TypeError, ValueError):
         i2i_prob = 50
     if decision == "generate":
+        # 与真实出卡同口径：按「文件真实存在」判定模板图（v0.9.9）
         decision = draw.plan_source(gen_mode, pool_size, quota,
-                                    draw.has_template_ref(entry),
+                                    draw.has_template_ref(entry, plugin._data_dir),
                                     pool.sub_int(seed, "genmode", 100), i2i_prob)
     pick = None
     if decision == "reuse_today":
