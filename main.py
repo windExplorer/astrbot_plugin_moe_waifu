@@ -214,13 +214,24 @@ class MoeWaifuPlugin(Star):
             logger.warning(f"[{PLUGIN_NAME}] 过程提示直发失败（忽略）\n{traceback.format_exc()}")
 
     def _draw_error_text(self, status: str, err: str) -> str:
+        """发给普通用户的抽卡失败提示：只说失败/稍后再试，不带技术细节。
+
+        萌绘是否安装、超时秒数、异常文本、配置路径这些只写 AstrBot 日志，
+        管理员在后台日志/工坊里排查；群里发这些对普通用户没有意义
+        （用户口径 v0.12.3）。
+        """
         if status == "skipped_no_anima":
-            return ("抽卡出图需要萌绘（ComfyUI 绘图）插件：请先安装并配置"
-                    " astrbot_plugin_comfyui_anima（v7.7.58+）后再试。")
+            logger.warning(
+                f"[{PLUGIN_NAME}] 抽卡失败：萌绘不可用（comfyui_draw/comfyui_img2img "
+                "工具不存在），请安装并配置 astrbot_plugin_comfyui_anima（v7.7.58+）")
+            return "抽卡失败，请稍后再试。"
         if status == "timeout":
-            return (f"抽卡出图超时（>{int(self._cfg('draw_timeout', 120))}s），"
-                    "萌绘可能正忙，请稍后再试。")
-        return f"抽卡出图失败：{err[:120]}。请稍后再试。"
+            logger.warning(
+                f"[{PLUGIN_NAME}] 抽卡失败：出图超时（>{int(self._cfg('draw_timeout', 120))}s），"
+                "萌绘可能正忙或工作流过重")
+            return "抽卡超时，请稍后再试。"
+        logger.warning(f"[{PLUGIN_NAME}] 抽卡失败：{err[:300]}")
+        return "抽卡失败，请稍后再试。"
 
     @staticmethod
     def _summon_line(decision: str, queued: int) -> str:
@@ -245,7 +256,7 @@ class MoeWaifuPlugin(Star):
             return
         gid = "" if event.is_private_chat() else str(event.get_group_id() or "")
         if gid and gid in self._disabled_groups():
-            yield event.plain_result("本群已停用今日老婆（可在插件配置的「停用群」里修改）")
+            yield event.plain_result("本群暂未开启抽卡。")
             return
         date = self._today()
 
@@ -281,13 +292,18 @@ class MoeWaifuPlugin(Star):
                         int(existing.get("nonce") or 0), self._store.get_epoch(uid))
                 entry = dict(entry)
                 entry["quote"] = pool.pick_quote(entry, seed_bytes)
-                card_path = await asyncio.to_thread(
-                    card.render_card, self._data_dir / rel["file"], entry,
-                    date_str=date, same_count=1, total_count=1,
-                    rerolled=bool(existing["rerolled"]),
-                    out_path=str(self._data_dir / "cards" / f"{uid}_{date}.png"),
-                    data_dir=self._data_dir,
-                )
+                try:
+                    card_path = await asyncio.to_thread(
+                        card.render_card, self._data_dir / rel["file"], entry,
+                        date_str=date, same_count=1, total_count=1,
+                        rerolled=bool(existing["rerolled"]),
+                        out_path=str(self._data_dir / "cards" / f"{uid}_{date}.png"),
+                        data_dir=self._data_dir,
+                    )
+                except Exception:
+                    logger.error(f"[{PLUGIN_NAME}] 卡图重渲染失败\n{traceback.format_exc()}")
+                    yield event.plain_result("抽卡失败，请稍后再试。")
+                    return
                 self._store.update_draw_card(uid, date, card_path)
                 yield event.chain_result([Image.fromFileSystem(card_path)])
                 return
@@ -317,10 +333,10 @@ class MoeWaifuPlugin(Star):
             bool(self._cfg("allow_unverified", False)),
         )
         if not candidates:
-            yield event.plain_result(
-                "角色库还是空的：请在 data/plugin_data/astrbot_plugin_moe_waifu/pools/ "
-                "添加角色卷 JSON（或在卷里把角色标为 verified）"
-            )
+            logger.warning(
+                f"[{PLUGIN_NAME}] 抽卡失败：没有可抽角色"
+                "（pools/ 下没有启用的角色卷，或卷内角色均未 verified）")
+            yield event.plain_result("抽卡失败，暂时没有可抽的角色，请稍后再试。")
             return
         salt = str(self._cfg("salt", "moe-waifu"))
         entry = pool.pick_character(
@@ -367,7 +383,8 @@ class MoeWaifuPlugin(Star):
             bool(self._cfg("allow_unverified", False)),
         )
         if not candidates:
-            yield event.plain_result("角色库还是空的，暂时无法重抽。")
+            logger.warning(f"[{PLUGIN_NAME}] 重抽失败：没有可抽角色")
+            yield event.plain_result("抽卡失败，暂时没有可抽的角色。")
             return
         salt = str(self._cfg("salt", "moe-waifu"))
         entry = pool.pick_character(
@@ -389,14 +406,10 @@ class MoeWaifuPlugin(Star):
     async def help_cmd(self, event: AstrMessageEvent):
         yield event.plain_result(
             "萌萌今日老婆\n"
-            "/今日老婆（别名 /老婆）：抽取今天的角色，萌绘立绘卡片，一人一天一位\n"
+            "/今日老婆（别名 /老婆）：抽取今天的角色，一人一天一位\n"
             "/换老婆：重新抽一位（受「每日换老婆次数」限制）\n\n"
-            "角色库管理 / 试画 / 立绘库维护都在 AstrBot Dashboard 的插件 Page「工坊」里做"
-            "（仅管理员）。\n"
-            "本插件依赖萌绘（astrbot_plugin_comfyui_anima v7.7.58+）生成立绘，"
-            "需要生图而萌绘不可用时会报错不出卡。\n"
-            "立绘会沉淀进「立绘库」：每角色攒满配额后直接从库里取图，不再消耗绘图算力。\n"
-            "角色库：data/plugin_data/astrbot_plugin_moe_waifu/pools/（一卷一 JSON）"
+            "抽到的角色会附上一张卡图；同一角色的卡图会逐步积累，之后可能直接复用。\n"
+            "角色库、试画、立绘维护等管理功能在 AstrBot 后台的插件页里，仅管理员可见。"
         )
 
     # ---------- 核心产出 ----------
@@ -528,11 +541,17 @@ class MoeWaifuPlugin(Star):
 
         cards_dir = self._data_dir / "cards"
         cards_dir.mkdir(parents=True, exist_ok=True)
-        card_path = await asyncio.to_thread(
-            card.render_card, src, entry,
-            date_str=date, same_count=same, total_count=total, rerolled=rerolled,
-            out_path=str(cards_dir / f"{uid}_{date}.png"), data_dir=self._data_dir,
-        )
+        try:
+            card_path = await asyncio.to_thread(
+                card.render_card, src, entry,
+                date_str=date, same_count=same, total_count=total, rerolled=rerolled,
+                out_path=str(cards_dir / f"{uid}_{date}.png"), data_dir=self._data_dir,
+            )
+        except Exception:
+            # 渲染异常只写日志：群里只回一句通用失败提示，不把栈信息抛给用户
+            logger.error(f"[{PLUGIN_NAME}] 卡图渲染失败\n{traceback.format_exc()}")
+            await self._send_plain(event, "抽卡失败，请稍后再试。")
+            return None
         self._store.update_draw_card(uid, date, card_path)
         if decision != "generate":
             self._store.log_job(char_id, date, decision, "from_pool", uid,
