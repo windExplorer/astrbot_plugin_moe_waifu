@@ -82,6 +82,8 @@ class MoeWaifuPlugin(Star):
         self._gen_queue = 0
         # 工坊后台试画/补图 job（webui_api 用）：job_id -> dict
         self._jobs: dict = {}
+        # 批量补图队列（v0.16.0）：进程内存态，重启即清
+        self._batch = None
         self._reload_modules()
 
     # ---------- 生命周期 ----------
@@ -90,7 +92,8 @@ class MoeWaifuPlugin(Star):
         """热重载自研子模块（依赖序）。main 里全部走模块属性访问（pool.xxx），
         reload 后自动生效，无需重新绑定函数对象。"""
         pkg = __package__
-        for name in ("store", "card", "pool", "draw", "prompt_gen", "webui_api"):
+        for name in ("store", "card", "pool", "draw", "prompt_gen",
+                     "batch_fill", "webui_api"):
             mod = sys.modules.get(f"{pkg}.{name}")
             if mod is not None:
                 try:

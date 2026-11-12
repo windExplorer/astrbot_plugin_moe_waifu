@@ -36,11 +36,12 @@ except Exception:  # pragma: no cover
     request = None  # type: ignore
 
 try:  # 双形态导入（包内正常加载 / 平铺调试）
-    from . import pool, draw, prompt_gen
+    from . import pool, draw, prompt_gen, batch_fill
 except ImportError:  # pragma: no cover
     import pool  # type: ignore
     import draw  # type: ignore
     import prompt_gen  # type: ignore
+    import batch_fill  # type: ignore
 
 ROUTE_PREFIX = "/astrbot_plugin_moe_waifu"
 PLUGIN_NAME = "astrbot_plugin_moe_waifu"
@@ -1446,6 +1447,128 @@ async def h_prompt_pools(plugin) -> dict:
     return ok({"pools": prompt_gen.dim_pool_options()})
 
 
+# ---------- 批量补图队列（v0.16.0） ----------
+# 前提（用户口径）：① 角色有可用图生图源（strategy.ref / gen_refs 文件真实存在，
+# 「不存在则跳过」；batch_require_ref=false 可关）② 立绘数不足配额（缺几张补几张）。
+# 主题由 batch_fill.theme_plan 伪随机轮换（相邻不重复），随档记录。
+
+def _batch_runner(plugin):
+    """插件实例常驻的队列（进程内存态，重启即清）；首次访问惰性创建。"""
+    runner = getattr(plugin, "_batch", None)
+    if runner is None:
+        runner = batch_fill.BatchRunner()
+        plugin._batch = runner
+    return runner
+
+
+def _batch_scope_entries(plugin, body) -> list:
+    """范围筛选：启用卷 ∩ verified，再按 mode=all/packs/series/chars 过滤。"""
+    packs = pool.load_packs(_pools_dir(plugin), logger)
+    mode = str(body.get("mode") or "all").strip()
+    sel_packs = {str(x) for x in (body.get("packs") or [])}
+    sel_series = {str(x) for x in (body.get("series") or [])}
+    sel_chars = {str(x) for x in (body.get("chars") or [])}
+    out = []
+    for p in packs:
+        if not p.get("enabled", True):
+            continue
+        for e in p.get("entries") or []:
+            if not e.get("verified", False):
+                continue
+            if mode == "packs" and (not sel_packs or str(e.get("pack") or "") not in sel_packs):
+                continue
+            if mode == "series" and (not sel_series or str(e.get("series") or "") not in sel_series):
+                continue
+            if mode == "chars" and (not sel_chars or str(e.get("id") or "") not in sel_chars):
+                continue
+            out.append(e)
+    return out
+
+
+def _batch_candidates(plugin, body) -> tuple:
+    """按前提筛出补图对象，返回 (candidates, skipped_ref, quota, require_ref)。"""
+    entries = _batch_scope_entries(plugin, body)
+    quota = max(1, int(plugin._cfg("portraits_per_char", 5)))
+    require_ref = bool(plugin._cfg("batch_require_ref", True))
+    cands = batch_fill.pick_candidates(
+        entries,
+        lambda cid: (plugin._store.count_portraits(cid) if plugin._store else 0),
+        quota, require_ref,
+        lambda e: draw.has_gen_refs(e, plugin._data_dir))
+    # 预览友好：因「无可用参考图」被跳过的角色（立绘不足配额的那部分）
+    chosen = {c["entry"].get("id") for c in cands}
+    skipped = []
+    for e in entries:
+        if e.get("id") in chosen:
+            continue
+        have = plugin._store.count_portraits(e.get("id")) if plugin._store else 0
+        if have < quota and require_ref and not draw.has_gen_refs(e, plugin._data_dir):
+            skipped.append({"char_id": e.get("id"), "name": e.get("name"),
+                            "reason": "无可用参考图"})
+    return cands, skipped, quota, require_ref
+
+
+async def h_batch_preview(plugin) -> dict:
+    """dry-run：返回将补图的角色清单（含每张将套用的主题序列）与跳过名单。"""
+    body = await _body()
+    cands, skipped, quota, require_ref = _batch_candidates(plugin, body)
+    salt = str(plugin._cfg("salt", "moe-waifu"))
+    labels = {t["id"]: t["label"] for t in prompt_gen.THEMES}
+    items = []
+    for c in cands:
+        e = c["entry"]
+        themes = batch_fill.theme_plan(str(e.get("id") or ""), salt, c["need"])
+        labels_list = [labels.get(t, t) for t in themes]
+        items.append({
+            "char_id": e.get("id"), "name": e.get("name"),
+            "series": e.get("series"), "pack": e.get("pack"),
+            "have": c["have"], "need": c["need"],
+            "themes": labels_list,
+            # v0.16.0：拼好的展示文本——⚠️ 工坊页跑在 sandbox iframe 里，
+            # modal slot 内插值调用 .join()/.map() 会在数据更新时打断整块
+            # 渲染（内容静默清空、无任何 console 警告；复现页实测），模板
+            # 一律纯字段插值，join/map 留在后端
+            "themes_text": " / ".join(labels_list),
+        })
+    items.sort(key=lambda x: (str(x.get("pack") or ""), str(x.get("name") or "")))
+    skipped_text = "、".join(str(s.get("name") or s.get("char_id") or "")
+                             for s in skipped)
+    return ok({"items": items, "total": sum(c["need"] for c in cands),
+               "skipped": skipped, "skipped_text": skipped_text,
+               "quota": quota, "require_ref": require_ref})
+
+
+async def h_batch_start(plugin) -> dict:
+    """启动批量补图队列。running 时拒绝重复启动。"""
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    cands, skipped, quota, require_ref = _batch_candidates(plugin, body)
+    if not cands:
+        return err("没有满足前提的角色：检查配额是否已满、或角色是否有可用参考图")
+    salt = str(plugin._cfg("salt", "moe-waifu"))
+    tasks = batch_fill.build_tasks(cands, salt)
+    runner = _batch_runner(plugin)
+    n = runner.start(plugin, tasks)
+    if n < 0:
+        return err("批量补图正在运行中，请先停止或等待完成")
+    logger.info(f"[{PLUGIN_NAME}] 批量补图启动：{len(cands)} 角色 / {n} 张"
+                f"（require_ref={require_ref}, 跳过 {len(skipped)}）")
+    return ok({"queued": n, "chars": len(cands), "skipped": len(skipped)})
+
+
+async def h_batch_status(plugin) -> dict:
+    """队列进度快照（工坊 2s 轮询）。"""
+    return ok({"batch": _batch_runner(plugin).snapshot(),
+               "quota": max(1, int(plugin._cfg("portraits_per_char", 5)))})
+
+
+async def h_batch_stop(plugin) -> dict:
+    """请求停止：当前张完成后不再开始下一张（在跑的单张不中断）。"""
+    was_running = _batch_runner(plugin).stop()
+    return ok({"stopped": True, "was_running": was_running})
+
+
 async def h_workflows(plugin) -> dict:
     """直接读萌绘配置的工作流条目，按用户口径计算图生图能力（v0.3.6）。
 
@@ -2410,6 +2533,10 @@ def register(plugin) -> None:
         ("/themes", h_themes, ["GET"]),
         ("/prompt/preview", h_prompt_preview, ["POST"]),
         ("/prompt/pools", h_prompt_pools, ["GET"]),
+        ("/batch/preview", h_batch_preview, ["POST"]),
+        ("/batch/start", h_batch_start, ["POST"]),
+        ("/batch/status", h_batch_status, ["GET", "POST"]),
+        ("/batch/stop", h_batch_stop, ["POST"]),
         ("/pools/save_entry", h_save_entry, ["POST"]),
         ("/pools/delete_entry", h_delete_entry, ["POST"]),
         ("/pools/set_pack", h_set_pack, ["POST"]),

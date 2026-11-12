@@ -46,6 +46,14 @@
   .dim-chip-x { cursor: pointer; opacity: .4; flex: none; font-size: 14px; line-height: 1;
     padding: 0 2px; }
   .dim-chip-x:hover { opacity: 1; color: #d63384; }
+  /* v0.16.0：批量补图弹窗纵向堆叠（替代 n-space——modal slot 内 n-space
+     在 sandbox iframe 下整块 content 静默不渲染，见弹窗内注释） */
+  .stack-v { display: flex; flex-direction: column; gap: 8px; }
+  /* v0.16.0：批量补图弹窗行 */
+  .batch-row { display: flex; align-items: center; gap: 8px; font-size: 12px;
+    padding: 2px 0; }
+  .batch-row .entry-name { font-size: 12px; flex: none; min-width: 88px; }
+  .batch-row .bind-tip { margin-top: 0; }
   .work-card { cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; }
   .work-card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(150,90,130,.14); }
   /* v0.6.2：作品卡悬停「进入详情」指示（卡片可点但此前没有任何视觉提示） */
@@ -374,6 +382,7 @@
                 <n-radio-button value="list">列表</n-radio-button>
               </n-radio-group>
               <n-button type="primary" size="small" @click="openNew">新增角色</n-button>
+              <n-button size="small" @click="openBatchModal">批量补图</n-button>
               <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
               <!-- v0.6.1：每行卡片数快捷调整（写回 ui_grid_cols，免去去配置页） -->
               <span style="font-size: 12px; opacity: .6;">每行</span>
@@ -1901,6 +1910,93 @@
                    :rows="6" readonly class="gal-detail-prompt"></n-input>
         </div>
       </n-space>
+    </n-modal>
+
+    <!-- ============ 批量补图队列弹窗（v0.16.0）：范围筛选 → 预览（dry-run）→ 启动/停止/进度。
+         前提由后端把关（立绘不足配额 + 有可用参考图）；主题伪随机轮换随档记录；
+         队列挂在插件进程（刷新页面不中断），状态本机内存、重启 AstrBot 即清。
+         preset 必须是 dialog（见生成立绘弹窗处的注释） ============ -->
+    <n-modal v-model:show="batchOpen" preset="dialog" title="批量补图"
+             style="width: 660px;">
+      <!-- ⚠️ sandbox iframe + naive Teleport 下 modal slot 的三条怪癖
+          （v0.6.2 同族；复现页 docs/_preview/waifu_smoke/_repro*.html 实测，
+          全部无 console 警告）：① slot 内插值/属性表达式调用方法（join/map/
+          Math.round）会在数据更新时打断整块渲染；② <template v-if> 子内容
+          更新时丢失（v0.13.0 已知坑的 modal 版）；③ slot 子树 :key 重建
+          （key 变化）后 Teleport 内容永久丢失——不要用 key 强刷。纪律：
+          弹窗内容纯 div 布局 + 纯字段插值 + span v-if，join/map 在后端拼好
+          或收口到 computed。 -->
+      <div class="stack-v">
+        <div class="bind-tip" style="margin-top: 0;">
+          自动为立绘不足配额（{{ batchQuota }} 张）的角色补图：
+          只补<b>存在可用参考图</b>的角色（无图跳过）；每张伪随机套一个内容主题
+          （相邻不重复）并随档记录；单张超时不卡队列；刷新页面不中断，重启 AstrBot 后队列清空。
+        </div>
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+          <span class="bind-tip" style="margin-top: 0;">范围</span>
+          <n-radio-group v-model:value="batchMode" size="small">
+            <n-radio-button value="all">全部角色</n-radio-button>
+            <n-radio-button value="packs">按卷</n-radio-button>
+            <n-radio-button value="series">按作品</n-radio-button>
+            <n-radio-button value="chars">按角色</n-radio-button>
+          </n-radio-group>
+          <n-select v-if="batchMode === 'packs'" v-model:value="batchPacks" multiple
+                    :options="packOpts" size="small" style="width: 240px;" clearable></n-select>
+          <n-select v-if="batchMode === 'series'" v-model:value="batchSeries" multiple
+                    :options="seriesOpts" size="small" style="width: 240px;" clearable
+                    filterable></n-select>
+          <n-select v-if="batchMode === 'chars'" v-model:value="batchChars" multiple
+                    :options="batchCharOpts" size="small" style="width: 240px;" clearable
+                    filterable></n-select>
+          <n-button size="small" :loading="batchPreviewLoading"
+                    :disabled="batchRunning" @click="doBatchPreview">预览</n-button>
+        </div>
+        <div v-if="batchPreview" class="bind-tip" style="margin-top: 0;">
+          将补 {{ batchPreview.items.length }} 个角色 / {{ batchPreview.total }} 张<span
+            v-if="batchPreview.skipped.length">；跳过 {{ batchPreview.skipped.length }} 个（无可用参考图）</span>：
+        </div>
+        <div v-if="batchPreview && batchPreview.items.length > 0"
+             style="max-height: 190px; overflow-y: auto; border: 1px solid rgba(128,128,128,.2);
+                    border-radius: 8px; padding: 6px 10px;">
+          <div v-for="it in batchPreview.items" :key="it.char_id" class="batch-row">
+            <b class="entry-name">{{ it.name }}</b>
+            <span class="bind-tip" style="margin-top: 0;">
+              {{ it.have }}/{{ batchPreview.quota }} → +{{ it.need }}　主题：{{ it.themes_text }}
+            </span>
+          </div>
+        </div>
+        <div class="bind-tip" v-if="batchPreview && batchPreview.skipped_text">
+          跳过：{{ batchPreview.skipped_text }}
+        </div>
+        <div v-if="batchProg && (batchProg.total > 0 || batchProg.running)">
+          <div class="bind-tip" style="margin-top: 4px;">
+            {{ batchProg.running ? "补图中" : (batchProg.stopped ? "已停止（未完成部分不再继续）" : "已结束") }}：
+            {{ batchProg.done }}/{{ batchProg.total }}（成功 {{ batchProg.ok }} · 跳过 {{ batchProg.skipped }} · 失败 {{ batchProg.failed }}）
+          </div>
+          <n-progress type="line"
+                      :percentage="batchPct"
+                      :show-indicator="false" style="margin-top: 4px;"></n-progress>
+          <div style="max-height: 160px; overflow-y: auto; margin-top: 6px;">
+            <div v-for="(it, ix) in batchProg.items" :key="ix" class="batch-row">
+              <n-tag size="tiny" :bordered="false"
+                     :type="it.status === 'ok' ? 'success' : (it.status === 'skipped' ? 'warning' : (it.status ? 'error' : 'default'))">
+                {{ it.status === "ok" ? "成功" : (it.status === "skipped" ? "跳过" : (it.status ? "失败" : "待生成")) }}
+              </n-tag>
+              <span class="bind-tip" style="margin-top: 0;">
+                {{ it.name || it.char_id }} · {{ it.theme_label || "" }}{{ it.error ? " · " + it.error : "" }}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 10px; align-items: center; margin-top: 6px;">
+          <n-button type="primary" size="small" :loading="batchStarting"
+                    :disabled="batchRunning" @click="doBatchStart">开始补图</n-button>
+          <n-button size="small" :disabled="!batchRunning" @click="doBatchStop">停止</n-button>
+          <span class="bind-tip" style="margin-top: 0;" v-if="batchRunning">
+            队列在后端继续运行，可安全离开本页面
+          </span>
+        </div>
+      </div>
     </n-modal>
 
     <!-- ============ 角色详情 · 参考图上传弹窗（v0.6.2 拖拽多选；v0.6.3 换公共组件 + 粘贴；preset 须 dialog，见上） ============ -->
@@ -3751,6 +3847,85 @@
         if (s === "base") return "base 直出";
         return s || "未知";
       }
+      // ---- 批量补图队列（v0.16.0）：范围筛选 → dry-run 预览 → 启动/停止/进度轮询 ----
+      var batchOpen = Vue.ref(false);
+      var batchMode = Vue.ref("all");
+      var batchPacks = Vue.ref([]);
+      var batchSeries = Vue.ref([]);
+      var batchChars = Vue.ref([]);
+      var batchPreview = Vue.ref(null);
+      var batchPreviewLoading = Vue.ref(false);
+      var batchStarting = Vue.ref(false);
+      var batchProg = Vue.ref(null);
+      var batchQuota = Vue.ref(5);
+      var batchTimer = null;
+      var batchRunning = Vue.computed(function () {
+        return !!(batchProg.value && batchProg.value.running);
+      });
+      // v0.16.0：⚠️ modal slot 内的插值/属性表达式不做方法调用（Math.round /
+      // join / map 会在数据更新时打断整块渲染、静默清空——sandbox iframe +
+      // naive Teleport 实测，复现页在 docs/_preview/waifu_smoke）——全部收口
+      // 到 computed 或后端文本字段
+      var batchPct = Vue.computed(function () {
+        var p = batchProg.value;
+        if (!p || !p.total) return 0;
+        return Math.round((p.done || 0) * 100 / p.total);
+      });
+      var batchCharOpts = Vue.computed(function () {
+        return (allEntries.value || []).map(function (e) {
+          return { label: (e.name || e.id) + "（" + (e.series || "未知作品") + "）",
+                   value: e.id };
+        });
+      });
+      function batchPayload() {
+        return { mode: batchMode.value,
+                 packs: batchPacks.value, series: batchSeries.value,
+                 chars: batchChars.value };
+      }
+      function openBatchModal() {
+        batchOpen.value = true;
+        pollBatch();   // 打开即拉一次进度（队列可能已在后台跑）
+      }
+      async function doBatchPreview() {
+        batchPreviewLoading.value = true;
+        try {
+          var res = await apiPost("batch/preview", batchPayload());
+          batchPreview.value = res || null;
+        } catch (e) { /* 已提示 */ } finally {
+          batchPreviewLoading.value = false;
+        }
+      }
+      async function doBatchStart() {
+        batchStarting.value = true;
+        try {
+          var res = await apiPost("batch/start", batchPayload());
+          if (res && res.queued > 0) {
+            message.success("队列已启动：" + res.chars + " 个角色 / " + res.queued + " 张"
+              + (res.skipped ? "（跳过 " + res.skipped + " 个无参考图角色）" : ""));
+            batchPreview.value = null;
+            pollBatch();
+          }
+        } catch (e) { /* 已提示 */ } finally {
+          batchStarting.value = false;
+        }
+      }
+      async function doBatchStop() {
+        try { await apiPost("batch/stop", {}); } catch (e) { /* 已提示 */ }
+        pollBatch();
+      }
+      async function pollBatch() {
+        try {
+          var res = await apiPost("batch/status", {});
+          if (res) {
+            batchProg.value = res.batch || null;
+            batchQuota.value = res.quota || batchQuota.value;
+          }
+        } catch (e) { /* 已提示 */ }
+        if (batchOpen.value) { batchTimer = setTimeout(pollBatch, 2000); }
+      }
+      Vue.watch(batchOpen, function (open) {
+        if (!open && batchTimer) { clearTimeout(batchTimer); batchTimer = null; }
+      });
       // v0.14.0 维度级控制：单独重摇(attempts) / 锁定(fixed) / 移除(disabled) /
       // 启用(enabled)，随 preview 请求发往 prompt_gen.apply_dim_state
       var galDimAttempts = Vue.ref({});
@@ -5155,6 +5330,15 @@
         galDetailOpen: galDetailOpen, galDetail: galDetail,
         openGalDetail: openGalDetail, themeLabel: themeLabel,
         portraitStrategyLabel: portraitStrategyLabel,
+        // v0.16.0：批量补图队列
+        batchOpen: batchOpen, batchMode: batchMode, batchPacks: batchPacks,
+        batchSeries: batchSeries, batchChars: batchChars,
+        batchPreview: batchPreview, batchPreviewLoading: batchPreviewLoading,
+        batchStarting: batchStarting, batchProg: batchProg,
+        batchQuota: batchQuota, batchRunning: batchRunning, batchPct: batchPct,
+        batchCharOpts: batchCharOpts, openBatchModal: openBatchModal,
+        doBatchPreview: doBatchPreview, doBatchStart: doBatchStart,
+        doBatchStop: doBatchStop,
         bindText: bindText, parsedBind: parsedBind, bindSaving: bindSaving,
         bindRows: bindRows, bindPackOpts: bindPackOpts, bindRawOpen: bindRawOpen,
         bindLoading: bindLoading, loadBindPools: loadBindPools, onBindRawInput: onBindRawInput,

@@ -2,6 +2,53 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.16.0 (2026-11-13)
+
+后台批量补图队列：全局/按卷/按作品/按角色自动补立绘（前提筛选 + 主题轮换伪随机 + 任务队列 + 单张超时不卡队）（版本 v0.15.0 -> v0.16.0）。
+
+- **需求（用户）**：做一个自动伪随机生成立绘的后台任务——全局或批量选择某些作品/角色补立绘；前提两条：①存在指定参考图（不存在则跳过）②角色立绘数量不足配置的配额；做成任务队列，每张遵循超时时间，避免一张卡住整体进度；每张随机套一个主题场景（多整点避免主题重复）。即待办清单里的「批量补图队列」。
+- **实现（后端，新顶层模块 `batch_fill.py`）**：
+  - 纯函数（可独立测）：`content_theme_ids()`（内容主题池，排除 random/tpl_ 模板）、
+    `theme_plan(char_id, salt, n)`（伪随机 + **相邻不重复**的主题序列，种子源
+    sha256(salt|batch|char_id)，60 张覆盖 ≥6 个主题有守卫）、`pick_candidates`
+    （前提筛选：`count < quota` 且 require_ref 时 `draw.has_gen_refs` 为真——
+    strategy.ref / gen_refs 文件真实存在，「不存在则跳过」；配置
+    `batch_require_ref` 默认开，关闭后 base 直出条目无图也补）、`build_tasks`
+    （每角色展开逐张任务并附主题）。
+  - `BatchRunner`：插件实例内存态队列（重启即清，面板如实提示），串行逐张；
+    单张超时由 `draw.generate_portrait` 内部的 draw_timeout 兜底——超时/失败/
+    萌绘未就绪都只记状态继续下一张，绝不卡整体；每张生成前现取
+    `next_portrait_seq`（中途有人抽卡/手补也不撞号）；提示词按该张主题生成，
+    归档随档记录 prompt + theme（v0.15.0 的详情弹窗直接可见）；停止 =
+    当前张完成后不再开始下一张。
+  - API：`POST /batch/preview`（dry-run：将补角色清单 + 每张将套用的主题序列
+    + 因无参考图跳过的名单）、`POST /batch/start`、`GET|POST /batch/status`
+    （进度快照）、`POST /batch/stop`。verified 条目限定，与抽卡同口径。
+  - 配置新增 `batch_require_ref`（默认开）。
+- **实现（前端）**：角色库工具栏「批量补图」按钮 → 弹窗（dialog 预设）：
+  范围四选（全部/按卷/按作品/按角色，多选下拉）→ 预览（角色行显示
+  已有/配额 → 补几张 + 主题序列文本）→ 开始/停止 + 进度条 + 逐张状态
+  （成功/跳过/失败 + 错误摘要），2s 轮询；队列在后端继续运行可安全离开页面。
+- **守卫与教训**：
+  - `tests/test_batch_fill.py`：主题轮换（相邻不重复/分布不退化/决定论）、
+    前提筛选（require_ref 开关/满额跳过/缺几张补几张）、任务展开、
+    BatchRunner 状态机（假 draw/prompt_gen 桩跑真队列：全完成计数、
+    随档记录、停止语义 done<total）。
+  - `test_webui_contract` 路由表补 4 条 batch 端点；`build_zip.ps1`
+    `$includeList` 与 `main.py` 热重载列表同步 batch_fill.py（守卫通过）。
+  - **⚠️ 工坊 modal slot 纪律（本版本踩实，写入 docs/设计说明.md）**：
+    sandbox iframe + naive Teleport 下，modal slot 内插值/属性表达式调用
+    方法（join/map/Math.round）、`<template v-if>`、slot 子树 `:key` 重建，
+    都会在数据更新时打断渲染或永久丢内容（全部无 console 警告）——弹窗
+    内容一律纯 div 布局 + 纯字段插值 + span v-if，join/map 后端拼好
+    （preview 响应新增 `themes_text`/`skipped_text`）或收口 computed
+    （`batchPct`）。
+  - **⚠️ 冒烟 fixture 教训（v0.13.5 同类）**：桩桥的 batch/status 必须
+    模拟真实状态机（idle→running→done）；恒返回 running 会让面板按钮
+    全 disabled、点击静默无效，症状与「渲染坏了」一模一样，排障两小时
+    才发现是 fixture 问题。复现页（docs/_preview/waifu_smoke/_repro*.html，
+    不入库）是本次定位的关键工具。
+
 ## v0.15.0 (2026-11-13)
 
 角色详情三连：立绘编号重复根因修复 + 最新在前可排序、立绘随档记录主题/提示词（详情弹窗）、生成源区正方形缩略与选中交互重做（版本 v0.14.0 -> v0.15.0）。

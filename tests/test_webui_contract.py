@@ -64,6 +64,7 @@ ROUTES = """
 /refs/orphan_delete
 /refs/set_draw_source /overview
 /prompt/pools
+/batch/preview /batch/start /batch/status /batch/stop
 """.split()
 
 STORE_METHODS = """
