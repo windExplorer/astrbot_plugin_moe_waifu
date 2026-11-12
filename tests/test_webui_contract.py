@@ -49,8 +49,7 @@ galOrphans bindOrphan
 ov goMenu refreshing refreshAll
 galDrawRef galDrawRefAbs setDrawSource galRefsSel
 workKeyword workFilterCat workFilterVerified workSort workCatOpts workVerifiedOpts
-workSortOpts filteredWorks workAddOpen workAddSel workAddSaving workAddOpts
-addWorkChars toggleWorkChar
+workSortOpts filteredWorks toggleWorkChar openNewForWork
 fmtTime cfgBoundGroups pickSimGroup simScopeText
 """.split()
 
@@ -58,7 +57,7 @@ ROUTES = """
 /records /records/detail /records/events /stats /users /user /filters
 /debug/state /debug/history /debug/simulate /debug/rerender
 /portraits/move_to_ref /refs/move_to_portrait /refs/orphans
-/refs/set_draw_source /overview /works/add_character
+/refs/set_draw_source /overview
 """.split()
 
 STORE_METHODS = """
@@ -162,8 +161,8 @@ def main():
     check("出卡源由卡片按钮指定",
           'setDrawSource(it.abs)' in page and 'setDrawSource(r.path)' in page)
     check("出卡源不再用路径下拉", "galDrawOpts" not in page)
-    check("作品库有筛选 / 排序 / 添加角色 / 启停",
-          all(k in page for k in ("filteredWorks", "workSort", "addWorkChars",
+    check("作品库有筛选 / 排序 / 添加角色（新建）/ 启停",
+          all(k in page for k in ("filteredWorks", "workSort", "openNewForWork",
                                   "toggleWorkChar")))
 
     if FAILURES:

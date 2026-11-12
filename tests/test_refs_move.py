@@ -322,21 +322,6 @@ def test_draw_source(root: Path):
     st.close()
 
 
-def test_works_add_character(root: Path):
-    """v0.12.0：作品详情添加角色 = 改 entry.series（跨作品会移动）。"""
-    plugin, st = make_plugin(root)
-    before = str(char_of(root, "c1").get("series") or "")
-    res = asyncio.run(call_handler(plugin, api.h_works_add_character,
-                                   {"series": "新作品", "id": "c1"}))
-    check("添加角色成功", res["status"] == "ok", str(res))
-    check("series 已改", char_of(root, "c1")["series"] == "新作品")
-    check("返回原作品", res["data"]["from"] == before)
-    bad = asyncio.run(call_handler(plugin, api.h_works_add_character,
-                                   {"series": "x", "id": "ghost"}))
-    check("角色不存在时报错", bad["status"] == "error")
-    st.close()
-
-
 def main():
     jobs = [("move_to_ref", test_move_to_ref), ("roundtrip", test_roundtrip),
             ("delete_legacy", test_delete_legacy_dirty_data),
@@ -346,8 +331,7 @@ def main():
             ("save_keeps_refs", test_save_entry_keeps_refs),
             ("unbind_shared", test_unbind_shared_ref),
             ("orphans", test_orphans_recovery),
-            ("draw_source", test_draw_source),
-            ("works_add_char", test_works_add_character)]
+            ("draw_source", test_draw_source)]
     for name, fn in jobs:
         with tempfile.TemporaryDirectory() as td:
             print(f"--- {name} ---")

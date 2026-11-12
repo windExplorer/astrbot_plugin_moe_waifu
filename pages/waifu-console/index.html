@@ -424,7 +424,8 @@
                 <b style="font-size: 16px;">{{ currentWork.series }}</b>
                 <n-tag size="small" :bordered="false">{{ catLabel(currentWork.category) }}</n-tag>
                 <span class="bind-tip">{{ currentWork.total }} 个角色 · {{ currentWork.verified }} 已验证 · {{ currentWork.portrait_count }} 张立绘</span>
-                <n-button size="small" type="primary" secondary @click="workAddOpen = true">添加角色</n-button>
+                <n-button size="small" type="primary" secondary
+                          @click="openNewForWork(currentWork.series)">添加角色</n-button>
                 <n-button size="small" @click="openWorkCover">设置作品封面</n-button>
               </n-space>
               <n-grid :cols="uiCols" :x-gap="12" :y-gap="12">
@@ -458,24 +459,9 @@
                 </n-gi>
               </n-grid>
               <n-empty v-if="currentWork.characters.length === 0"
-                       description="该作品暂无角色，点上方「添加角色」从角色库选"></n-empty>
+                       description="该作品暂无角色，点上方「添加角色」新建一个"></n-empty>
             </div>
-            <n-modal v-model:show="workAddOpen" preset="card"
-                     :title="'添加角色到「' + (currentWork ? currentWork.series : '') + '」'"
-                     style="width: 560px;">
-              <div class="stack">
-                <div class="bind-tip" style="margin-top: 0;">
-                  从角色库选择要归入本作品的角色（可多选）；已在别的作品里的角色会直接移过来。
-                </div>
-                <n-select v-model:value="workAddSel" :options="workAddOpts" multiple filterable
-                          placeholder="搜索角色名 / id" :max-tag-count="6"></n-select>
-                <n-space justify="end">
-                  <n-button size="small" @click="workAddOpen = false">取消</n-button>
-                  <n-button size="small" type="primary" :loading="workAddSaving"
-                            :disabled="!workAddSel.length" @click="addWorkChars">加入</n-button>
-                </n-space>
-              </div>
-            </n-modal>
+
           </div>
 
           <!-- ============ 试画台（v0.5.9 三步流：选角色 → 确认提示词 → 生成） ============ -->
@@ -2682,6 +2668,15 @@
         drawerTitle.value = "新增角色";
         showDrawer.value = true;
       }
+      function openNewForWork(series) {
+        // 作品详情「添加角色」：直接新建一个属于该作品的角色（大概率角色库里
+        // 还没有），预填作品名；不提供"从角色库挑"的入口（那会把已有角色挪走）。
+        isNew.value = true;
+        form.value = emptyForm();
+        form.value.series = String(series || "");
+        drawerTitle.value = "新增角色 · " + (series || "");
+        showDrawer.value = true;
+      }
       function openEdit(e) {
         isNew.value = false;
         form.value = entryToForm(e);
@@ -4287,40 +4282,6 @@
         });
         return out;
       });
-      // 作品详情：添加角色（把角色 series 改成当前作品）
-      var workAddOpen = Vue.ref(false);
-      var workAddSel = Vue.ref([]);
-      var workAddSaving = Vue.ref(false);
-      var workAddOpts = Vue.computed(function () {
-        var series = currentWork.value ? currentWork.value.series : "";
-        return (allEntries.value || [])
-          .filter(function (e) { return e.series !== series; })
-          .map(function (e) {
-            return {
-              label: e.name + "（" + e.id + (e.series ? " · " + e.series : " · 无作品") + "）",
-              value: e.id
-            };
-          });
-      });
-      async function addWorkChars() {
-        if (!currentWork.value || !workAddSel.value.length) return;
-        var series = currentWork.value.series;
-        workAddSaving.value = true;
-        var okN = 0;
-        for (var i = 0; i < workAddSel.value.length; i++) {
-          try {
-            await apiPost("works/add_character",
-                          { series: series, id: workAddSel.value[i] });
-            okN += 1;
-          } catch (e) { /* 单条失败不挡后续 */ }
-        }
-        workAddSaving.value = false;
-        if (!okN) return;
-        message.success("已加入 " + okN + " 个角色到「" + series + "」");
-        workAddOpen.value = false;
-        workAddSel.value = [];
-        await refreshAll();
-      }
       async function toggleWorkChar(c, val) {
         try {
           await apiPost("pools/set_verified", { id: c.id, verified: !!val });
@@ -4561,8 +4522,7 @@
         workFilterVerified: workFilterVerified, workSort: workSort,
         workCatOpts: workCatOpts, workVerifiedOpts: workVerifiedOpts,
         workSortOpts: workSortOpts, filteredWorks: filteredWorks,
-        workAddOpen: workAddOpen, workAddSel: workAddSel, workAddSaving: workAddSaving,
-        workAddOpts: workAddOpts, addWorkChars: addWorkChars, toggleWorkChar: toggleWorkChar,
+        toggleWorkChar: toggleWorkChar, openNewForWork: openNewForWork,
         openWork: openWork, backWorks: backWorks, gotoTry: gotoTry, openEditById: openEditById,
         workCoverModal: workCoverModal, workCoverSeries: workCoverSeries,
         workCoverCandidates: workCoverCandidates, openWorkCover: openWorkCover,

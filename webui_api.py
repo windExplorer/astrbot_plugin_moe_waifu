@@ -1075,28 +1075,6 @@ async def h_works_set_cover(plugin) -> dict:
     return ok({"series": series, "cover": cover})
 
 
-async def h_works_add_character(plugin) -> dict:
-    """把角色库里的一条角色归入某个作品（改 entry.series）。
-
-    作品库是按 series 聚合的，「添加角色」本质就是改 series；已在别的作品
-    里的角色会被移过来（返回 from 便于前端提示）。
-    """
-    body = await _body()
-    series = str(body.get("series") or "").strip()
-    cid = str(body.get("id") or "").strip()
-    if not series or not cid:
-        return err("缺少 series 或 id")
-    old = {"series": ""}
-
-    def mutate(e, raw):
-        old["series"] = str(raw.get("series") or "")
-        raw["series"] = series
-
-    if _set_entry_field(plugin, cid, mutate) is None:
-        return err(f"角色库里找不到 {cid}")
-    return ok({"id": cid, "series": series, "from": old["series"]})
-
-
 async def h_refs_list(plugin) -> dict:
     """某角色的参考图库：strategy.refs 列表 + 主参考（strategy.ref）。"""
     body = await _body()
@@ -2311,7 +2289,6 @@ def register(plugin) -> None:
         ("/refs/unbind", h_refs_unbind, ["POST"]),
         ("/pools/set_cover", h_set_cover, ["POST"]),
         ("/works/set_cover", h_works_set_cover, ["POST"]),
-        ("/works/add_character", h_works_add_character, ["POST"]),
         ("/jobs/start", h_job_start, ["POST"]),
         ("/jobs/status", h_job_status, ["GET", "POST"]),
         ("/jobs/archive", h_job_archive, ["POST"]),
