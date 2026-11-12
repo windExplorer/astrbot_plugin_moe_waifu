@@ -143,13 +143,31 @@ for seed in (1, 42, 777, 99999):
     check(f"三视图模板强制标准站姿(seed={seed})", "标准站姿" in p3["pose"]["zh"])
     check(f"三视图模板强制微笑(seed={seed})", "微笑" in p3["expression"]["zh"])
     check(f"三视图模板随机穿搭在池内(seed={seed})", p3["outfit"]["zh"] in pool_zh)
-    check(f"三视图模板强制纯色背景(seed={seed})", "纯" in p3["background"]["zh"])
+    check(f"三视图模板强制灰底(seed={seed})", "灰" in p3["background"]["zh"])
 p4 = prompt_gen.pick_variations(42, tpl4)
 check("四视图模板强制四视图", "四视图" in p4["compose"]["zh"])
 check("四视图模板随机穿搭在池内", p4["outfit"]["zh"] in pool_zh)
 ps = prompt_gen.pick_variations(42, tpl_s)
 check("站姿模板强制正常站姿构图", "正常站姿" in ps["compose"]["zh"])
 check("站姿模板随机穿搭在池内", ps["outfit"]["zh"] in pool_zh)
+
+# v0.13.0：三视图文案（正/侧/背 + 灰底）、单图模板、JK 款式不再只有水手服
+check("三视图文案含正/侧/背与灰底",
+      all(k in p3["compose"]["zh"] for k in ("三视图", "正面", "侧面", "背面", "灰")))
+tpl_single = prompt_gen.get_theme("tpl_single")
+check("单图模板存在", tpl_single is not None)
+p1s = prompt_gen.pick_variations(42, tpl_single)
+check("单图模板强制单张全身构图", "单张全身立绘" in p1s["compose"]["zh"])
+check("单图模板灰底", "灰" in p1s["background"]["zh"])
+campus = prompt_gen.get_theme("campus")
+campus_outfits = {prompt_gen.pick_variations(s, campus)["outfit"]["zh"] for s in range(400)}
+check("校园主题 JK 款式足够多样（>=5）", len(campus_outfits) >= 5)
+check("服装池已扩充（>=28 款）", len(prompt_gen.OUTFITS) >= 28)
+# 三视图的图生图指令不能被句尾「单人竖版立绘」拉回单图
+inst_3v = prompt_gen.build_local_instruction(
+    ENTRY, prompt_gen.pick_variations(42, tpl3))
+check("三视图指令要求同图并列而非单人竖版",
+      "单人完整竖版立绘" not in inst_3v and "并列" in inst_3v)
 # 指定穿搭（outfit_override，v0.7.4）
 p_fix = prompt_gen.pick_variations(42, tpl3, "白色婚纱")
 check("指定穿搭覆盖随机", p_fix["outfit"]["zh"] == "白色婚纱")

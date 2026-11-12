@@ -33,14 +33,33 @@ except Exception:  # pragma: no cover - 本地平铺调试
 # zh 为空 = 无需提及该项；en 为空 = 文生图不追加 tag。
 
 OUTFITS = [
-    {"w": 9, "zh": "水手服JK制服", "en": "sailor school uniform, serafuku"},
+    {"w": 5, "zh": "水手服JK制服", "en": "sailor school uniform, serafuku"},
+    # —— v0.13.0：JK / 校园系扩充（用户反馈「校园主题每次都是水手服」：
+    #    原来主题子集里只有水手服(权重9)与运动外套(权重5)，等于二选一）——
+    {"w": 5, "zh": "西装夹克JK制服（格纹百褶裙）", "en": "blazer, school uniform, plaid skirt"},
+    {"w": 5, "zh": "针织开衫JK制服（衬衫领结 + 百褶裙）", "en": "cardigan, school uniform, shirt, ribbon, pleated skirt"},
+    {"w": 4, "zh": "背带裙JK制服（白衬衫 + 背带）", "en": "suspender skirt, school uniform, shirt"},
+    {"w": 4, "zh": "马甲衬衫JK制服", "en": "vest, shirt, school uniform"},
+    {"w": 4, "zh": "长袖白衬衫与深色百褶裙（学院风）", "en": "white shirt, pleated skirt, school uniform"},
+    {"w": 3, "zh": "冬季呢子校服大衣与围巾", "en": "duffle coat, school uniform, scarf"},
     {"w": 7, "zh": "白色婚纱", "en": "white wedding dress, bridal veil"},
+    {"w": 4, "zh": "简约白色吊带礼服", "en": "white evening gown, sleeveless dress"},
+    {"w": 4, "zh": "秀禾服（中式红色婚服）", "en": "chinese wedding dress, red hanfu"},
     {"w": 7, "zh": "黑色旗袍", "en": "black qipao, china dress"},
+    {"w": 4, "zh": "改良短款旗袍", "en": "short qipao, china dress"},
+    {"w": 3, "zh": "旗袍配毛披肩", "en": "qipao, fur shawl"},
     {"w": 6, "zh": "连体泳装", "en": "one-piece swimsuit"},
     {"w": 4, "zh": "分体泳装", "en": "bikini swimsuit"},
+    {"w": 4, "zh": "连体竞技泳衣", "en": "competition swimsuit, one-piece swimsuit"},
+    {"w": 3, "zh": "泳装外搭防晒衬衫", "en": "swimsuit, oversized shirt"},
     {"w": 7, "zh": "干练的职业西装套裙", "en": "business suit, office lady"},
+    {"w": 4, "zh": "西装裤装套装", "en": "business suit, pants suit"},
+    {"w": 3, "zh": "马甲与衬衫的通勤装", "en": "vest, shirt, office lady"},
     {"w": 6, "zh": "日式浴衣", "en": "yukata, japanese clothes"},
+    {"w": 4, "zh": "振袖和服（深色系）", "en": "furisode, japanese clothes"},
     {"w": 6, "zh": "女仆装", "en": "maid outfit, maid headdress"},
+    {"w": 4, "zh": "咖啡厅女仆装（围裙 + 发带）", "en": "maid outfit, apron, maid headdress"},
+    {"w": 3, "zh": "和风女仆装", "en": "wa maid, japanese clothes, maid outfit"},
     {"w": 5, "zh": "运动外套与短裤", "en": "track jacket, gym clothes"},
     {"w": 5, "zh": "冬季大衣与围巾", "en": "winter coat, scarf"},
     {"w": 6, "zh": "碎花夏日连衣裙", "en": "floral summer dress"},
@@ -104,12 +123,15 @@ POSES = [
 # 全身站姿/三视图/四视图；「立绘模板」主题（THEMES 带 tpl_ 前缀）强制约束到此维度。
 COMPOSE = [
     {"w": 24, "zh": "", "en": ""},
-    {"w": 3, "zh": "正常站姿的全身立绘（正面朝向镜头，纯色背景）",
+    # v0.13.0：三/四视图模板文案按用户口径写死（正面 / 侧面 / 背面 + 灰色背景），
+    # 单图项只描述构图，背景交给 background 维度（免得「纯色」与模板灰底打架）。
+    {"w": 3, "zh": "正常站姿的单张全身立绘（正面朝向镜头）",
      "en": "simple background, standing, full body, front-facing"},
-    {"w": 1, "zh": "三视图（正面、侧面、背面同框，纯色背景）",
-     "en": "character sheet, three views, front view, side view, back view, simple background"},
-    {"w": 1, "zh": "四视图（四个不同角度同框，纯色背景）",
-     "en": "character sheet, multiple views, four views, simple background"},
+    {"w": 2, "zh": "三视图（正面、侧面、背面同框，灰色纯色背景）",
+     "en": "character sheet, three views, front view, side view, back view, grey background"},
+    {"w": 1, "zh": "四视图（正面、侧面、背面、四分之三侧面同框，灰色纯色背景）",
+     "en": "character sheet, four views, front view, side view, back view, "
+           "three-quarter view, grey background"},
 ]
 
 EXPRESSIONS = [
@@ -158,17 +180,27 @@ THEMES = (
     {"id": "tpl_standing", "label": "【模板】纯色背景 · 正常站姿",
      "outfit_kw": [], "bg_kw": ["纯"], "pose_kw": ["标准站姿"],
      "expression_kw": ["微笑"], "compose_kw": ["正常站姿"]},
-    {"id": "tpl_3view", "label": "【模板】三视图（正/侧/背）",
-     "outfit_kw": [], "bg_kw": ["纯"], "pose_kw": ["标准站姿"],
+    # v0.13.0：单图 / 三视图 / 四视图三套底稿模板，统一灰底（character sheet 惯例），
+    # 图生图配上「本次生成源」多选（正/侧/背分图）即可按参考图出底稿。
+    {"id": "tpl_single", "label": "【模板】单图 · 正面全身（灰底）",
+     "outfit_kw": [], "bg_kw": ["灰"], "pose_kw": ["标准站姿"],
+     "expression_kw": ["微笑"], "compose_kw": ["单张全身立绘"]},
+    {"id": "tpl_3view", "label": "【模板】三视图（正/侧/背 · 灰底）",
+     "outfit_kw": [], "bg_kw": ["灰"], "pose_kw": ["标准站姿"],
      "expression_kw": ["微笑"], "compose_kw": ["三视图"]},
-    {"id": "tpl_4view", "label": "【模板】四视图（多角度同框）",
-     "outfit_kw": [], "bg_kw": ["纯"], "pose_kw": ["标准站姿"],
+    {"id": "tpl_4view", "label": "【模板】四视图（正/侧/背/¾ · 灰底）",
+     "outfit_kw": [], "bg_kw": ["灰"], "pose_kw": ["标准站姿"],
      "expression_kw": ["微笑"], "compose_kw": ["四视图"]},
     {"id": "swimsuit", "label": "泳装 · 夏日", "outfit_kw": ["泳装"], "bg_kw": ["海边"]},
-    {"id": "campus", "label": "校园 · JK", "outfit_kw": ["水手服", "运动外套"], "bg_kw": ["教室", "樱花"]},
-    {"id": "wedding", "label": "婚纱 · 典礼", "outfit_kw": ["婚纱"], "bg_kw": ["纯白", "浅粉"]},
-    {"id": "office", "label": "职场 · 通勤", "outfit_kw": ["西装", "毛衣"], "bg_kw": ["咖啡馆", "霓虹"]},
-    {"id": "kimono", "label": "和风 · 浴衣", "outfit_kw": ["浴衣"], "bg_kw": ["和室", "樱花"]},
+    {"id": "campus", "label": "校园 · JK",
+     "outfit_kw": ["水手服", "西装夹克", "针织开衫", "背带", "马甲", "百褶裙", "运动外套"],
+     "bg_kw": ["教室", "樱花"]},
+    {"id": "wedding", "label": "婚纱 · 典礼",
+     "outfit_kw": ["婚纱", "礼服", "秀禾"], "bg_kw": ["纯白", "浅粉"]},
+    {"id": "office", "label": "职场 · 通勤",
+     "outfit_kw": ["西装", "毛衣", "马甲"], "bg_kw": ["咖啡馆", "霓虹"]},
+    {"id": "kimono", "label": "和风 · 浴衣",
+     "outfit_kw": ["浴衣", "和服", "振袖"], "bg_kw": ["和室", "樱花"]},
     {"id": "gothic", "label": "暗黑 · 哥特", "outfit_kw": ["哥特", "女巫"], "bg_kw": ["霓虹", "雨"]},
     {"id": "home", "label": "居家 · 慵懒", "outfit_kw": ["睡衣", "毛衣"], "bg_kw": ["雨", "和室", "咖啡馆"]},
     {"id": "idol", "label": "偶像 · 舞台", "outfit_kw": ["打歌服"], "bg_kw": ["圣诞", "霓虹", "星空"]},
@@ -251,6 +283,12 @@ def pick_variations(seed_int: int, theme: dict | None = None,
     return picks
 
 
+def _compose_is_multi(picks: dict) -> bool:
+    """本轮是否要求多视图底稿（三/四视图模板）。LLM 提示与兜底文案都要跟着改。"""
+    zh = str((picks.get("compose") or {}).get("zh") or "")
+    return ("三视图" in zh) or ("四视图" in zh)
+
+
 def variation_zh_list(picks: dict) -> list:
     """本轮要改的中文维度短语（跳过「保持不变」的空项），LLM 元提示用。"""
     order = [("构图视图", "compose"), ("服装", "outfit"), ("背景与光照", "background"),
@@ -288,8 +326,13 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "") -> str:
     extra = str(custom or "").strip().strip("。，,")
     if extra:
         parts.append(extra)
-    tail = ("。保持人物的面部特征、发型发色与角色辨识度不变，只做上述改动；"
-            "输出单人完整竖版立绘")
+    # v0.13.0：三/四视图模板不能被句尾的「单人竖版立绘」拉回单图——
+    # 图生图指令必须明确要求同一张图内并列多个视角。
+    compose_zh = str((picks.get("compose") or {}).get("zh") or "")
+    multi_view = ("三视图" in compose_zh) or ("四视图" in compose_zh)
+    tail = "。保持人物的面部特征、发型发色与角色辨识度不变，只做上述改动；"
+    tail += ("在同一张图内并列展示上述各个视角，输出角色设定稿"
+             if multi_view else "输出单人完整竖版立绘")
     if not parts:
         return ("根据参考图重新绘制该角色的单人完整竖版立绘"
                 "，保持人物的面部特征、发型发色与角色辨识度不变")
@@ -343,7 +386,10 @@ def build_t2i_qwen_local(entry: dict, picks: dict, custom: str = "") -> str:
         zh.append(extra)
     zh = [s for s in zh if s]
     tags = str(entry.get("tags_en") or "").strip().rstrip(",")
-    lines = ["一幅单人完整竖版角色立绘插画，构图干净、光影柔和、细节精致"]
+    head = ("一幅在同一张图内并列展示正面、侧面、背面多视角的角色设定稿"
+            if _compose_is_multi(picks)
+            else "一幅单人完整竖版角色立绘插画")
+    lines = [head + "，构图干净、光影柔和、细节精致"]
     if zh:
         lines.append("；".join(zh))
     if tags:
@@ -367,7 +413,8 @@ _SYSTEM_PROMPT = (
 _SYSTEM_T2I_NATURAL = (
     "你为 Moss-Image（自然语言系文生图模型，英文效果最好）撰写单人角色立绘的"
     "英文提示词。写法：一段连贯的英文描述（caption），覆盖主体外观、服装、"
-    "动作姿势、表情、场景与光照、构图（full body portrait）；角色身份锚定——"
+    "动作姿势、表情、场景与光照、构图（默认 full body portrait；多视图要求时用 "
+    "character sheet, multiple views, front view, side view, back view）；角色身份锚定——"
     "把已给 tags 里的发色/发型/瞳色/标志性特征自然融入描述，点名用"
     "「规范英文名（作品名）」句式。禁止：8k/highly detailed 之类质量词堆砌"
     "（最多以 best quality, highres 开头）、markdown、解释性文字。"
@@ -380,7 +427,8 @@ _SYSTEM_T2I_QWEN = (
     "你为 Qwen-Image-2.1（通义千问图像模型，文生图吃官方格式的连贯长描述）"
     "撰写单人角色立绘提示词。写法：一段连贯的中文描述（5~10 句），覆盖角色"
     "外观（把已给 tags 的发色/发型/瞳色/服装特征写成自然语句）、服装、姿势、"
-    "表情、背景环境与光影、构图（单人完整竖版立绘）；不写比例数字、"
+    "表情、背景环境与光影、构图（默认单人完整竖版立绘；若改动维度要求三/四视图，"
+    "则写成同一张图内并列展示正面、侧面、背面的角色设定稿）；不写比例数字、"
     "不写 best quality 之类画质套话、不用 markdown、不写标签串。"
     "输出纪律：只输出提示词本体一段话，不要解释、不要引号、不要分点。"
 )
@@ -402,9 +450,13 @@ def build_meta_prompt(entry: dict, picks: dict, custom: str = "") -> str:
     extra = str(custom or "").strip()
     if extra:
         lines.append(f"- 用户附加要求：{extra}")
+    goal = ("角色是二次元角色；本轮要求在同一张图内并列展示正面、侧面、背面等"
+            "多个视角，输出角色设定稿，不要退化成单张立绘。"
+            if _compose_is_multi(picks)
+            else "角色是二次元角色，目标是单人完整竖版立绘。")
     lines += [
         "请把以上改动自然融合成一条编辑指令；未列出的维度一律不要改动。",
-        "角色是二次元角色，目标是单人完整竖版立绘。",
+        goal,
     ]
     return "\n".join(lines)
 
@@ -502,7 +554,9 @@ def build_t2i_meta_prompt(entry: dict, picks: dict, style: str,
         segs += [f"{label}：{zh}" for label, zh in variation_zh_list(picks)]
         if extra:
             segs.append(f"用户附加要求：{extra}")
-        segs.append("目标是单人完整竖版立绘，请写成一段连贯中文长描述。")
+        segs.append("目标是同一张图内并列展示多视角的角色设定稿，请写成一段连贯中文长描述。"
+                    if _compose_is_multi(picks)
+                    else "目标是单人完整竖版立绘，请写成一段连贯中文长描述。")
         return "\n".join(segs)
     # natural（MOSS 口径）
     head = f"Character: {name}" + (f" ({series})" if series else "")
