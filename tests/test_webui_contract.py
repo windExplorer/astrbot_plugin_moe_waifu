@@ -170,6 +170,12 @@ def main():
           all(k in page for k in ("filteredWorks", "workSort", "openNewForWork",
                                   "toggleWorkChar")))
 
+    # 11) 渲染健壮性（v0.13.5）：库里 seed 是 INTEGER，模板对数字直接 .slice
+    #     会抛 TypeError → 整个立绘墙渲染中断（真机「只有标题没图片」事故）
+    check("立绘卡 seed 截断先 String 化（数字无 .slice，直接 slice 炸渲染）",
+          "String(it.seed" in template
+          and '(it.seed || "").slice' not in template)
+
     if FAILURES:
         print(f"test_webui_contract: {len(FAILURES)} FAILED")
         sys.exit(1)

@@ -202,6 +202,20 @@
   .try-char-thumb { width: 52px; height: 89px; object-fit: cover; border-radius: 8px;
                     flex: none; box-shadow: 0 2px 8px rgba(120,60,110,.16);
                     cursor: zoom-in; display: block; }
+  /* ---- v0.13.5：醒目折叠条（可折叠图片块）----
+     旧版是一行灰色小字「▸ 展开 · 发现 N 张…」，用户根本注意不到里面有图 */
+  .fold-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+              margin-top: 10px; border: 1px solid rgba(214,51,132,.35);
+              border-radius: 8px; background: rgba(214,51,132,.08);
+              cursor: pointer; user-select: none; transition: background .15s ease; }
+  .fold-bar:hover { background: rgba(214,51,132,.16); }
+  .fold-bar b { font-size: 13px; }
+  .fold-chevron { display: inline-block; font-weight: 700; flex: none;
+                  transition: transform .15s ease; }
+  .fold-chevron.open { transform: rotate(90deg); }
+  .fold-count { flex: none; min-width: 24px; text-align: center; padding: 1px 8px;
+                border-radius: 999px; background: #fff; font-size: 12px;
+                font-weight: 700; box-shadow: 0 1px 3px rgba(120,60,110,.2); }
   .sim-hero { display: flex; align-items: center; gap: 14px; padding: 12px;
               border-radius: 8px; background: rgba(214,51,132,.06);
               border: 1px solid rgba(214,51,132,.18); }
@@ -823,9 +837,12 @@
                                   :tip="delArm === it.file ? '再点一次确认删除' : '删除立绘'"
                                   @click.stop="doDeletePortrait(it)"></w-icon-btn>
                     </div>
-                    <!-- v0.13.2：seed 32 位 hex 只显前 8 位（全文挪 tooltip），meta 回到单行 -->
-                    <div class="gal-meta" :title="it.seed ? 'seed ' + it.seed : ''">
-                      #{{ it.seq }} · {{ it.date }} · seed {{ (it.seed || "").slice(0, 8) }}{{ (it.seed || "").length > 8 ? "…" : "" }}{{ isCover(it) ? " · 封面" : "" }}{{ galDrawRefAbs === it.abs ? " · 出卡源" : "" }}
+                    <!-- v0.13.2：seed 只显前 8 位（全文挪 tooltip），meta 回到单行。
+                         ⚠️ v0.13.5 修：库里 seed 是 INTEGER，旧写法对数字直接 .slice
+                         会抛 TypeError → 整个立绘墙渲染中断（真机「只有标题没图片」
+                         的根因；mock fixture 是字符串才一直没炸）——必须先 String() -->
+                    <div class="gal-meta" :title="it.seed != null ? 'seed ' + it.seed : ''">
+                      #{{ it.seq }} · {{ it.date }} · seed {{ String(it.seed == null ? "" : it.seed).slice(0, 8) }}{{ String(it.seed == null ? "" : it.seed).length > 8 ? "…" : "" }}{{ isCover(it) ? " · 封面" : "" }}{{ galDrawRefAbs === it.abs ? " · 出卡源" : "" }}
                     </div>
                   </div>
                 </n-gi>
@@ -883,13 +900,18 @@
               </div>
               <!-- v0.9.10：找回因编辑保存丢失绑定的孤儿图片（文件其实还在 data/refs/）
                    v0.12.7：默认折叠，并可物理删除（仍被引用的图后端会拒绝） -->
-              <div v-if="galOrphans.length > 0" style="margin-top: 10px;">
-                <div class="bind-tip" style="margin-bottom: 6px; cursor: pointer; user-select: none;"
-                     @click="galOrphansOpen = !galOrphansOpen">
-                  {{ galOrphansOpen ? "▾ 收起" : "▸ 展开" }} · 发现 {{ galOrphans.length }} 张未绑定图片
-                  （文件仍在 data/refs/，只是绑定丢了）：可重新绑定，或确认后物理删除
-                </div>
-                <div v-if="galOrphansOpen">
+              <div v-if="galOrphans.length > 0" class="fold-bar"
+                   :style="{ color: brandColor }"
+                   title="点击展开 / 收起"
+                   @click="galOrphansOpen = !galOrphansOpen">
+                <span class="fold-chevron" :class="{ open: galOrphansOpen }">▸</span>
+                <b>未绑定图片（这里折叠着 {{ galOrphans.length }} 张图）</b>
+                <span class="fold-count">{{ galOrphans.length }}</span>
+                <span class="bind-tip" style="margin-top: 0;">
+                  文件仍在 data/refs/，只是绑定丢了——点此{{ galOrphansOpen ? "收起" : "展开" }}，可重新绑定或物理删除
+                </span>
+              </div>
+              <div v-if="galOrphansOpen" style="margin-top: 8px;">
                   <n-grid :cols="6" :x-gap="8" :y-gap="8">
                     <n-gi v-for="o in galOrphans" :key="o.path">
                       <div class="gal-item">
@@ -910,7 +932,6 @@
                     </n-gi>
                   </n-grid>
                 </div>
-              </div>
             </div>
           </div>
 
