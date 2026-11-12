@@ -509,6 +509,21 @@ class Store:
             "SELECT * FROM draws WHERE user_id=? AND date=?", (user_id, date)
         ).fetchone())
 
+    def update_draw_char(self, user_id: str, date: str, char_id: str,
+                         char_name: str = "", series: str = "",
+                         seed_hex: str = "") -> None:
+        """强制换签重派角色后更新签行：char_id 与随签快照一并刷新。
+
+        portrait_file/decision 清空——旧立绘属于旧角色，下次抽取按新角色
+        重新做立绘决策（出图或取库存）。
+        """
+        self._conn.execute(
+            "UPDATE draws SET char_id=?, char_name=?, series=?, seed_hex=?,"
+            " portrait_file='', decision='', updated_at=? WHERE user_id=? AND date=?",
+            (char_id, char_name, series, seed_hex, _now(), user_id, date),
+        )
+        self._conn.commit()
+
     def reset_char_day(self, char_id: str, date: str) -> dict:
         """重试某角色当日生成：删当日立绘行 + 清指向它的签卡路径。
 

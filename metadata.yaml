@@ -1,7 +1,7 @@
 name: astrbot_plugin_moe_waifu # 插件唯一识别名，与目录名一致
 display_name: 萌萌今日老婆 # 展示名
 desc: 每天从二次元角色库确定性抽取一位「今日老婆」，萌绘生成专属立绘、沉淀立绘库，萌系竖版卡片发送。
-version: v0.9.3 # 版本唯一来源（格式 vX.Y.Z），CHANGELOG 与包名由此派生
+version: v0.9.4 # 版本唯一来源（格式 vX.Y.Z），CHANGELOG 与包名由此派生
 author: windExplorer # 须与插件市场 GitHub 用户名一致
 repo: https://github.com/windExplorer/astrbot_plugin_moe_waifu
 category: entertainment # 英文枚举：ai_tools/utilities/productivity/integrations/entertainment/other

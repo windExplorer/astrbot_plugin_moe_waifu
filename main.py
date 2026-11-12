@@ -224,18 +224,37 @@ class MoeWaifuPlugin(Star):
             entry = pool.find_entry(self._load_packs(), existing["char_id"])
             rel = self._store.portrait_by_date(existing["char_id"], date) \
                 or (self._store.list_portraits(existing["char_id"]) or [None])[-1]
-            if entry is None or rel is None:
-                yield event.plain_result("今天已经抽过老婆啦，但底图被清理了，明天再来吧")
+            if entry is None:
+                yield event.plain_result("今天已经抽过老婆啦，但这位角色已不在库里，明天再来吧")
                 return
-            card_path = await asyncio.to_thread(
-                card.render_card, self._data_dir / rel["file"], entry,
-                date_str=date, same_count=1, total_count=1,
-                rerolled=bool(existing["rerolled"]),
-                out_path=str(self._data_dir / "cards" / f"{uid}_{date}.png"),
-                data_dir=self._data_dir,
-            )
-            self._store.update_draw_card(uid, date, card_path)
-            yield event.chain_result([Image.fromFileSystem(card_path)])
+            if rel is not None and (self._data_dir / rel["file"]).is_file():
+                card_path = await asyncio.to_thread(
+                    card.render_card, self._data_dir / rel["file"], entry,
+                    date_str=date, same_count=1, total_count=1,
+                    rerolled=bool(existing["rerolled"]),
+                    out_path=str(self._data_dir / "cards" / f"{uid}_{date}.png"),
+                    data_dir=self._data_dir,
+                )
+                self._store.update_draw_card(uid, date, card_path)
+                yield event.chain_result([Image.fromFileSystem(card_path)])
+                return
+            # 没有可用底图（立绘库被清 / 调试「强制换签」已重派新角色）：
+            # 按当前 nonce 走完整产出流程重出（出图/取图 → 落库 → 渲染）
+            key = (uid, date)
+            if key in self._inflight:
+                yield event.plain_result("正在召唤中，稍等一下再看看～")
+                return
+            self._inflight.add(key)
+            try:
+                card_path = await self._produce(
+                    event, entry, uid, date,
+                    nonce=int(existing.get("nonce") or 0),
+                    rerolled=bool(existing["rerolled"]),
+                )
+            finally:
+                self._inflight.discard(key)
+            if card_path:
+                yield event.chain_result([Image.fromFileSystem(card_path)])
             return
 
         # 首抽

@@ -1538,9 +1538,12 @@ async def h_debug_clear_draws(plugin) -> dict:
 
 
 async def h_debug_force_reroll(plugin) -> dict:
-    """强制换签（调试版换老婆）：nonce+1 重派种子、清卡图，下次抽取出新角色。
+    """强制换签（调试版换老婆）：nonce+1 按新种子重派角色、清卡图。
 
-    直接改库，不受 reroll_daily_limit 限制。
+    直接改库，不受 reroll_daily_limit 限制。v0.9.4 起除了 nonce+1 还会
+    真正重算 char_id（旧实现只加 nonce 不换人——/今日老婆 对已有签只重渲染
+    旧角色卡，导致"强制换签抽出来还是同一个人"）；候选为空时保留旧角色
+    只加 nonce。角色候选集沿用该签当时的 group_id（群绑定口径一致）。
     """
     if not plugin._store:
         return err("插件未初始化完成")
@@ -1553,9 +1556,31 @@ async def h_debug_force_reroll(plugin) -> dict:
     row = plugin._store.force_reroll(uid, date)
     if row is None:
         return err(f"{uid} 在 {date} 没有抽取记录")
+    nonce = int(row.get("nonce") or 0)
+    seed = pool.derive_seed(date, uid, str(plugin._cfg("salt", "moe-waifu")), nonce)
+    candidates = pool.candidates_for(
+        plugin._load_packs(), str(row.get("group_id") or ""),
+        str(plugin._cfg("group_pools", "") or ""),
+        bool(plugin._cfg("allow_unverified", False)),
+    )
+    reassigned = ""
+    if candidates:
+        entry = pool.pick_character(seed, candidates)
+        if entry["id"] != row.get("char_id"):
+            plugin._store.update_draw_char(
+                uid, date, entry["id"],
+                char_name=str(entry.get("name") or ""),
+                series=str(entry.get("series") or ""),
+                seed_hex=seed.hex(),
+            )
+            reassigned = pool.entry_label(entry)
+    row = plugin._store.get_draw(uid, date) or row
     deleted = _delete_card_files(plugin, [(old or {}).get("card_path")])
-    plugin._store.debug_log("reset", uid, f"{date} 强制换签 → nonce={row['nonce']}")
-    return ok({"row": row, "cards_deleted": deleted})
+    detail = f"{date} 强制换签 → nonce={nonce}"
+    if reassigned:
+        detail += f"，重派 {reassigned}"
+    plugin._store.debug_log("reset", uid, detail)
+    return ok({"row": row, "reassigned": reassigned, "cards_deleted": deleted})
 
 
 async def h_debug_reset_char_day(plugin) -> dict:
