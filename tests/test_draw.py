@@ -107,6 +107,11 @@ with tempfile.TemporaryDirectory() as ref_td:
     check("没指定源时返回 4 元组", isinstance(r1, tuple) and len(r1) == 4)
     check("没指定源回退文生图（comfyui_draw）", seen.get("tool") == "comfyui_draw")
     check("没指定源不传 image", "image" not in seen)
+    # v0.13.4：文生图链也传「尺寸开关」——绑定了尺寸来源开关的新版工作流上，
+    # 只传宽高而 custom_size=None 会被工作流配置（默认关）忽略，配置宽高不生效
+    check("文生图传配置宽高 + 尺寸开关",
+          seen.get("width") == 704 and seen.get("height") == 1200
+          and seen.get("custom_size") is True)
     # 显式指定 → 只用这一张
     explicit = {"strategy_type": "img2img", "tags_en": "miku",
                 "strategy": {"ref": "refs/b.png", "refs": ["refs/a.png"]}}

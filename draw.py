@@ -195,6 +195,12 @@ def _base_kwargs(cfg: dict, prompt: str, seed_int: int,
         else:
             kwargs["width"] = _snap16(cfg.get("draw_width", 700))
             kwargs["height"] = _snap16(cfg.get("draw_height", 1200))
+        # v0.13.4：文生图链也传「尺寸开关」——绑定了尺寸来源开关的新版工作流
+        # （ComfySwitchNode + EmptyLatentImage）上，只传宽高而 custom_size=None
+        # 会按工作流条目配置（默认关）被忽略、回落工作流默认尺寸；显式传 True
+        # 才让上面的配置宽高真正生效。旧版萌绘丢弃未知参数并 WARN，无开关的
+        # 工作流忽略该请求（萌绘日志有说明），均无害。
+        kwargs["custom_size"] = True
     workflow = str(cfg.get("draw_workflow") or "").strip()
     if with_workflow and workflow:
         kwargs["workflow"] = workflow
