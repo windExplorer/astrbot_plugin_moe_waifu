@@ -2,6 +2,56 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.10.1 (2026-11-12)
+
+修复「设了封面还显示旧图 / 很多地方不实时刷新」，补齐全局与各页签刷新入口
+（版本 v0.10.0 -> v0.10.1）。
+
+- **现象（用户）**：「设置某张图片为封面，结果一直是原来的，而且好像很多地方都
+  缺少刷新按钮操作」。
+- **根因（前端数据是十几份互不相干的快照）**
+  1. **封面根本没消费后端缩略**：`/pools` 把封面缩略放在响应顶层
+     `thumbs` / `cover_paths` 字典里，条目本身只挂了 `cover_path`、**没有
+     `thumb`**；而角色卡模板写的是 `v-if="e.thumb"` → 恒 false，永远落到
+     首字母占位。`loadAll()` 刷再多次也不会变。
+  2. `loadAll()` 只写 `meta`；`setPortraitCover` 只 `loadAll + loadGalItems`，
+     **没刷 `works` / `currentWork`**，所以作品列表 `w.cover`、作品详情
+     `c.thumb`、作品封面候选 `workCoverCandidates` 全是首屏旧快照。
+     `setWorkCover` 提交的 `c.cover_path` 还可能来自那个旧候选，等于把旧封面
+     又存了一遍。
+  3. `Vue.watch(menu)` 只对 records/stats/users/debug 四个页签懒加载，
+     `chars/works/try/gallery/bind/config` 切回去不会重拉。
+  4. 多数写操作只刷 0~2 个局部 `load*`（`doTryToRef` 甚至完全不刷、
+     `togglePack`/`doToggleVerified` 只改本地对象），其它视图保持旧值。
+  5. 后端次要隐患：`_thumb_cached` 只按 mtime 失效（图片原地覆盖且 mtime
+     精度不足时会命中旧 data URL），`h_works_set_cover` 也没像
+     `h_set_cover` 那样清缩略缓存。
+- **修复**
+  - `allEntries` 改为把响应顶层 `thumbs` / `cover_paths` 合并进每个条目
+    （`thumb` + `cover_path`），角色卡封面终于读得到后端算好的图。
+  - 新增统一入口 `refreshAll(opts)`：`loadAll + loadWorks + loadGallery +
+    loadGalRefs + loadTryRefs + loadDrawerRefs + loadOverview`，并重挂
+    `currentWork`（按 series 找新数组元素，封面候选不再陈旧）；
+    `{full:true}` 额外刷统计/记录/用户/调试/筛选项/工作流，
+    `{config:true}` 才重置配置表单（默认绝不覆盖正在编辑的输入）。
+  - 15 处写操作的 `await loadAll()` 统一换成 `await refreshAll()`；
+    另补 `togglePack`、`doToggleVerified`、`bindAndReloadRefs`、
+    `unbindDrawerRef`、`deleteTryRef`、`doTryToRef`、`setWorkCover`、
+    `doArchive`、`doDetailGenerate` 回调、`doDeletePortrait`、
+    `movePortraitToRef`、`refreshAfterDebug`、`saveConfig`、`doSaveBind`。
+  - `Vue.watch(menu)` 补 overview/chars/works/try/gallery/bind/config 分支。
+  - 界面：顶栏新增「刷新全部」；overview / chars / gallery 的刷新改绑
+    `refreshAll`；works / try / 分群绑定 / 配置页内各补「刷新」按钮
+    （配置页文案注明「丢弃未保存修改」）。
+  - 后端：`_thumb_cached` 缓存 stamp 改为 `(mtime, size)`；`h_works_set_cover`
+    补 `_THUMB_CACHE.clear()`，与 `h_set_cover` 对称。
+- **守卫**：`test_webui_contract.py` 新增 9 项——`allEntries` 必须合并
+  thumbs/cover_paths、`refreshAll` 必须覆盖主要快照、7 个关键写操作
+  （setPortraitCover / setWorkCover / doArchive / doTryToRef /
+  doDeletePortrait / movePortraitToRef / moveRefToPortrait）函数体内必须有
+  `refreshAll(`、切页签必须补 chars/works/try/bind/config。13 个自检全过；
+  `docs/设计说明.md` 补第 17 条决策。
+
 ## v0.10.0 (2026-11-12)
 
 总览页（第一栏）+ 刷新停在上次页签 + 出卡图生图源与参考图列表解耦

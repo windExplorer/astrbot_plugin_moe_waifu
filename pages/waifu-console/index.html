@@ -208,6 +208,9 @@
               {{ meta.anima_ready ? "萌绘已就绪" : "萌绘未安装/未启用" }}
             </n-tag>
             <n-tag :bordered="false" size="small">立绘配额 {{ meta.quota }}/角色</n-tag>
+            <n-button size="tiny" secondary :loading="refreshing" @click="refreshAll">
+              刷新全部
+            </n-button>
           </n-space>
         </div>
         <div class="page-scroll">
@@ -221,7 +224,7 @@
           <div v-if="menu === 'overview'" class="stack">
             <div class="sec-title">总览
               <span class="cnt">{{ ov.version }} · {{ ov.anima_ready ? "萌绘已就绪" : "萌绘未就绪" }} · 出图方式 {{ ov.gen_source_mode }}</span>
-              <n-button size="tiny" secondary :loading="ovLoading" @click="loadOverview">刷新</n-button>
+              <n-button size="tiny" secondary :loading="refreshing" @click="refreshAll">刷新</n-button>
             </div>
             <div v-if="!ov.anima_ready"
                  style="padding: 8px 12px; border-radius: 8px; background: rgba(230,162,60,.12); color: #c47f17; font-size: 13px;">
@@ -304,7 +307,7 @@
                 <n-radio-button value="list">列表</n-radio-button>
               </n-radio-group>
               <n-button type="primary" size="small" @click="openNew">新增角色</n-button>
-              <n-button size="small" :loading="loadingAll" @click="loadAll">刷新</n-button>
+              <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
               <!-- v0.6.1：每行卡片数快捷调整（写回 ui_grid_cols，免去去配置页） -->
               <span style="font-size: 12px; opacity: .6;">每行</span>
               <n-select v-model:value="uiColsSel" :options="colOpts" size="small"
@@ -378,6 +381,9 @@
 
           <!-- ============ 作品库 ============ -->
           <div v-if="menu === 'works'">
+            <div style="margin-bottom: 10px;">
+              <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
+            </div>
             <div v-if="!currentWork" class="stack">
               <n-grid :cols="uiCols" :x-gap="12" :y-gap="12">
                 <n-gi v-for="w in works" :key="w.series">
@@ -445,6 +451,7 @@
               <n-space vertical size="medium">
                 <n-space align="center" :wrap="true">
                   <n-button size="small" @click="backFromTry">← 返回</n-button>
+                  <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
                   <n-steps size="small" :current="tryStep" style="flex: 1; min-width: 300px;">
                     <n-step title="选角色与画法"></n-step>
                     <n-step title="确认提示词"></n-step>
@@ -621,8 +628,8 @@
               </template>
               <n-tag v-else size="small" :bordered="false" type="warning">孤立立绘（原条目已删除）</n-tag>
               <span class="bind-tip" style="margin-top: 0;">立绘 {{ galItems.length }}/{{ meta.quota }} · 参考图 {{ galRefs.length }}</span>
-              <w-icon-btn icon="refresh" tip="刷新" :loading="loadingGal"
-                          @click="loadGallery"></w-icon-btn>
+              <w-icon-btn icon="refresh" tip="刷新全部" :loading="refreshing"
+                          @click="refreshAll"></w-icon-btn>
             </div>
 
             <!-- 生成立绘面板：补一张 / 选图图生图 -->
@@ -1489,6 +1496,7 @@
                 </div>
                 <n-space>
                   <n-button type="primary" :loading="bindSaving" @click="doSaveBind">保存</n-button>
+                  <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
                 </n-space>
               </n-space>
             </n-card>
@@ -1500,6 +1508,8 @@
               <n-space vertical size="medium">
                 <n-space align="center">
                   <n-button type="primary" :loading="configSaving" @click="saveConfig">保存配置</n-button>
+                  <n-button size="small" :loading="refreshing"
+                            @click="refreshAll({ config: true })">刷新（丢弃未保存修改）</n-button>
                   <span class="bind-tip">保存后即时生效；改「种子盐值」会洗牌所有人当天的抽卡结果</span>
                 </n-space>
                 <div v-for="sec in configSections" :key="sec.title">
@@ -2249,7 +2259,7 @@
         apiUpload(file).then(function (res) {
           var path = (res && res.path) || "";
           var chain = apiPost("refs/bind", { id: target.bindId, path: path })
-            .then(function () { return loadAll(); });
+            .then(function () { return refreshAll(); });
           if (target.setRef && tryMode.value === "img2img") {
             chain = chain.then(function () { tryOverride.value.ref = path; });
           }
@@ -2400,8 +2410,18 @@
 
       var allEntries = Vue.computed(function () {
         var out = [];
+        // 后端把封面缩略放在响应顶层 thumbs / cover_paths 字典，条目上只有
+        // cover_path。以前模板读 e.thumb 恒为 undefined → 设了封面角色卡也
+        // 永远不换图（用户报「一直是原来的」）。这里合并成真正的 e.thumb。
+        var thumbs = (meta.value && meta.value.thumbs) || {};
+        var covers = (meta.value && meta.value.cover_paths) || {};
         (meta.value.packs || []).forEach(function (p) {
-          (p.entries || []).forEach(function (e) { out.push(e); });
+          (p.entries || []).forEach(function (e) {
+            out.push(Object.assign({}, e, {
+              thumb: thumbs[e.id] || "",
+              cover_path: e.cover_path || covers[e.id] || ""
+            }));
+          });
         });
         return out;
       });
@@ -2502,6 +2522,7 @@
           await apiPost("pools/set_pack", { pack: p.pack, enabled: !p.enabled });
           p.enabled = !p.enabled;
           message.success((p.enabled ? "已启用" : "已停用") + "：" + (p.title || p.pack));
+          await refreshAll();
         } catch (e) { /* 已提示 */ }
       }
 
@@ -2623,7 +2644,7 @@
           await apiPost("pools/save_entry", { pack: f.pack, entry: formToEntry(f) });
           message.success("已保存：" + f.name);
           showDrawer.value = false;
-          await loadAll();
+          await refreshAll();
         } catch (e) { /* 已提示 */ } finally {
           saving.value = false;
         }
@@ -2634,7 +2655,7 @@
           await apiPost("pools/delete_entry", { pack: e.pack, id: e.id });
           message.success("已删除：" + e.name + "（立绘文件保留，可在立绘库看到孤立图）");
           delArm.value = "";
-          await loadAll();
+          await refreshAll();
         } catch (err2) { /* 已提示 */ }
       }
       async function doToggleVerified(e) {
@@ -2642,6 +2663,7 @@
           await apiPost("pools/set_verified", { id: e.id, verified: !e.verified });
           e.verified = !e.verified;
           message.success(e.name + (e.verified ? " 已参与群内抽卡" : " 已移出抽卡池"));
+          await refreshAll();
         } catch (err2) { /* 已提示 */ }
       }
 
@@ -2683,7 +2705,7 @@
       }
       function bindAndReloadRefs(path) {
         return apiPost("refs/bind", { id: form.value.id, path: path })
-          .then(function () { return loadDrawerRefs(); });
+          .then(function () { return refreshAll(); });
       }
       // v0.6.3：上传收口到 w-upload-panel（拖拽/点击/粘贴），多选逐张绑定
       async function onDrawerPanelFiles(files) {
@@ -2702,7 +2724,7 @@
         uploading.value = false;
         if (!okN) return;
         message.success("参考图已上传并绑定 " + okN + " 张");
-        await loadAll();
+        await refreshAll();
         await loadDrawerRefs();
       }
       function designateRef(path) {
@@ -2716,7 +2738,7 @@
           if (form.value.strategy_ref === path) { form.value.strategy_ref = ""; }
           message.success("已移除参考图" + (res && res.file_deleted ? "（文件已删）" : ""));
           delArm.value = "";
-          await loadDrawerRefs();
+          await refreshAll();
         } catch (e) { /* 已提示 */ }
       }
       Vue.watch(function () {
@@ -2799,7 +2821,7 @@
         if (firstPath) { tryOverride.value.ref = firstPath; }
         message.success("参考图已上传并绑定 " + okN + " 张" +
           (firstPath ? "，已选用第一张为本次参考图" : ""));
-        await loadAll();
+        await refreshAll();
         await loadTryRefs();
       }
       var tryCharId = Vue.ref("");
@@ -3030,7 +3052,7 @@
             color: e.color || "#E8B4C8", verified: !!e.verified
           } });
           message.success("已把本次参数保存到角色：" + e.name);
-          await loadAll();
+          await refreshAll();
         } catch (err2) { /* 已提示 */ }
       }
       function backFromTry() { setMenu(cameFrom.value || "chars"); }
@@ -3073,7 +3095,7 @@
           if (tryOverride.value.ref === r.path) { tryOverride.value.ref = ""; }
           message.success("已删除参考图" + (res && res.file_deleted ? "（文件已删）" : ""));
           delArm.value = "";
-          await loadTryRefs();
+          await refreshAll();
         } catch (e) { /* 已提示 */ }
       }
       Vue.watch(function () {
@@ -3093,7 +3115,7 @@
         try {
           await apiPost("pools/set_verified", { id: tryEntry.value.id, verified: true });
           message.success(tryEntry.value.name + " 已标记 verified，参与群内抽卡");
-          await loadAll();
+          await refreshAll();
         } catch (e) { /* 已提示 */ }
       }
       async function doArchive() {
@@ -3102,7 +3124,7 @@
           var res = await apiPost("jobs/archive", { job_id: tryJobId.value });
           tryArchived.value = true;
           message.success("已存入立绘库：" + ((res && res.archived) || ""));
-          await loadAll();
+          await refreshAll();
         } catch (e) { /* 已提示 */ }
       }
       // 转为参考图（v0.7.5）：成品拷进角色参考图库并绑定，不入立绘列表
@@ -3113,6 +3135,7 @@
           tryToRefed.value = true;
           message.success("已转为参考图：" + ((res && res.rel) || "") +
                           "（可在角色详情参考图墙查看）");
+          await refreshAll();
         } catch (e) { /* 已提示 */ }
       }
 
@@ -3200,7 +3223,7 @@
                         { id: galCharId.value, path: path || "" });
           galDrawRef.value = path || "";
           message.success(path ? "已指定出卡图生图源" : "已取消指定，抽卡不再使用图生图");
-          await loadAll();
+          await refreshAll();
         } catch (e) { /* 已提示 */ }
       }
       // 找回未绑定图片（v0.9.10：编辑保存曾清空 refs，文件其实还在磁盘）
@@ -3215,7 +3238,7 @@
         try {
           await apiPost("refs/bind", { id: galCharId.value, path: p });
           message.success("已重新绑定到当前角色");
-          await loadAll();
+          await refreshAll();
           loadGalRefs();
         } catch (e) { /* 已提示 */ }
       }
@@ -3238,7 +3261,7 @@
         uploading.value = false;
         galUpNote.value = "已上传并绑定 " + done + "/" + list.length + " 张";
         message.success("参考图已上传 " + done + "/" + list.length + " 张");
-        await loadAll();
+        await refreshAll();
         await loadGalRefs();
       }
       function onGalPanelFiles(files) { uploadAndBindFiles(files); }
@@ -3251,7 +3274,7 @@
           copy.strategy.ref = path;
           await apiPost("pools/save_entry", { pack: e.pack, entry: copy });
           message.success("已设为主参考（图生图时优先使用）");
-          await loadAll();
+          await refreshAll();
           await loadGalRefs();
         } catch (err2) { /* 已提示 */ }
       }
@@ -3262,7 +3285,7 @@
           if (galRef.value === r.path) { galRef.value = ""; }
           message.success("已移除参考图绑定" + (res && res.file_deleted ? "（文件已删）" : ""));
           delArm.value = "";
-          await loadAll();
+          await refreshAll();
           await loadGalRefs();
         } catch (e) { /* 已提示 */ }
       }
@@ -3413,10 +3436,10 @@
                 message.success("已生成并转为参考图：" + ((r2 && r2.rel) || ""));
               } catch (e2) { /* 已提示 */ }
               galAsRef.value = false;
-              await loadGalRefs();
+              await refreshAll();
             } else {
               message.success("已生成并存入立绘库");
-              loadGallery();
+              await refreshAll();
             }
           }, function (why) {
             refillRunning.value = false;
@@ -3441,8 +3464,7 @@
             (res && res.relocated_to
               ? "；该图仍被参考图引用，已自动另存到参考图库，那边不受影响" : ""));
           delArm.value = "";
-          await loadGallery();
-          await loadGalRefs();
+          await refreshAll();
         } catch (e) { /* 已提示 */ }
       }
       // 立绘 → 参考图（v0.9.1 真·移动）：文件另存 refs/、立绘行删除、两边列表各自刷新。
@@ -3454,8 +3476,7 @@
             { file: it.file, id: galCharId.value });
           message.success("已转移到参考图库：立绘 #" + it.seq +
             (res && res.to ? " → " + res.to : "") + "（立绘库里已移走）");
-          await loadGallery();
-          await loadGalRefs();
+          await refreshAll();
         } catch (e) { /* 已提示 */ }
       }
       // 参考图 → 立绘（反向互转）：refs 解绑、文件归档进立绘库，参考图列表里不再有。
@@ -3468,7 +3489,7 @@
             (res && res.main_ref_cleared ? "（主参考已清空，可重新指定）" : ""));
           await loadGalRefs();
           await loadGallery();
-          await loadAll();
+          await refreshAll();
         } catch (e) { /* 已提示 */ }
       }
       // 封面（v0.5.0）：entry.cover 优先于首张立绘
@@ -3483,7 +3504,7 @@
         try {
           await apiPost("pools/set_cover", { id: galCharId.value, path: it.file });
           message.success("已设为角色封面：" + it.file);
-          await loadAll();
+          await refreshAll();
           await loadGalItems();
         } catch (e) { /* 已提示 */ }
       }
@@ -3969,6 +3990,8 @@
         loadFilterOpts();
         loadDebugHistory();
         if (dbgStateUid.value) { loadDebugState(); }
+        // 调试动作可能删立绘/换签，角色库、作品库、总览同样是旧快照
+        refreshAll({ full: true });
       }
       // 星语式快捷操作：全部自动带上「刚查到状态的 QQ + 今天 + 今日老婆」，
       // 不再要求用户在每个按钮旁重复填一遍参数。两段确认沿用 delArm 机制。
@@ -4075,17 +4098,26 @@
                           ((res && res.files_deleted) || 0) + "/" +
                           ((res && res.cleared) || 0) + "），配额自动补生会从 0 重建");
           refreshAfterDebug();
-          await loadAll();
+          await refreshAll();
         } catch (e) { /* 已提示 */ } finally {
           dbgBusy.value = false;
         }
       }
 
       Vue.watch(menu, function (m) {
+        // v0.10.1：以前只有 4 个页签切过去会重拉，角色库/作品库/试画台/
+        // 分群绑定/配置切回去一直是首屏旧快照。补齐后即使某个写操作漏刷，
+        // 切一次页签也能看到最新数据。
         if (m === "records") { loadFilterOpts(); loadRecords(); loadRecEvents(); loadRecJobs(); }
         else if (m === "stats") { loadStats(); }
         else if (m === "users") { loadUsers(); }
         else if (m === "debug") { loadDebugHistory(); }
+        else if (m === "overview") { loadOverview(); }
+        else if (m === "chars") { fetchPools(); }
+        else if (m === "works") { loadWorks().then(resyncCurrentWork); }
+        else if (m === "try") { loadTryRefs(); }
+        else if (m === "gallery") { loadGallery(); loadGalRefs(); }
+        else if (m === "bind" || m === "config") { loadConfig(); }
       });
 
       // ---- 作品库 ----
@@ -4120,10 +4152,7 @@
           await apiPost("works/set_cover", { series: workCoverSeries.value, path: path });
           message.success(path ? "作品封面已设置" : "作品封面已清除（回退自动选择）");
           workCoverModal.value = false;
-          await loadWorks();
-          currentWork.value = works.value.find(function (w) {
-            return w.series === workCoverSeries.value;
-          }) || null;
+          await refreshAll();  // 含 loadWorks + 重挂 currentWork（候选不再是旧快照）
         } catch (e) { /* 已提示 */ }
       }
       function gotoTry(c) {
@@ -4209,6 +4238,7 @@
           var sk = ((res && res.skipped) || []).length;
           message.success("已保存 " + ch + " 项" + (sk ? "（跳过 " + sk + " 项不符合 schema）" : ""));
           await loadConfig();  // timezone 改了要立刻反映到时间显示上
+          await refreshAll({ full: true });  // 配额/verified/时区等影响其它所有快照
         } catch (e) { /* 已提示 */ } finally {
           configSaving.value = false;
         }
@@ -4233,6 +4263,7 @@
         try {
           await apiPost("group_pools", { text: bindText.value });
           await loadConfig();  // 刷新其它页的「已绑定群」一键填入标签
+          await refreshAll();  // 候选集变了，总览/角色库/统计一起拉齐
           message.success("分群绑定已保存并即时生效");
         } catch (e) { /* 已提示 */ } finally {
           bindSaving.value = false;
@@ -4240,13 +4271,47 @@
       }
 
       // ---- 装载 ----
-      async function loadAll() {
+      async function fetchPools() {
         loadingAll.value = true;
         try {
           var res = await apiGet("pools");
           if (res && res.packs) { meta.value = res; }
         } catch (e) { /* 已提示 */ } finally {
           loadingAll.value = false;
+        }
+      }
+      async function loadAll() { return fetchPools(); }
+      // v0.10.1：页面把数据拆成十几份互不相干的 ref 快照，老代码每个写操作
+      // 只刷 1~2 个 → 「设封面后作品库还是旧图」。统一入口一次拉齐所有相关
+      // 视图；loadConfig 故意不放（会覆盖用户正在编辑的配置表单）。
+      var refreshing = Vue.ref(false);
+      function resyncCurrentWork() {
+        if (!currentWork.value) return;
+        var s = currentWork.value.series;
+        currentWork.value = works.value.find(function (w) {
+          return w.series === s;
+        }) || null;
+      }
+      async function refreshAll(opts) {
+        var o = opts || {};
+        refreshing.value = true;
+        try {
+          await fetchPools();
+          await Promise.all([
+            loadWorks(), loadGallery(), loadGalRefs(), loadTryRefs(),
+            loadDrawerRefs(), loadOverview()
+          ]);
+          resyncCurrentWork();
+          // 配置页点「刷新」才重置表单；其它场景绝不动用户正在编辑的输入
+          if (o.config) { await loadConfig(); }
+          if (o.full) {
+            await Promise.all([
+              loadStats(), loadRecords(), loadRecEvents(), loadRecJobs(),
+              loadUsers(), loadDebugHistory(), loadFilterOpts(), loadWorkflows(true)
+            ]);
+          }
+        } catch (e) { /* 各 load 内部已提示 */ } finally {
+          refreshing.value = false;
         }
       }
       loadAll().then(function () {
@@ -4258,6 +4323,7 @@
         theme: theme, themeOverrides: themeOverrides,
         dragOverlay: dragOverlay, dragOverlayText: dragOverlayText,
         menu: menu, menuOpts: menuOpts, onMenu: onMenu,
+        refreshing: refreshing, refreshAll: refreshAll,
         ov: ov, ovLoading: ovLoading, loadOverview: loadOverview, goMenu: goMenu,
         meta: meta, loadingAll: loadingAll, loadAll: loadAll, rowKey: rowKey,
         charsMode: charsMode, cardPage: cardPage, cardPageSize: cardPageSize,

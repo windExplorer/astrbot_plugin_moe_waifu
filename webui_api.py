@@ -122,20 +122,26 @@ _THUMB_CACHE: dict = {}
 
 
 def _thumb_cached(path, max_w: int = 160) -> str | None:
-    """缩略 data URL（带 mtime 缓存）：/pools 每次装载都会全量重取，别每次重编码。"""
+    """缩略 data URL（带 mtime+size 缓存）：/pools 每次装载都会全量重取，别每次重编码。
+
+    缓存键含路径与宽度；stamp 同时看 mtime 与文件大小——图片被原地覆盖
+    但 mtime 精度不足（1s 内 / copy2 保留 mtime）时，旧 data URL 不会继续命中
+    （v0.10.1：设完封面仍是旧图的次要隐患）。
+    """
     p = Path(path)
     if not p.is_file():
         return None
     key = f"{p}|{max_w}"
     try:
-        mtime = p.stat().st_mtime
+        stat = p.stat()
+        stamp = (stat.st_mtime, stat.st_size)
     except Exception:
         return None
     cached = _THUMB_CACHE.get(key)
-    if cached and cached[0] == mtime:
+    if cached and cached[0] == stamp:
         return cached[1]
     durl = _thumb_data_url(str(p), max_w)
-    _THUMB_CACHE[key] = (mtime, durl)
+    _THUMB_CACHE[key] = (stamp, durl)
     return durl
 
 
@@ -1064,6 +1070,7 @@ async def h_works_set_cover(plugin) -> dict:
     else:
         meta.pop(series, None)
     _save_works_meta(plugin, meta)
+    _THUMB_CACHE.clear()   # 与 h_set_cover 对称：作品封面变了，缩略整体失效
     return ok({"series": series, "cover": cover})
 
 

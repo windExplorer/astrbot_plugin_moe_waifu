@@ -46,7 +46,7 @@ doForceReroll doClearDraws doResetCharDay doClearCharPortraits
 charNameOf decisionLabel barPct
 movePortraitToRef moveRefToPortrait doQuickAction
 galOrphans bindOrphan
-ov ovLoading loadOverview goMenu
+ov goMenu refreshing refreshAll
 galDrawRef galDrawOpts setDrawSource
 fmtTime cfgBoundGroups pickSimGroup simScopeText
 """.split()
@@ -131,6 +131,27 @@ def main():
           and "cfgBoundGroups" in page and "pickSimGroup" in page)
     check("查状态自动带出群号", "simF.value.group_id = res.draw.group_id" in page)
     check("模拟抽签返回抽取范围", '"scope": scope' in api and "simScopeText" in page)
+
+    # 9) 刷新链路（v0.10.1）：封面缩略在响应顶层 thumbs/cover_paths 字典里，
+    #    条目本身没有 thumb；写操作必须走统一 refreshAll，否则「设了封面
+    #    作品库/角色卡还是旧图」会复发。
+    check("allEntries 合并后端 thumbs/cover_paths",
+          "meta.value.thumbs" in page and "meta.value.cover_paths" in page)
+    check("统一刷新入口覆盖主要快照",
+          all(name in page for name in
+              ("async function refreshAll", "loadWorks()", "loadGallery()",
+               "loadGalRefs()", "loadOverview()")))
+    for fn in ("setPortraitCover", "setWorkCover", "doArchive", "doTryToRef",
+               "doDeletePortrait", "movePortraitToRef", "moveRefToPortrait"):
+        body = re.search(
+            r"(?:async )?function " + fn + r"\([^)]*\)\s*\{(.*?)\n      \}",
+            page, re.S)
+        check(f"{fn} 后走统一刷新",
+              bool(body) and "refreshAll(" in body.group(1),
+              "函数体未找到 refreshAll")
+    check("切页签补了 chars/works/try/bind/config 懒刷新",
+          all(f'm === "{k}"' in page for k in
+              ("chars", "works", "try", "bind", "config")))
 
     if FAILURES:
         print(f"test_webui_contract: {len(FAILURES)} FAILED")
