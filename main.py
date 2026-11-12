@@ -32,26 +32,26 @@ _CARD_KEEP_DAYS = 90
 # 试画缓存保留天数（工坊试画成品拷贝，供大图查看；过期回收）
 _TRY_CACHE_KEEP_DAYS = 7
 
-# 召唤过程提示（v0.9.6：随机、有温度，不再干巴巴一句「正在召唤」）。
-# 萌绘单张 20~120s，图生图更慢；等就等得像回事。
+# 生成过程提示（v0.13.0：中性、简洁，不再用拟人化/肉麻的措辞）。
+# 萌绘单张 20~120s，图生图更慢；只说明"在做什么、大概要等"，不额外加戏。
 _SUMMON_LINES = [
-    "♥ 正在召唤你的今日老婆，画师大大正在赶稿……",
-    "♥ 正在为你的老婆梳妆打扮，请稍候～",
-    "♥ 正在调制颜料与光影，马上就好～",
-    "♥ 你的老婆正从二次元赶来，路途有点远，稍等一下下～",
-    "♥ 正在为你的老婆挑选最上镜的角度……",
-    "♥ 召唤阵已经点亮，正在描线与上色……",
+    "正在准备今日角色立绘，请稍候……",
+    "正在绘制今日角色，马上就好。",
+    "正在调整画面与光影，请稍候。",
+    "立绘生成中，需要一点时间，请稍等。",
+    "正在确认构图与配色，稍后即可查看。",
+    "绘制任务已开始，完成后会直接发送。",
 ]
 # 图生图模板模式的过程提示
 _I2I_LINES = [
-    "♥ 正在照着官方图精心重绘你的老婆，细节控狂喜……",
-    "♥ 正在参考原作立绘为你的老婆描线与上色，稳得很～",
-    "♥ 正在把模板图变成你的专属老婆，稍等片刻～",
+    "正在按参考图重绘今日角色，请稍候……",
+    "正在参考原图绘制今日角色，稍等片刻。",
+    "基于参考图的绘制进行中，完成后会发送。",
 ]
-# 排队提示（萌绘生图串行，多人同时召唤时告知前面还有几位）
+# 排队提示（萌绘生图串行，多人同时请求时告知前面还有几个任务）
 _QUEUE_LINES = [
-    "♥ 前面还有 {n} 位召唤在排队，你的老婆正在候场～",
-    "♥ 画师大大手里还有 {n} 张约稿，排到你的就画～",
+    "当前有 {n} 个绘制任务在排队，请稍候。",
+    "前面还有 {n} 个任务，完成你的这张后会立即发送。",
 ]
 
 
@@ -215,12 +215,12 @@ class MoeWaifuPlugin(Star):
 
     def _draw_error_text(self, status: str, err: str) -> str:
         if status == "skipped_no_anima":
-            return ("召唤老婆需要萌绘（ComfyUI 绘图）插件：请先安装并配置"
-                    " astrbot_plugin_comfyui_anima（v7.7.58+）后再来哦")
+            return ("生成立绘需要萌绘（ComfyUI 绘图）插件：请先安装并配置"
+                    " astrbot_plugin_comfyui_anima（v7.7.58+）后再试。")
         if status == "timeout":
-            return (f"立绘生成超时了（>{int(self._cfg('draw_timeout', 120))}s），"
-                    "萌绘可能正忙，稍后再试试吧")
-        return f"立绘生成失败了：{err[:120]}。稍后再试一次吧"
+            return (f"立绘生成超时（>{int(self._cfg('draw_timeout', 120))}s），"
+                    "萌绘可能正忙，请稍后再试。")
+        return f"立绘生成失败：{err[:120]}。请稍后再试。"
 
     @staticmethod
     def _summon_line(decision: str, queued: int) -> str:
@@ -237,11 +237,11 @@ class MoeWaifuPlugin(Star):
     async def waifu_cmd(self, event: AstrMessageEvent):
         """抽今日老婆：一人一天一位，种子决定，萌绘立绘卡片。"""
         if self._store is None or self._data_dir is None:
-            yield event.plain_result("老婆殿还没布置好（插件未初始化完成），稍后再试～")
+            yield event.plain_result("插件尚未初始化完成，请稍后再试。")
             return
         uid = str(event.get_sender_id() or "").strip()
         if not uid:
-            yield event.plain_result("老婆殿没看清你是谁，稍后再试一次～")
+            yield event.plain_result("无法识别你的账号，请稍后再试。")
             return
         gid = "" if event.is_private_chat() else str(event.get_group_id() or "")
         if gid and gid in self._disabled_groups():
@@ -255,7 +255,7 @@ class MoeWaifuPlugin(Star):
             if card_path and Path(card_path).is_file():
                 yield event.chain_result([
                     Image.fromFileSystem(card_path),
-                    Plain("这是你今天的老婆～明天再来见新的一位吧"),
+                    Plain("这是你今天抽到的角色，明天可以再抽一位。"),
                 ])
                 return
             # 卡图被清理过：立绘库里还有底图就重渲染一张（不重新生图）
@@ -263,7 +263,7 @@ class MoeWaifuPlugin(Star):
             rel = self._store.portrait_by_date(existing["char_id"], date) \
                 or (self._store.list_portraits(existing["char_id"]) or [None])[-1]
             if entry is None:
-                yield event.plain_result("今天已经抽过老婆啦，但这位角色已不在库里，明天再来吧")
+                yield event.plain_result("今天已经抽过了，但这位角色已不在角色库中，明天再来吧。")
                 return
             if rel is not None and (self._data_dir / rel["file"]).is_file():
                 # 印象语按签随机选句：优先用落库的种子快照（换老婆后句子跟着变）
@@ -295,7 +295,7 @@ class MoeWaifuPlugin(Star):
             # 按当前 nonce 走完整产出流程重出（出图/取图 → 落库 → 渲染）
             key = (uid, date)
             if key in self._inflight:
-                yield event.plain_result("正在召唤中，稍等一下再看看～")
+                yield event.plain_result("正在生成中，请稍后再查看。")
                 return
             self._inflight.add(key)
             try:
@@ -318,7 +318,7 @@ class MoeWaifuPlugin(Star):
         )
         if not candidates:
             yield event.plain_result(
-                "老婆库还是空的：请在 data/plugin_data/astrbot_plugin_moe_waifu/pools/ "
+                "角色库还是空的：请在 data/plugin_data/astrbot_plugin_moe_waifu/pools/ "
                 "添加角色卷 JSON（或在卷里把角色标为 verified）"
             )
             return
@@ -327,7 +327,7 @@ class MoeWaifuPlugin(Star):
             pool.derive_seed(date, uid, salt, 0, self._store.get_epoch(uid)), candidates)
         key = (uid, date)
         if key in self._inflight:
-            yield event.plain_result("正在召唤中，稍等一下再看看～")
+            yield event.plain_result("正在生成中，请稍后再查看。")
             return
         self._inflight.add(key)
         try:
@@ -341,25 +341,25 @@ class MoeWaifuPlugin(Star):
     async def reroll_cmd(self, event: AstrMessageEvent):
         """重抽今日老婆：nonce+1 得新角色，受每日次数限制。"""
         if self._store is None or self._data_dir is None:
-            yield event.plain_result("老婆殿还没布置好（插件未初始化完成），稍后再试～")
+            yield event.plain_result("插件尚未初始化完成，请稍后再试。")
             return
         uid = str(event.get_sender_id() or "").strip()
         if not uid:
-            yield event.plain_result("老婆殿没看清你是谁，稍后再试一次～")
+            yield event.plain_result("无法识别你的账号，请稍后再试。")
             return
         gid = "" if event.is_private_chat() else str(event.get_group_id() or "")
         date = self._today()
         limit = int(self._cfg("reroll_daily_limit", 1))
         if limit <= 0:
-            yield event.plain_result("今天的换老婆功能没有开启哦")
+            yield event.plain_result("今日重抽功能未开启。")
             return
         existing = self._store.get_draw(uid, date)
         if not existing:
-            yield event.plain_result("今天还没抽过老婆，先发 /今日老婆 吧")
+            yield event.plain_result("今天还没抽过，先发送 /今日老婆。")
             return
         used = int(existing.get("nonce") or 0)
         if used >= limit:
-            yield event.plain_result(f"今天的换老婆次数用完了（{limit} 次），明天再来吧")
+            yield event.plain_result(f"今日重抽次数已用完（{limit} 次），明天再来吧。")
             return
         packs = self._load_packs()
         candidates = pool.candidates_for(
@@ -367,7 +367,7 @@ class MoeWaifuPlugin(Star):
             bool(self._cfg("allow_unverified", False)),
         )
         if not candidates:
-            yield event.plain_result("老婆库还是空的，换不了哦")
+            yield event.plain_result("角色库还是空的，暂时无法重抽。")
             return
         salt = str(self._cfg("salt", "moe-waifu"))
         entry = pool.pick_character(
@@ -375,7 +375,7 @@ class MoeWaifuPlugin(Star):
             candidates)
         key = (uid, date)
         if key in self._inflight:
-            yield event.plain_result("正在召唤中，稍等一下再看看～")
+            yield event.plain_result("正在生成中，请稍后再查看。")
             return
         self._inflight.add(key)
         try:
@@ -388,8 +388,8 @@ class MoeWaifuPlugin(Star):
     @filter.command("老婆帮助", alias={"waifu帮助"})
     async def help_cmd(self, event: AstrMessageEvent):
         yield event.plain_result(
-            "♥ 萌萌今日老婆 ♥\n"
-            "/今日老婆（别名 /老婆）：抽今天的老婆，萌绘立绘卡片，一人一天一位\n"
+            "萌萌今日老婆\n"
+            "/今日老婆（别名 /老婆）：抽取今天的角色，萌绘立绘卡片，一人一天一位\n"
             "/换老婆：重新抽一位（受「每日换老婆次数」限制）\n\n"
             "角色库管理 / 试画 / 立绘库维护都在 AstrBot Dashboard 的插件 Page「工坊」里做"
             "（仅管理员）。\n"
