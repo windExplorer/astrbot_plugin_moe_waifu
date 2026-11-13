@@ -29,6 +29,21 @@ def main():
           len(ids) >= 10 and "random" not in ids
           and not any(str(t).startswith("tpl_") for t in ids))
 
+    # v0.32.2：build_char_tasks——详情页补齐配额的显式主题序列 → 任务
+    # （预览弹窗确认过的序列原样下发，实跑不再走 theme_plan 复算）
+    _entry = {"id": "c9", "name": "测试娘", "strategy_type": "base"}
+    _tasks = bf.build_char_tasks(_entry, ["campus", "swimsuit", "maid"], have=2)
+    check("build_char_tasks 形状与顺序",
+          len(_tasks) == 3
+          and [t["theme_id"] for t in _tasks] == ["campus", "swimsuit", "maid"]
+          and all(t["char_id"] == "c9" for t in _tasks)
+          and [t["index"] for t in _tasks] == [0, 1, 2]
+          and all(t["have"] == 2 for t in _tasks)
+          and all(t["entry"] is _entry for t in _tasks))
+    check("build_char_tasks 空序列/缺字段安全",
+          bf.build_char_tasks(_entry, []) == []
+          and bf.build_char_tasks(None, ["campus"])[0]["char_id"] == "")
+
     plan = bf.theme_plan("c1", "salt", 60)
     check("主题序列长度正确", len(plan) == 60)
     check("相邻主题不重复", all(a != b for a, b in zip(plan, plan[1:])))

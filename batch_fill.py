@@ -153,6 +153,21 @@ def char_salt(salt: str, char_id: str, nonce: int = 0) -> str:
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
+def build_char_tasks(entry: dict, themes: list, have: int = 0) -> list:
+    """单角色补齐（v0.32.2）：显式主题序列 → 逐张任务（与 build_tasks 输出同形）。
+
+    详情页「补齐配额」的预览弹窗允许逐张换随机 / 整体重随机——实跑必须按
+    用户确认过的序列出图（预览 = 实出），所以任务直接吃显式列表，不再走
+    theme_plan。调用方负责校验主题 id 合法、张数与配额差一致。
+    """
+    cid = str((entry or {}).get("id") or "")
+    out = []
+    for i, tid in enumerate(themes or []):
+        out.append({"char_id": cid, "index": i, "theme_id": str(tid or ""),
+                    "entry": entry, "have": int(have or 0)})
+    return out
+
+
 def build_tasks(cands: list, salt: str, date: str = "",
                 overrides: dict | None = None) -> list:
     """候选 → 具体任务：每角色展开成逐张任务并附主题 id（theme_plan 决定）。

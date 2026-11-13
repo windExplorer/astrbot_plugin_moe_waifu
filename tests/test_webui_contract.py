@@ -59,6 +59,8 @@ galAvatarThumb galAvatarBusy galAvatarUploadOpen galAvatarNote
 galAvatarPickOpen openAvatarPick doAvatarSet avatarClear doAvatarGenerate
 onAvatarPanelFiles galAvBatchOpen galAvBatch startAvatarBatch stopAvatarBatch
 galFillBusy galFillLabel startGalFill stopGalFill
+galFillOpen galFillRows galFillHave galFillQuota galFillLoading
+rerollFillRow rerollFillAll doFillStart
 avatarOf hashColor thumbOf colorOf rerollLabel tv brandColor zhLocale
 bindRows bindSeriesOpts bindRawOpen bindLoading loadBindPools onBindRawInput
 addBindRow setRowGid setRowSeries removeBindRow
@@ -84,7 +86,7 @@ ROUTES = """
 /refs/set_draw_source /overview
 /prompt/pools
 /batch/preview /batch/start /batch/status /batch/stop
-/batch/char_start
+/batch/char_start /batch/char_preview
 /works/discover /works/discover_add
 /pools/import /pools/duplicates /pools/dedupe /relational/status
 /portraits/set_active /trash/list /trash/restore /trash/purge
