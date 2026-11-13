@@ -506,30 +506,33 @@ def art_theme_weight(theme_id: str) -> int:
 # 缺省 = 不约束该维度）；筛不出子集（池里没这个词）就退回全池随机。custom 由用户
 # 在预览面板自填。v0.19.0：每个内容主题都补了 artstyle_kw（画风收束到贴合该主题
 # 的几种），另加 art_* 纯画风主题（整组图想统一成某种画风时直接选）。
-# tpl_ 前缀 = 「立绘模板」：按 character sheet 行业惯例强制构图 + 标准站姿 +
-# 平静表情（微笑上限）+ 纯色背景。服装不置空、按种子从 OUTFITS 池随机
-# （v0.7.2 曾置空回归原始服装，用户反馈模板也要能换装——v0.7.4 起随机 +
-# 可在预览面板指定任意穿搭，见 pick_variations 的 outfit_override）。
+# tpl_ 前缀 = 「立绘模板」：**固定底稿**，不带任何种子随机——构图 + 标准站姿 +
+# 温柔微笑 + 纯色/灰底全部锁死；服装 / 画风 / 体型 / 取景四维 plain_dims 置空
+# （提示词不提及 → 服装跟角色原始设定、画风交底模默认，character sheet 惯例）。
+# 历史沿革：v0.7.2 曾置空变装，v0.7.4 按当时反馈改回随机穿搭；v0.29.3 用户明确
+# 「模板是固定提示词，不能充满随机性」——随机感全部收回。想给模板换装 / 换画风，
+# 用预览面板显式指定（outfit_override 与维度 chip / fixed 锁定不受 plain 影响）。
+_TPL_PLAIN = ["outfit", "artstyle", "body", "framing"]
 THEMES = (
     {"id": "random", "label": "随机（按种子变化）", "outfit_kw": [], "bg_kw": []},
     {"id": "tpl_standing", "label": "【模板】纯色背景 · 正常站姿",
-     "outfit_kw": [], "bg_kw": ["纯"], "pose_kw": ["标准站姿"],
+     "outfit_kw": [], "bg_kw": ["纯白色摄影棚"], "pose_kw": ["标准站姿"],
      "expression_kw": ["微笑"], "compose_kw": ["正常站姿"],
-     "artstyle_kw": ["赛璐璐", "厚涂"]},
+     "plain_dims": _TPL_PLAIN},
     # v0.13.0：单图 / 三视图 / 四视图三套底稿模板，统一灰底（character sheet 惯例），
     # 图生图配上「本次生成源」多选（正/侧/背分图）即可按参考图出底稿。
     {"id": "tpl_single", "label": "【模板】单图 · 正面全身（灰底）",
      "outfit_kw": [], "bg_kw": ["灰"], "pose_kw": ["标准站姿"],
      "expression_kw": ["微笑"], "compose_kw": ["单张全身立绘"],
-     "artstyle_kw": ["赛璐璐", "厚涂"]},
+     "plain_dims": _TPL_PLAIN},
     {"id": "tpl_3view", "label": "【模板】三视图（正/侧/背 · 灰底）",
      "outfit_kw": [], "bg_kw": ["灰"], "pose_kw": ["标准站姿"],
      "expression_kw": ["微笑"], "compose_kw": ["三视图"],
-     "artstyle_kw": ["赛璐璐", "厚涂"]},
+     "plain_dims": _TPL_PLAIN},
     {"id": "tpl_4view", "label": "【模板】四视图（正/侧/背/¾ · 灰底）",
      "outfit_kw": [], "bg_kw": ["灰"], "pose_kw": ["标准站姿"],
      "expression_kw": ["微笑"], "compose_kw": ["四视图"],
-     "artstyle_kw": ["赛璐璐", "厚涂"]},
+     "plain_dims": _TPL_PLAIN},
     # —— v0.14.0：主题子集全面扩充 + 关键词修正。教训：
     #    ① swimsuit 原只用「泳装」一词，漏掉池里叫「泳衣」的款式；
     #    ② office 原「西装」「马甲」两个宽泛词会把 JK 制服吸进职场子集；

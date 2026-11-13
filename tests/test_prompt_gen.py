@@ -249,34 +249,46 @@ check("服装下拉无空项且降序", "" not in pools["outfit"]
                    if it["zh"] == pools["outfit"][0])) >= int(next(it["w"] for it in prompt_gen.OUTFITS
                                                                   if it["zh"] == pools["outfit"][-1])))
 
-# ---------- 立绘模板主题 + 全身姿势池（v0.7.0；v0.7.4 起模板恢复随机穿搭） ----------
+# ---------- 立绘模板主题 + 全身姿势池（v0.7.0；v0.29.3 起模板 = 固定底稿） ----------
+# 用户口径：模板是固定提示词，不参与随机、不吃维度池——同一模板换种子必须
+# 逐位一致；想换装 / 换画风走预览面板显式指定（outfit_override / fixed 锁定）。
 tpl3 = prompt_gen.get_theme("tpl_3view")
 tpl4 = prompt_gen.get_theme("tpl_4view")
 tpl_s = prompt_gen.get_theme("tpl_standing")
-check("三套立绘模板主题存在", tpl3 is not None and tpl4 is not None and tpl_s is not None)
-check("模板主题已不再置空服装", all("outfit" not in (t.get("plain_dims") or [])
-                                  for t in prompt_gen.THEMES))
-pool_zh = {str(it.get("zh") or "") for it in prompt_gen.OUTFITS}
-
-
-def in_pool(zh: str) -> bool:
-    """服装条目可能带颜色前缀（v0.13.1），只要款式部分在池内即可。"""
-    return any(z and z in str(zh or "") for z in pool_zh)
-
-
+tpl_single_t = prompt_gen.get_theme("tpl_single")
+check("四套立绘模板主题存在",
+      all(t is not None for t in (tpl3, tpl4, tpl_s, tpl_single_t)))
+_TPL_PLAIN = ("outfit", "artstyle", "body", "framing")
+check("模板主题置空服装/画风/体型/取景（固定底稿口径）",
+      all(all(d in (t.get("plain_dims") or []) for d in _TPL_PLAIN)
+          for t in (tpl3, tpl4, tpl_s, tpl_single_t)))
 for seed in (1, 42, 777, 99999):
     p3 = prompt_gen.pick_variations(seed, tpl3)
     check(f"三视图模板强制三视图(seed={seed})", "三视图" in p3["compose"]["zh"])
     check(f"三视图模板强制标准站姿(seed={seed})", "标准站姿" in p3["pose"]["zh"])
     check(f"三视图模板强制微笑(seed={seed})", "微笑" in p3["expression"]["zh"])
-    check(f"三视图模板随机穿搭在池内(seed={seed})", in_pool(p3["outfit"]["zh"]))
     check(f"三视图模板强制灰底(seed={seed})", "灰" in p3["background"]["zh"])
+    check(f"三视图模板不提穿搭/画风/体型/取景(seed={seed})",
+          all(p3[d]["zh"] == "" for d in _TPL_PLAIN))
+_base3 = prompt_gen.pick_variations(1, tpl3)
+check("三视图模板跨种子完全一致（无随机）",
+      all(prompt_gen.pick_variations(s, tpl3) == _base3 for s in range(200)))
+check("四视图模板跨种子完全一致",
+      all(prompt_gen.pick_variations(s, tpl4)
+          == prompt_gen.pick_variations(1, tpl4) for s in range(200)))
+check("单图模板跨种子完全一致",
+      all(prompt_gen.pick_variations(s, tpl_single_t)
+          == prompt_gen.pick_variations(1, tpl_single_t) for s in range(200)))
+check("站姿模板跨种子完全一致",
+      all(prompt_gen.pick_variations(s, tpl_s)
+          == prompt_gen.pick_variations(1, tpl_s) for s in range(200)))
 p4 = prompt_gen.pick_variations(42, tpl4)
 check("四视图模板强制四视图", "四视图" in p4["compose"]["zh"])
-check("四视图模板随机穿搭在池内", in_pool(p4["outfit"]["zh"]))
 ps = prompt_gen.pick_variations(42, tpl_s)
 check("站姿模板强制正常站姿构图", "正常站姿" in ps["compose"]["zh"])
-check("站姿模板随机穿搭在池内", in_pool(ps["outfit"]["zh"]))
+check("站姿模板纯白摄影棚底（不再白/粉随机）", "纯白" in ps["background"]["zh"])
+check("模板显式指定穿搭仍然生效（outfit_override 不受 plain 影响）",
+      prompt_gen.pick_variations(42, tpl3, "白色婚纱")["outfit"]["zh"] == "白色婚纱")
 
 # v0.13.1：服装配色独立抽取——旗袍/婚纱不再永远黑色
 colors = [c for c in prompt_gen.OUTFIT_COLORS if c.get("zh")]
@@ -490,10 +502,12 @@ _art_only = all(
     == prompt_gen.pick_variations(s)["background"]
     for s in range(60))
 check("纯画风主题只收束画风（服装/背景仍随种子）", _art_only)
-# 内容主题都带画风约束（用户要求「主题里要加上画风」）
+# 内容主题都带画风约束（用户要求「主题里要加上画风」；tpl_ 模板 v0.29.3 起
+# 固定底稿不写画风，交底模默认——所以也排除）
 _no_style = [t["id"] for t in prompt_gen.THEMES
-             if t["id"] != "random" and not (t.get("artstyle_kw") or [])]
-check("除 random 外所有主题都约束画风", not _no_style)
+             if t["id"] != "random" and not str(t["id"]).startswith("tpl_")
+             and not (t.get("artstyle_kw") or [])]
+check("内容主题（除 random/tpl_）都约束画风", not _no_style)
 # 主题画风子集必须真的能摇出东西（写错关键词 = 画风悄悄失效）
 _bad_style_subset = []
 for t in prompt_gen.THEMES:
