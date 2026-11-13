@@ -4736,7 +4736,9 @@
                      seq: 0, display_no: 0 });
         });
         galItems.value.forEach(function (it) {
-          if (it.abs) {
+          // v0.29.6：停用（软删除）的立绘不进生成源——立绘墙有「显示停用」
+          // 开关只是供查看/恢复，停用图不应再被选为图生图参考
+          if (it.abs && it.active) {
             out.push({ kind: "portrait", path: it.abs, thumb: it.thumb,
                        seq: it.seq, display_no: it.display_no });
           }
@@ -4855,6 +4857,19 @@
             || String(a.created_at || "").localeCompare(String(b.created_at || ""));
         });
         return arr;
+      });
+      // v0.29.6：已选生成源里被停用 / 移除的图自动剔除——不然「先选中、后停用」
+      // 的图会留在 galRefsSel 里，生成时照样喂进工作流（列表里看不见它）。
+      Vue.watch([galItems, galRefs], function () {
+        var ok = {};
+        galRefsView.value.forEach(function (r) { if (r.path) { ok[r.path] = 1; } });
+        galItems.value.forEach(function (it) {
+          if (it.active && it.abs) { ok[it.abs] = 1; }
+        });
+        var kept = galRefsSel.value.filter(function (p) { return ok[p]; });
+        if (kept.length !== galRefsSel.value.length) {
+          galRefsSel.value = kept;
+        }
       });
       var galDetailOpen = Vue.ref(false);
       var galDetail = Vue.ref(null);
