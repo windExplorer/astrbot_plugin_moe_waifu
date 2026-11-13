@@ -610,4 +610,46 @@ check("Qwen 兜底首句定框架", _q.startswith("一幅"), _q[:40])
 check("Qwen 兜底光照单独成句", "光照" in _q)
 check("Qwen 兜底不写指令腔", "请画" not in _q and "帮我" not in _q)
 
+# ---------- v0.26.3：表情与主题 / 姿势协调 ----------
+# ① 内容主题全部配了 expression_kw（旧版十个内容主题一个都没配，表情全池随机）
+_content_themes = [t for t in prompt_gen.THEMES
+                   if not str(t["id"]).startswith(("art_", "tpl_"))
+                   and t["id"] != "random"]
+_missing_expr = [t["id"] for t in _content_themes if not t.get("expression_kw")]
+check("内容主题都配了表情子集", not _missing_expr, str(_missing_expr))
+
+# ② 强情绪降权、柔和表情为主
+_total_w = sum(int(it["w"]) for it in prompt_gen.EXPRESSIONS)
+_surprised_w = sum(int(it["w"]) for it in prompt_gen.EXPRESSIONS
+                   if "惊讶" in str(it["zh"]))
+_soft_kw = ("微笑", "平静", "若有所思", "莞尔", "浅笑")
+_soft_w = sum(int(it["w"]) for it in prompt_gen.EXPRESSIONS
+              if any(k in str(it["zh"]) for k in _soft_kw))
+check("惊讶类表情占比 < 5%", _surprised_w * 100 // _total_w < 5,
+      f"{_surprised_w}/{_total_w}")
+check("柔和类表情占比 >= 40%", _soft_w * 100 // _total_w >= 40,
+      f"{_soft_w}/{_total_w}")
+
+# ③ 主题子集生效：泳装主题下表情都落在子集里
+_sw = prompt_gen.get_theme("swimsuit")
+_sw_expr = {prompt_gen.pick_variations(s, _sw)["expression"]["zh"]
+            for s in range(200)}
+_sw_allowed = {it["zh"] for it in prompt_gen.EXPRESSIONS
+               if any(kw in str(it["zh"]) for kw in _sw["expression_kw"])}
+check("泳装主题表情限定在子集内",
+      bool(_sw_expr) and _sw_expr <= _sw_allowed, str(_sw_expr))
+
+# ④ 睡姿锁表情：睡着 / 躺着不许配「惊讶瞪眼」
+_sleep_hit = 0
+for s in range(160):
+    p = prompt_gen.pick_variations(s)
+    if any(h in str(p["pose"].get("zh") or "")
+           for h in ("打瞌睡", "蜷缩", "睡着", "侧躺", "仰面躺")):
+        _sleep_hit += 1
+        if not any(k in str(p["expression"].get("zh") or "")
+                   for k in ("困倦", "闭眼", "平静")):
+            check("睡姿表情被锁到困倦/闭眼/平静", False,
+                  str(p["expression"].get("zh")))
+check("睡姿样本存在且全部锁定", _sleep_hit > 0, str(_sleep_hit))
+
 print("test_prompt_gen: ALL OK")

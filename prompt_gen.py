@@ -263,24 +263,45 @@ FRAMING = [
      "en": "full body, full length"},
 ]
 
+# 表情维度（v0.26.3 重平衡）：用户实测 10 张里「惊讶地睁大眼睛」出现太频繁，
+# 还常和泳装 / 婚纱这类主题完全不搭。改法两层：
+#   ① 强情绪表情降权（惊讶瞪眼 5→2、捂嘴 3→1、吐舌 5→3、大笑 5→3），
+#      补 3 款立绘常用的柔和表情（平静淡然 / 莞尔一笑 / 移开视线浅笑）；
+#      柔和类合计约 47%，强情绪类压到个位数。
+#   ② 每个内容主题配 expression_kw（见 THEMES），表情在主题子集内抽，
+#      不再与服装 / 场景各自独立随机。
 EXPRESSIONS = [
-    {"w": 8, "zh": "温柔微笑", "en": "smile"},
+    {"w": 12, "zh": "温柔微笑", "en": "gentle smile, soft expression"},
+    {"w": 8, "zh": "平静淡然的表情", "en": "calm, neutral expression, serene"},
+    {"w": 7, "zh": "安静若有所思", "en": "pensive, thoughtful"},
+    {"w": 7, "zh": "莞尔一笑（嘴角轻扬）", "en": "subtle smile, closed mouth"},
     {"w": 6, "zh": "害羞脸红", "en": "blush, shy"},
-    {"w": 5, "zh": "得意的坏笑", "en": "smirk, smug"},
-    {"w": 5, "zh": "惊讶地睁大眼睛", "en": "surprised, wide-eyed"},
+    {"w": 5, "zh": "微微移开视线、带着浅笑", "en": "looking away, soft smile"},
     {"w": 5, "zh": "无语地半眯着眼", "en": "expressionless, half-closed eyes"},
-    {"w": 5, "zh": "俏皮地眨眼吐舌", "en": "wink, tongue out"},
-    {"w": 5, "zh": "安静若有所思", "en": "pensive"},
-    {"w": 5, "zh": "开怀大笑", "en": "laughing, open mouth"},
-    {"w": 4, "zh": "傲娇地嘟起嘴", "en": "pout"},
+    {"w": 5, "zh": "闭眼享受阳光", "en": "closed eyes, peaceful expression"},
+    {"w": 4, "zh": "得意的坏笑", "en": "smirk, smug"},
     {"w": 4, "zh": "困倦惺忪", "en": "sleepy"},
-    # —— v0.14.0 扩充 ——
     {"w": 4, "zh": "星星眼兴奋表情", "en": "star-shaped eyes, excited"},
-    {"w": 4, "zh": "闭眼享受阳光", "en": "closed eyes, peaceful expression"},
-    {"w": 3, "zh": "惊讶地捂住嘴", "en": "surprised, covering mouth"},
-    {"w": 3, "zh": "微微歪头一脸疑惑", "en": "confused, tilting head"},
-    {"w": 3, "zh": "得意地挺起胸膛", "en": "proud, confident smile"},
+    {"w": 3, "zh": "俏皮地眨眼吐舌", "en": "wink, tongue out"},
+    {"w": 3, "zh": "开怀大笑", "en": "laughing, open mouth"},
+    {"w": 3, "zh": "傲娇地嘟起嘴", "en": "pout"},
+    {"w": 2, "zh": "惊讶地睁大眼睛", "en": "surprised, wide-eyed"},
+    {"w": 2, "zh": "微微歪头一脸疑惑", "en": "confused, tilting head"},
+    {"w": 2, "zh": "得意地挺起胸膛", "en": "proud, confident smile"},
+    {"w": 1, "zh": "惊讶地捂住嘴", "en": "surprised, covering mouth"},
 ]
+
+# 姿势 → 表情锁定（v0.26.3）：睡着的姿势配「惊讶瞪眼」是硬伤，这类姿势直接
+# 把表情收窄到困倦 / 闭眼 / 平静；其余姿势仍走主题子集或全池。
+_POSE_EXPR_LOCK = (
+    (("打瞌睡", "蜷缩", "睡着", "侧躺", "仰面躺"), ["困倦", "闭眼", "平静"]),
+)
+
+# 纯画风主题（art_*）通用的立绘表情池：排除需要特定情境的困倦 / 惊讶 / 疑惑 /
+# 傲娇（用户实测「婚纱 + 困倦惺忪」违和）。只影响 art_* 主题，抽卡与内容主题
+# 不受影响。
+_GENERIC_EXPR_KWS = ("微笑", "平静", "若有所思", "莞尔", "浅笑",
+                     "害羞", "半眯", "坏笑")
 
 # body：v0.19.10 按用户口径重做——默认（90%）不提及体型 = 跟随参考图/角色原本
 # 体型；变化合计压到 ~10% 且不再让「高挑成熟」一家独大（旧池 66/34 的变化概率、
@@ -509,39 +530,51 @@ THEMES = (
     #    ② office 原「西装」「马甲」两个宽泛词会把 JK 制服吸进职场子集；
     #    ③ idol 原 outfit 子集只有 1 项（永远打歌服）。
     #    关键词全部改成池条目命名自带的专属词（命中校验在 tests/test_prompt_gen.py）。
+    # v0.26.3：内容主题全部补 expression_kw——表情跟着场景走，不再全池随机
+    # （用户实测「泳装配惊讶瞪眼」这类违和组合，根因就是这十个主题一个都没配）。
     {"id": "swimsuit", "label": "泳装 · 夏日",
      "outfit_kw": ["泳装", "泳衣", "比基尼", "纱笼"], "bg_kw": ["海边", "泳池", "水上", "度假"],
+     "expression_kw": ["微笑", "害羞", "闭眼享受", "开怀大笑"],
      "artstyle_kw": ["水彩", "赛璐璐", "扁平", "淡彩", "Riso"]},
     {"id": "campus", "label": "校园 · JK",
      "outfit_kw": ["水手服", "西装夹克", "针织开衫", "背带", "马甲衬衫JK", "百褶裙",
                    "运动外套", "校服", "体操服", "拉拉队"],
      "bg_kw": ["教室", "樱花", "天台", "走廊", "图书馆", "体育馆"],
+     "expression_kw": ["微笑", "害羞", "俏皮", "若有所思"],
      "artstyle_kw": ["赛璐璐", "少女漫画", "水彩", "淡彩"]},
     {"id": "wedding", "label": "婚纱 · 典礼",
      "outfit_kw": ["婚纱", "礼服", "秀禾", "白无垢"], "bg_kw": ["纯白", "浅粉", "教堂", "拱门", "宴会"],
+     "expression_kw": ["温柔微笑", "害羞", "闭眼享受", "若有所思"],
      "artstyle_kw": ["油画", "水彩", "赛璐璐", "彩绘玻璃", "细密画", "岩彩"]},
     {"id": "office", "label": "职场 · 通勤",
      "outfit_kw": ["职业西装", "西装裤装", "通勤", "铅笔裙", "西裤", "毛衣", "航空制服"],
      "bg_kw": ["咖啡馆", "霓虹", "办公室", "写字楼", "天桥"],
+     "expression_kw": ["微笑", "坏笑", "半眯", "若有所思"],
      "artstyle_kw": ["厚涂", "扁平", "赛璐璐", "复古印刷", "韩漫"]},
     {"id": "kimono", "label": "和风 · 浴衣",
      "outfit_kw": ["浴衣", "和服", "振袖", "访问着", "巫女"], "bg_kw": ["和室", "樱花", "祭典", "温泉", "枯山水"],
+     "expression_kw": ["温柔微笑", "若有所思", "害羞", "平静"],
      "artstyle_kw": ["浮世绘", "水墨", "水彩", "岩彩", "淡彩"]},
     {"id": "maid", "label": "女仆 · 咖啡厅",
      "outfit_kw": ["女仆"], "bg_kw": ["咖啡馆", "咖啡店", "客厅", "沙发"],
+     "expression_kw": ["微笑", "害羞", "俏皮"],
      "artstyle_kw": ["赛璐璐", "水彩", "扁平", "Riso"]},
     {"id": "gothic", "label": "暗黑 · 哥特",
      "outfit_kw": ["哥特", "女巫", "吸血鬼", "魔法学院"], "bg_kw": ["霓虹", "雨", "古堡", "烛光", "墓园"],
+     "expression_kw": ["半眯", "若有所思", "坏笑", "平静"],
      "artstyle_kw": ["哥特", "油画", "铜版画", "彩绘玻璃", "故障"]},
     {"id": "home", "label": "居家 · 慵懒",
      "outfit_kw": ["睡衣", "睡袍", "睡裙", "T恤", "卫衣", "家居服", "毛衣"],
      "bg_kw": ["雨", "和室", "咖啡馆", "客厅", "卧室"],
+     "expression_kw": ["困倦", "温柔微笑", "闭眼享受", "若有所思"],
      "artstyle_kw": ["水彩", "少女漫画", "赛璐璐", "淡彩", "剪纸"]},
     {"id": "idol", "label": "偶像 · 舞台",
      "outfit_kw": ["打歌服", "舞台", "演出服"], "bg_kw": ["圣诞", "霓虹", "星空", "演唱会", "直播间"],
+     "expression_kw": ["星星眼", "开怀大笑", "俏皮", "微笑"],
      "artstyle_kw": ["赛博", "3D 渲染", "赛璐璐", "Y2K", "故障"]},
     {"id": "party", "label": "旗袍 · 东方",
      "outfit_kw": ["旗袍"], "bg_kw": ["和室", "樱花", "绿意花园", "中式庭院", "红灯笼"],
+     "expression_kw": ["温柔微笑", "害羞", "若有所思", "平静"],
      "artstyle_kw": ["水墨", "油画", "浮世绘", "岩彩", "细密画"]},
     # —— v0.19.0：纯画风主题。只约束 artstyle 维度（服装/背景/姿势仍按种子随机），
     #    适合「让这角色的这一批图统一成某种画风」；批量补图的内容主题轮换会自动
@@ -776,6 +809,37 @@ def pick_variations(seed_int: int, theme: dict | None = None,
     text = str(outfit_override or "").strip().strip("。，,")[:80]
     if text:
         picks["outfit"] = {"w": 0, "zh": text, "en": text}
+    # v0.26.3：纯画风主题（art_*）只锁画风、不约束表情，实测会出现「婚纱 +
+    # 困倦惺忪」这类违和。给一个通用立绘表情池（排除需要特定情境的困倦 /
+    # 惊讶 / 疑惑），让纯画风主题下的表情也落在自然范围。
+    if theme and str(theme.get("id") or "").startswith("art_") \
+            and not _theme_kws("expression", theme):
+        generic = [it for it in EXPRESSIONS
+                   if any(kw in str(it.get("zh") or "")
+                          for kw in _GENERIC_EXPR_KWS)]
+        if generic:
+            picks["expression"] = _weighted_pick(
+                generic, _sub(seed_int, "expression@art_theme", 2 ** 30))
+    # v0.26.3：姿势与表情强相关——睡着 / 躺着的姿势配「惊讶瞪眼」是硬伤。
+    # 与主题子集取交集（睡姿优先）；交集为空才退到睡姿子集，避免覆盖掉主题
+    # 已收窄的表情范围（泳装主题的「闭眼享受阳光」正好两边都合适）。
+    pose_zh = str((picks.get("pose") or {}).get("zh") or "")
+    for hints, expr_kws in _POSE_EXPR_LOCK:
+        if not any(h in pose_zh for h in hints):
+            continue
+        lock_pool = [it for it in EXPRESSIONS
+                     if any(kw in str(it.get("zh") or "") for kw in expr_kws)]
+        theme_kws = _theme_kws("expression", theme)
+        if theme_kws and lock_pool:
+            themed = [it for it in EXPRESSIONS
+                      if any(kw in str(it.get("zh") or "") for kw in theme_kws)]
+            both = [it for it in lock_pool if it in themed]
+            if both:
+                lock_pool = both
+        if lock_pool:
+            picks["expression"] = _weighted_pick(
+                lock_pool, _sub(seed_int, "expression@pose_lock", 2 ** 30))
+        break
     return picks
 
 
