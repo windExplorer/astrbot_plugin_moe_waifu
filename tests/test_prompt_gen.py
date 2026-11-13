@@ -452,6 +452,71 @@ async def _run_i2i_tpl(seed):
 txt_tpl, _src_tpl = asyncio.run(_run_i2i_tpl(7))
 check("tpl_3view 主题仍输出三视图指令", "三视图" in txt_tpl)
 
+# ---------- v0.31.1：模板主题跳过 LLM 通道（固定底稿逐位确定） ----------
+# 用户实测：三视图模板「有时候」得到 LLM 改写的压缩指令（丢并列设定稿强调 /
+# 参考图对齐条款，文生图 qwen 通道甚至写出「把构图改为…」的编辑指令口吻）。
+# v0.29.3 已定口径「模板是固定提示词，不能充满随机性」——LLM 改写就是随机源，
+# tpl_ 主题必须短路 LLM、逐位确定。
+class _LlmContext:
+    """带可用对话模型的桩：text_chat 记录调用，验证 LLM 通道是否真被短路。"""
+
+    def __init__(self):
+        self.calls = []
+
+    def get_provider_by_id(self, pid):
+        raise RuntimeError("no astrbot")
+
+    async def get_using_provider_async(self):
+        return self
+
+    def get_all_providers(self):
+        return [self]
+
+    async def text_chat(self, prompt, session_id=None, system_prompt=""):
+        self.calls.append({"prompt": prompt, "system": system_prompt})
+
+        class _R:
+            completion_text = "把构图改为正面侧面背面同框的三视图，LLM改写版"
+
+        return _R()
+
+
+async def _run_llm(ctx, e, theme_id=""):
+    return await prompt_gen.build_generation_prompt(
+        ctx,
+        {"prompt_llm_enabled": True, "prompt_llm_provider": "",
+         "variations_enabled": True},
+        e, 7, theme_id=theme_id)
+
+
+_llm = _LlmContext()
+t1, s1 = asyncio.run(_run_llm(_llm, ENTRY, "tpl_3view"))
+t2, s2 = asyncio.run(_run_llm(_llm, ENTRY, "tpl_3view"))
+check("模板 + LLM 开启也走本地指令（不调用对话模型）",
+      s1 == "local" and len(_llm.calls) == 0)
+check("模板指令逐位确定（两次调用完全一致）", t1 == t2)
+check("模板指令带并列设定稿与参考图对齐条款",
+      "并列展示上述各个视角" in t1 and "输出角色设定稿" in t1
+      and "确保各视角是同一个角色、同一套服装" in t1)
+
+_orig_detect = prompt_gen.detect_t2i_style
+prompt_gen.detect_t2i_style = lambda ctx, wf: "qwen"
+try:
+    _llm2 = _LlmContext()
+    qb, sb = asyncio.run(_run_llm(
+        _llm2, dict(ENTRY, strategy_type="base"), "tpl_3view"))
+    check("模板 + qwen 文生图走本地长描述（不调用对话模型）",
+          sb == "local" and len(_llm2.calls) == 0
+          and "并列展示正面、侧面、背面" in qb)
+    _llm3 = _LlmContext()
+    _nb, nb_src = asyncio.run(_run_llm(
+        _llm3, dict(ENTRY, strategy_type="base"), ""))
+    check("非模板主题仍走 LLM 通道（对照）",
+          nb_src == "llm" and len(_llm3.calls) == 1)
+finally:
+    prompt_gen.detect_t2i_style = _orig_detect
+
+
 # ---------- v0.22.4：文生图链路也不许随机多视图 ----------
 # 现象：批量补图里 base 直出的角色吐出三/四视图拼接设定稿。根因是 COMPOSE
 # 池 3/30 权重随机命中多视图，而 force_single_view 只加在 img2img 分支，

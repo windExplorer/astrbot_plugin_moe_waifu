@@ -1548,6 +1548,12 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
     不传 = 纯种子决定论不变）。
     """
     theme, _theme_rec = resolve_theme(theme_id, seed_int)
+    # v0.31.1：tpl_ 模板主题 = 固定底稿（v0.29.3 口径：模板是固定提示词，不能充满
+    # 随机性），**跳过 LLM 通道**——LLM 每次改写措辞是非确定源，实测三视图模板
+    # 「有时候」被压缩掉关键约束（并列设定稿强调 / 参考图对齐条款），文生图 qwen
+    # 通道甚至会写出「把构图改为…」的编辑指令口吻。模板提示词必须逐位确定：
+    # 图生图走 build_local_instruction，文生图走 _t2i_local_of（含 qwen/natural）。
+    is_tpl = bool(theme and str(theme.get("id") or "").startswith("tpl_"))
     try:
         stype = str(entry.get("strategy_type") or "base")
         if stype == "img2img" and template_ref_mode(entry) == "none":
@@ -1573,7 +1579,8 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
             # v0.29.7：按「实际会用的」工作流探测（条目/本次覆盖 > 全局），
             # 修「选了 Qwen 工作流却按全局底模拼 tags」的错位
             style = detect_t2i_style(context, effective_workflow(entry, cfg))
-            if not bool(cfg.get("prompt_llm_enabled", True)) or style == "danbooru":
+            if (not bool(cfg.get("prompt_llm_enabled", True)) or style == "danbooru"
+                    or is_tpl):
                 return _t2i_local_of(style, entry, picks, custom)
             provider = await _resolve_provider(
                 context, cfg.get("prompt_llm_provider", ""))
@@ -1612,7 +1619,8 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
         # v0.14.0：维度级控制在强制单图之后——面板显式启用/锁定的 compose
         # 是用户意图，应能覆盖「随机命中被拦」的默认行为
         picks = apply_dim_state(picks, seed_int, dim_state, theme)
-        if not bool(cfg.get("prompt_llm_enabled", True)):
+        if not bool(cfg.get("prompt_llm_enabled", True)) or is_tpl:
+            # v0.31.1：is_tpl 一并短路——模板的编辑指令走本地确定性拼装
             return build_local_instruction(entry, picks, custom), "local"
         provider = await _resolve_provider(context, cfg.get("prompt_llm_provider", ""))
         if provider is None:
