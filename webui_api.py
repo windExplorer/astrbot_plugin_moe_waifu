@@ -120,6 +120,18 @@ def _version_of() -> str:
 
 
 _THUMB_CACHE: dict = {}
+# v0.18.2：立绘缩略也进这份缓存（切角色要重取一整墙图），给个上限防常驻内存
+# 无限涨。每条上限约 40~60KB（420px JPEG base64），600 条约 30MB 封顶。
+_THUMB_CACHE_MAX = 600
+
+
+def _trim_thumb_cache() -> None:
+    """超上限按插入顺序丢最旧的（dict 保序；近似 LRU 足够，不必精确）。"""
+    while len(_THUMB_CACHE) > _THUMB_CACHE_MAX:
+        try:
+            _THUMB_CACHE.pop(next(iter(_THUMB_CACHE)))
+        except (StopIteration, KeyError):  # pragma: no cover - 并发删同名键
+            break
 
 
 def _thumb_cached(path, max_w: int = 160) -> str | None:
@@ -128,6 +140,9 @@ def _thumb_cached(path, max_w: int = 160) -> str | None:
     缓存键含路径与宽度；stamp 同时看 mtime 与文件大小——图片被原地覆盖
     但 mtime 精度不足（1s 内 / copy2 保留 mtime）时，旧 data URL 不会继续命中
     （v0.10.1：设完封面仍是旧图的次要隐患）。
+
+    v0.18.2：`/portraits/list` 也改走这里——切角色要重新编码一整墙立绘（每张
+    420px JPEG，几十毫秒），真机上就是「换角色后要等 1~3 秒」的主要开销。
     """
     p = Path(path)
     if not p.is_file():
@@ -143,6 +158,7 @@ def _thumb_cached(path, max_w: int = 160) -> str | None:
         return cached[1]
     durl = _thumb_data_url(str(p), max_w)
     _THUMB_CACHE[key] = (stamp, durl)
+    _trim_thumb_cache()
     return durl
 
 
@@ -439,7 +455,7 @@ async def h_portraits_index(plugin) -> dict:
             "color": meta[1],
             "pack": meta[2],
             "count": len(rows),
-            "thumb": _thumb_data_url(str(plugin._data_dir / first["file"]), 420) if first else None,
+            "thumb": _thumb_cached(str(plugin._data_dir / first["file"]), 420) if first else None,
         })
     return ok({"chars": chars})
 
@@ -466,7 +482,9 @@ async def h_portraits_list(plugin) -> dict:
             # abs：绝对路径（v0.6.0）——立绘可被选为图生图源；draw 侧
             # Path(ref).exists() 按 CWD 解析相对路径，必须传绝对路径
             "abs": str(full),
-            "thumb": _thumb_data_url(str(full), 420) if full.is_file() else None,
+            # v0.18.2：走缓存（原先每次都重新编码 420px JPEG，切一次角色就是
+            # 一整墙重编码——真机「换角色要等 1~3 秒」的主要开销）
+            "thumb": _thumb_cached(full, 420) if full.is_file() else None,
             # v0.15.0：详情弹窗用（旧行 prompt 为 null）
             "created_at": row["created_at"],
             "prompt": row["prompt"],

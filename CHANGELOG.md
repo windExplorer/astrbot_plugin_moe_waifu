@@ -2,6 +2,43 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.18.2 (2026-11-13)
+
+角色详情切换角色不再「生硬等 1~3 秒」：切换即立骨架载入态 + 缩略图缓存（版本 v0.18.1 -> v0.18.2）。
+
+- **现象（用户）**：从角色库点卡片进角色详情、或在详情页用下拉换角色后，要等
+  1~3 秒页面才「变」；这段时间里挂着的还是**上一位角色**的立绘墙与参考图墙
+  （名字已经是新的、图还是旧的），观感就是「点了没反应」。
+- **根因（两条）**：
+  1. **前端取数顺序**：`Vue.watch(galCharId)` 里只是发起 `loadGalItems` /
+     `loadGalRefs`，**没有先清空**上一位的数据——新数据到达前模板照旧渲染旧数组，
+     所以「图与名字对不上」；且没有竞态保护，连点 A→B 时 A 的慢响应后到会盖掉 B
+     （显示错的角色，得再点一次才对）。参考图区的 `galDrawRef/MainRef` 同样残留。
+  2. **后端每次都重编码缩略图**：`/portraits/list` 里每张立绘都走
+     `_thumb_data_url`（Image.open 解码 700×1200 PNG + LANCZOS 缩放到 420 + JPEG
+     编码，每张几十毫秒），切一次角色就是一整墙重编码；`/portraits/index` 同理
+     每角色一张，而它这个 `thumb` 字段前端根本没用。`_thumb_cached` 早已存在，
+     只是这两处没走。
+- **修复（前端 `pages/waifu-console/index.html`）**：
+  - 新增 `galSwitching`（详情数据是否在途）+ `galLoadSeq`（序号令牌）。
+    watch 里**先清空** `galItems`/`galRefs`/`galMainRef`/`galDrawRef(Abs)`，
+    再并行取数；`loadGalItems(cid, token)` / `loadGalRefs(cid, token)` 拿到
+    过期令牌的响应直接丢弃（快速连点也不会串图）。
+  - 载入态 UI：立绘区与参考图区各给一块「转圈 + 正在载入『X』的立绘与参考图…」
+    文字条 + 骨架占位（`.gal-skel` 呼吸动画），标题旁加「载入中…」小标。
+    骨架卡沿用立绘的 7:12 竖版比例、参考图骨架为 1:1，切换时不会跳版。
+  - 载入完成的判定收口到 `Promise.all([...])` + 令牌比对，不会出现「A 的响应
+    把 B 的载入态提前关掉」。
+- **修复（后端 `webui_api.py`）**：`/portraits/list` 与 `/portraits/index` 改走
+  `_thumb_cached(fp, 420)`；给 `_THUMB_CACHE` 加 600 条上限（`_trim_thumb_cache`
+  按插入序丢最旧，防浏览很多角色后常驻内存无限涨）。缩略图按 mtime+size 命中，
+  立绘是内容寻址文件名、正常不会被原地覆盖，缓存不会吐旧图。
+- **守卫**：`tests/test_template_structure.py` 新增两条（`galSwitching` 两块载入态
+  存在、`.gal-skel` 样式存在），防止以后被「顺手删掉」退回生硬等待。
+- **验证**：`test_html_integrity` / `test_inline_js`(node --check) /
+  `test_template_structure` / `test_webui_contract` 全 OK；`webui_api.py`
+  `compileall` 通过。
+
 ## v0.18.1 (2026-11-13)
 
 批量补图「预览」报 postMessage 克隆错误：出站参数统一纯化（版本 v0.18.0 -> v0.18.1）。

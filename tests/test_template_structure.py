@@ -106,6 +106,12 @@ def main():
     dseg = page.split('<n-drawer-content :title="drawerTitle" closable>', 1)[1][:300]
     check("编辑抽屉表单容器不是 n-space（div.stack）", "<n-space" not in dseg.split("<n-grid")[0])
 
+    # v0.18.2：角色详情「切角色」的载入态（立绘区 + 参考图区各一块骨架）。
+    # 旧版切换后仍挂着上一位角色的图直到数据到达（1~3 秒），观感像点了没反应。
+    check("角色详情有切换载入态（galSwitching）",
+          page.count('v-if="galSwitching"') >= 2)
+    check("载入态有骨架样式（gal-skel）", ".gal-skel" in page)
+
     if FAILURES:
         print(f"test_template_structure: {len(FAILURES)} FAILED")
         sys.exit(1)
