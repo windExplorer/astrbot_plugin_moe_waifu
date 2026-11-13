@@ -929,90 +929,8 @@
                   <div>{{ galItems.length }} 张<span v-if="galSummary && galSummary.portrait_avg_ms > 0"> · 平均生成耗时 {{ fmtDur(galSummary.portrait_avg_ms) }}</span></div>
                 </div>
               </n-card>
-
-            <!-- 生成立绘面板：补一张 / 选图图生图 -->
-            <n-card size="small" :bordered="true" title="生成立绘">
-              <n-space vertical size="medium">
-                <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
-                  <n-radio-group v-model:value="galMode" size="small">
-                    <n-radio-button value="refill">补一张（跟随条目画法）</n-radio-button>
-                    <n-radio-button value="img2img">图生图重绘</n-radio-button>
-                  </n-radio-group>
-                  <n-select v-if="galMode === 'img2img'" v-model:value="galWf"
-                            :options="wfOpts('img')" filterable tag clearable
-                            placeholder="工作流（留空=全局配置）" style="width: 200px;"></n-select>
-                  <!-- v0.7.2：补一张也可指定工作流（txt+img 合并；条目是 img2img 时
-                       走 img2img_workflow，base/lora 走 workflow，留空跟随配置） -->
-                  <n-select v-if="galMode === 'refill'" v-model:value="galWfAny"
-                            :options="wfAllOpts" filterable tag clearable
-                            placeholder="工作流（留空=跟随配置）" style="width: 200px;"></n-select>
-                  <n-input-number v-if="galMode === 'img2img'" v-model:value="galDenoise"
-                                  :step="0.05" :min="0.2" :max="0.95"
-                                  placeholder="重绘强度" style="width: 120px;"></n-input-number>
-                  <!-- v0.13.3：图生图显式尺寸（留空 = 配置 draw_width/height）——
-                       旧版普通重绘不传宽高，输出尺寸跟参考图走，多视图源转单图会得横版 -->
-                  <n-input-number v-if="galMode === 'img2img'" v-model:value="galWidth"
-                                  :min="256" :max="4096" :step="16"
-                                  placeholder="宽（空=配置）" style="width: 128px;"></n-input-number>
-                  <n-input-number v-if="galMode === 'img2img'" v-model:value="galHeight"
-                                  :min="256" :max="4096" :step="16"
-                                  placeholder="高（空=配置）" style="width: 128px;"></n-input-number>
-                  <!-- v0.7.0：主题快选 + 主按钮（v0.6.2 的「查看/编辑提示词」并入主按钮——
-                       点主按钮打开提示词面板，在面板里点「开始生成」才出图） -->
-                  <n-select v-model:value="galTheme" :options="themeOpts" size="small"
-                            style="width: 190px;" filterable
-                            @update:value="galPromptConfirmed = false"></n-select>
-                  <n-button type="primary" size="small" :loading="refillRunning"
-                            :disabled="!galCharId" @click="openPromptModal">
-                    {{ galMode === "img2img" ? "按所选图生成…" : "开始补图…" }}
-                  </n-button>
-                  <span class="bind-tip" style="margin-top: 0;" v-if="refillRunning">
-                    萌绘生成中，已等待 {{ tryElapsed }} 秒…
-                  </span>
-                </div>
-                <div v-if="galMode === 'img2img'">
-                  <div class="bind-tip" style="margin-top: 0;">
-                    在下方墙上点 ⊕ 加入生成源（再点一次移出，可多选）；多图工作流（如 Qwen 2.1）
-                    可一次喂正/侧/背多张，顺序即「图1/图2/图3」，多数最多 3 张。
-                    用参考图适合稳脸型画风，用立绘适合做变体。
-                    姿势变化主要靠提示词——每次生成按种子随机抽全身姿势（站/坐/躺/打瞌睡/搞怪…），
-                    想固定构图就用【模板】主题；从多视图设定稿转单张立绘，指令会自动只保留正面视角。
-                    「宽/高」留空 = 用配置尺寸（draw_width/height），填了按本次出图；
-                    带尺寸开关的工作流（Qwen 2.1 Edit）按此出图，普通工作流仍跟参考图尺寸。
-                    「重绘强度」仅对带 KSampler 的经典 img2img 工作流生效，
-                    Qwen2.1 Turbo 编辑类工作流（ManualSigmas 固定调度表）没有该字段、会被忽略。
-                  </div>
-                  <!-- v0.15.0：提示行常驻（不再随选中出现/消失引起布局跳动），
-                       选中数并入文案；交互拆分——点图片看大图，点图片下方文字选中 -->
-                  <div class="bind-tip gen-sel-tip" style="margin-top: 0;">
-                    生成源（点击图片看大图；点图片<b>下方文字</b>选中/取消，顺序即「图1/图2/图3」）{{ galRefsSel.length > 0 ? " · 已选 " + galRefsSel.length + " 张" : "" }}
-                  </div>
-                  <div class="gen-strip" v-if="genSources.length > 0">
-                    <div v-for="g in genSources" :key="g.kind + ':' + g.path"
-                         class="gal-item" :class="{ 'ref-selected': galRefsSel.indexOf(g.path) >= 0 }"
-                         :title="g.kind === 'ref' ? '参考图' : '立绘 #' + g.display_no">
-                      <img v-if="g.thumb" :src="g.thumb" class="clickable-img" alt="生成源"
-                           title="点击查看大图"
-                           @click.stop="openViewer(g.path, g.kind === 'ref' ? '参考图' : '#' + g.display_no)">
-                      <div v-else class="gal-meta">文件丢失</div>
-                      <div class="gal-meta gen-sel"
-                           title="点击选中 / 取消（多选顺序 = 图1/图2/图3）"
-                           @click.stop="selectGenSource(g)">
-                        {{ galRefsSel.indexOf(g.path) >= 0
-                           ? "已选 #" + (galRefsSel.indexOf(g.path) + 1)
-                           : (g.kind === "ref" ? "参考图" : "立绘 #" + g.display_no) }}
-                      </div>
-                    </div>
-                  </div>
-                  <div class="bind-tip" v-else>该角色还没有参考图 / 立绘：先上传参考图或补一张。</div>
-                </div>
-                <div class="bind-tip" style="margin-top: 0;" v-else>
-                  按条目画法自动生成一张新立绘并入库{{ detailEntry ? "（" + stratLabel(detailEntry) + "）" : "" }}。
-                </div>
-                <n-alert v-if="refillError" type="error" :bordered="false">{{ refillError }}</n-alert>
-              </n-space>
-            </n-card>
             </div><!-- /概览页签 -->
+
 
             <div v-else-if="galTab === 'profile'" class="stack">
               <!-- v0.31.0：头像——上传 / 从已有图裁取 / AI 生成 / 移除 -->
@@ -1121,8 +1039,92 @@
             </n-card>
             </div><!-- /资料页签 -->
 
-            <!-- 立绘区 -->
-            <div v-else-if="galTab === 'portraits'">
+            <!-- 立绘区（v0.32.1：生成立绘面板从概览挪入本页签——生成与立绘墙同屏，
+                 出图立即可见；概览只留速览卡） -->
+            <div v-else-if="galTab === 'portraits'" class="stack">
+            <!-- 生成立绘面板：补一张 / 选图图生图 -->
+            <n-card size="small" :bordered="true" title="生成立绘">
+              <n-space vertical size="medium">
+                <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+                  <n-radio-group v-model:value="galMode" size="small">
+                    <n-radio-button value="refill">补一张（跟随条目画法）</n-radio-button>
+                    <n-radio-button value="img2img">图生图重绘</n-radio-button>
+                  </n-radio-group>
+                  <n-select v-if="galMode === 'img2img'" v-model:value="galWf"
+                            :options="wfOpts('img')" filterable tag clearable
+                            placeholder="工作流（留空=全局配置）" style="width: 200px;"></n-select>
+                  <!-- v0.7.2：补一张也可指定工作流（txt+img 合并下拉；base/lora→workflow、
+                       img2img 条目→img2img_workflow，留空跟随配置） -->
+                  <n-select v-if="galMode === 'refill'" v-model:value="galWfAny"
+                            :options="wfAllOpts" filterable tag clearable
+                            placeholder="工作流（留空=跟随配置）" style="width: 200px;"></n-select>
+                  <n-input-number v-if="galMode === 'img2img'" v-model:value="galDenoise"
+                                  :step="0.05" :min="0.2" :max="0.95"
+                                  placeholder="重绘强度" style="width: 120px;"></n-input-number>
+                  <!-- v0.13.3：图生图显式尺寸（留空 = 配置 draw_width/height）——
+                       旧版普通重绘不传宽高，输出尺寸跟参考图走，多视图源转单图会得横版 -->
+                  <n-input-number v-if="galMode === 'img2img'" v-model:value="galWidth"
+                                  :min="256" :max="4096" :step="16"
+                                  placeholder="宽（空=配置）" style="width: 128px;"></n-input-number>
+                  <n-input-number v-if="galMode === 'img2img'" v-model:value="galHeight"
+                                  :min="256" :max="4096" :step="16"
+                                  placeholder="高（空=配置）" style="width: 128px;"></n-input-number>
+                  <!-- v0.7.0：主题快选 + 主按钮（v0.6.2 的「查看/编辑提示词」并入主按钮——
+                       点主按钮打开提示词面板，在面板里点「开始生成」才出图） -->
+                  <n-select v-model:value="galTheme" :options="themeOpts" size="small"
+                            style="width: 190px;" filterable
+                            @update:value="galPromptConfirmed = false"></n-select>
+                  <n-button type="primary" size="small" :loading="refillRunning"
+                            :disabled="!galCharId" @click="openPromptModal">
+                    {{ galMode === "img2img" ? "按所选图生成…" : "开始补图…" }}
+                  </n-button>
+                  <span class="bind-tip" style="margin-top: 0;" v-if="refillRunning">
+                    萌绘生成中，已等待 {{ tryElapsed }} 秒…
+                  </span>
+                </div>
+                <div v-if="galMode === 'img2img'">
+                  <div class="bind-tip" style="margin-top: 0;">
+                    在下方生成源条点图加入生成源（再点一次移出，可多选）；多图工作流（如 Qwen 2.1）
+                    可一次喂正/侧/背多张，顺序即「图1/图2/图3」，多数最多 3 张。
+                    用参考图适合稳脸型画风，用立绘适合做变体。
+                    姿势变化主要靠提示词——每次生成按种子随机抽全身姿势（站/坐/躺/打瞌睡/搞怪…），
+                    想固定构图就用【模板】主题；从多视图设定稿转单张立绘，指令会自动只保留正面视角。
+                    「宽/高」留空 = 用配置尺寸（draw_width/height），填了按本次出图；
+                    带尺寸开关的工作流（Qwen 2.1 Edit）按此出图，普通工作流仍跟参考图尺寸。
+                    「重绘强度」仅对带 KSampler 的经典 img2img 工作流生效，
+                    Qwen2.1 Turbo 编辑类工作流（ManualSigmas 固定调度表）没有该字段、会被忽略。
+                  </div>
+                  <!-- v0.15.0：提示行常驻（不再随选中出现/消失引起布局跳动），
+                       选中数并入文案；交互拆分——点图片看大图，点图片下方文字选中 -->
+                  <div class="bind-tip gen-sel-tip" style="margin-top: 0;">
+                    生成源（点击图片看大图；点图片<b>下方文字</b>选中/取消，顺序即「图1/图2/图3」）{{ galRefsSel.length > 0 ? " · 已选 " + galRefsSel.length + " 张" : "" }}
+                  </div>
+                  <div class="gen-strip" v-if="genSources.length > 0">
+                    <div v-for="g in genSources" :key="g.kind + ':' + g.path"
+                         class="gal-item" :class="{ 'ref-selected': galRefsSel.indexOf(g.path) >= 0 }"
+                         :title="g.kind === 'ref' ? '参考图' : '立绘 #' + g.display_no">
+                      <img v-if="g.thumb" :src="g.thumb" class="clickable-img" alt="生成源"
+                           title="点击查看大图"
+                           @click.stop="openViewer(g.path, g.kind === 'ref' ? '参考图' : '#' + g.display_no)">
+                      <div v-else class="gal-meta">文件丢失</div>
+                      <div class="gal-meta gen-sel"
+                           title="点击选中 / 取消（多选顺序 = 图1/图2/图3）"
+                           @click.stop="selectGenSource(g)">
+                        {{ galRefsSel.indexOf(g.path) >= 0
+                           ? "已选 #" + (galRefsSel.indexOf(g.path) + 1)
+                           : (g.kind === "ref" ? "参考图" : "立绘 #" + g.display_no) }}
+                      </div>
+                    </div>
+                  </div>
+                  <div class="bind-tip" v-else>该角色还没有参考图 / 立绘：先上传参考图或补一张。</div>
+                </div>
+                <div class="bind-tip" style="margin-top: 0;" v-else>
+                  按条目画法自动生成一张新立绘并入库{{ detailEntry ? "（" + stratLabel(detailEntry) + "）" : "" }}。
+                </div>
+                <n-alert v-if="refillError" type="error" :bordered="false">{{ refillError }}</n-alert>
+              </n-space>
+            </n-card>
+
               <div class="sec-title">立绘
                 <span class="cnt">{{ galItems.length }}/{{ meta.quota }} · 不足配额会按种子自动补生{{ galDrawRef ? " · 出卡源已指定" : "" }}<template v-if="galDisabledCount > 0"> · 已停用 {{ galDisabledCount }}（不占配额）</template></span>
                 <!-- v0.21.0：停用的立绘默认隐藏，点这里切换显示 -->
@@ -1142,6 +1144,15 @@
                           :type="galBulk ? 'default' : 'primary'"
                           :secondary="!galBulk"
                           @click="toggleGalBulk">{{ galBulk ? "退出批量" : "批量停用 / 启用" }}</n-button>
+                <!-- v0.32.1：补齐配额——专注当前角色的批量补图（主题序列走同一个
+                     theme_plan：内容:画风 3:2、避开已用主题；队列与列表页批量共用，
+                     互斥运行）。缺几张补几张，满配额时提示无需补齐。 -->
+                <n-button size="small" style="margin-left: 8px;"
+                          :loading="galFillBusy"
+                          :disabled="!galCharId || (batchRunning && !galFillBusy)"
+                          @click="startGalFill">{{ galFillLabel }}</n-button>
+                <n-button v-if="galFillBusy" size="small" quaternary type="warning"
+                          @click="stopGalFill">停止</n-button>
               </div>
               <div v-if="galBulk" class="gal-bulk-bar">
                 <span class="gal-bulk-count">已选 <b>{{ galSelCount }}</b> 张</span>
@@ -1224,7 +1235,7 @@
                 </n-gi>
               </n-grid>
               <n-empty v-else-if="!loadingGal"
-                       description="还没有立绘：去「概览」页签点「开始补图」，或去试画台试一张"></n-empty>
+                       description="还没有立绘：上方面板点「开始补图」，或去试画台试一张"></n-empty>
             </div>
 
             <!-- 参考图区 -->
@@ -5983,6 +5994,65 @@
           galAvBatchTimer = null;
         }
       });
+      // ---- v0.32.1：补齐配额（详情页单角色批量补图，队列与列表页批量共用） ----
+      var galFillBusy = Vue.ref(false);
+      var galFillTotal = Vue.ref(0);
+      var galFillTimer = null;
+      var galFillLabel = Vue.computed(function () {
+        if (!galFillBusy.value) {
+          return batchRunning.value ? "批量队列运行中" : "补齐配额";
+        }
+        var d = (batchProg.value && batchProg.value.done) || 0;
+        return "补图中 " + d + "/" + galFillTotal.value;
+      });
+      async function startGalFill() {
+        if (galFillBusy.value || !galCharId.value) return;
+        try {
+          var res = await apiPost("batch/char_start", { id: galCharId.value });
+          var queued = (res && res.queued) || 0;
+          if (!queued) {
+            message.info((res && res.note) || "立绘已满配额，无需补齐");
+            return;
+          }
+          galFillTotal.value = queued;
+          galFillBusy.value = true;
+          pollGalFill();
+        } catch (e) { /* 已提示 */ }
+      }
+      function pollGalFill() {
+        if (galFillTimer) { clearTimeout(galFillTimer); galFillTimer = null; }
+        galFillTimer = setTimeout(async function () {
+          var snap = null;
+          try {
+            var res = await apiPost("batch/status", {});
+            if (res) {
+              batchProg.value = res.batch || null;   // 与列表页批量共享同一进度源
+              snap = res.batch || null;
+            }
+          } catch (e) { /* 瞬时失败继续轮 */ }
+          if (!galFillBusy.value) { galFillTimer = null; return; }
+          if (snap && snap.running === false) {
+            galFillBusy.value = false;
+            galFillTimer = null;
+            var okN = (snap && snap.ok) || 0;
+            var failN = (snap && snap.failed) || 0;
+            if (snap && snap.stopped) {
+              message.info("补齐已停止：" + okN + "/" + (snap.total || 0) + " 张");
+            } else if (failN) {
+              message.warning("补齐结束：" + okN + " 张成功 / " + failN + " 张失败");
+            } else {
+              message.success("补齐完成：" + okN + " 张");
+            }
+            await refreshAll();       // 立绘墙 / 速览刷新（新图入库）
+            await loadGalSummary();
+            return;
+          }
+          pollGalFill();
+        }, 2000);
+      }
+      async function stopGalFill() {
+        try { await apiPost("batch/stop", {}); } catch (e) { /* 已提示 */ }
+      }
 
       // ---- 抽签记录 ----
       // v0.13.2：四个筛选 select 的空值改 null（见 tryCharId 注释——placeholder 才会显示）
@@ -7269,6 +7339,8 @@
         doAvatarGenerate: doAvatarGenerate, onAvatarPanelFiles: onAvatarPanelFiles,
         galAvBatchOpen: galAvBatchOpen, galAvBatch: galAvBatch,
         startAvatarBatch: startAvatarBatch, stopAvatarBatch: stopAvatarBatch,
+        galFillBusy: galFillBusy, galFillLabel: galFillLabel,
+        startGalFill: startGalFill, stopGalFill: stopGalFill,
         galOutfit: galOutfit, galCustom: galCustom, galAttempt: galAttempt,
         galPrompt: galPrompt, galPromptSource: galPromptSource,
         galDims: galDims, galPromptLoading: galPromptLoading,

@@ -2497,6 +2497,59 @@ async def h_batch_stop(plugin) -> dict:
     return ok({"stopped": True, "was_running": was_running})
 
 
+async def h_batch_char_start(plugin) -> dict:
+    """单角色补齐配额（v0.32.1）：详情页立绘页签「补齐配额」——只补当前角色。
+
+    与列表页批量补图共用同一套机制：BatchRunner 队列（互斥运行）、theme_plan
+    主题序列（内容:画风 3:2、一轮内不重复、避开该角色已用主题）、缺几张补
+    几张（至多 quota - have）；effective_batch_entry 照常把挂了图生图源的
+    角色纠正为 img2img 出图。batch_require_ref 开启时同样要求可用图生图源
+    （与列表页批量同口径），报错文案给出替代路径（上传绑定 / 补一张 / 关配置）。
+    """
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    cid = str(body.get("id") or "").strip()
+    if not cid:
+        return err("缺少角色 id")
+    entry = pool.find_entry(pool.load_packs(_pools_dir(plugin), logger), cid)
+    if entry is None:
+        return err(f"角色库里找不到「{cid}」")
+    quota = max(1, int(plugin._cfg("portraits_per_char", 5)))
+    have = int(plugin._store.count_portraits(cid) or 0)
+    need = quota - have
+    if need <= 0:
+        return ok({"queued": 0, "have": have, "quota": quota,
+                   "note": f"立绘已满配额（{have}/{quota}），无需补齐"})
+    if bool(plugin._cfg("batch_require_ref", True)) \
+            and not draw.has_gen_refs(entry, plugin._data_dir):
+        return err("该角色没有可用图生图源（配置 batch_require_ref 开启时批量补图"
+                   "需要）：先在「参考图」页签上传绑定，或改用「补一张」，"
+                   "或在插件配置里关闭该要求")
+    # 已用主题：续补不重放（与列表页 _batch_candidates 同源同口径）
+    try:
+        rows = plugin._store.list_portraits(cid)
+    except Exception:
+        rows = []
+    used = []
+    for r in rows or []:
+        try:
+            t = str(r["theme"] or "").strip()
+        except (KeyError, IndexError, TypeError):
+            t = ""
+        if t:
+            used.append(t)
+    tasks = batch_fill.build_tasks(
+        [{"entry": entry, "have": have, "need": need, "used_themes": used}],
+        str(plugin._cfg("salt", "moe-waifu")), date=plugin._today())
+    runner = _batch_runner(plugin)
+    n = runner.start(plugin, tasks)
+    if n < 0:
+        return err("批量补图队列正在运行中（可能是列表页的批量），请等待完成或先停止")
+    logger.info(f"[{PLUGIN_NAME}] 单角色补齐启动：{cid}（{have}/{quota}，补 {n} 张）")
+    return ok({"queued": n, "have": have, "quota": quota})
+
+
 async def h_workflows(plugin) -> dict:
     """直接读萌绘配置的工作流条目，按用户口径计算图生图能力（v0.3.6）。
 
@@ -4317,6 +4370,8 @@ def register(plugin) -> None:
         ("/batch/start", h_batch_start, ["POST"]),
         ("/batch/status", h_batch_status, ["GET", "POST"]),
         ("/batch/stop", h_batch_stop, ["POST"]),
+        # v0.32.1：详情页单角色补齐配额（与列表页批量共用队列）
+        ("/batch/char_start", h_batch_char_start, ["POST"]),
         ("/pools/save_entry", h_save_entry, ["POST"]),
         ("/pools/import", h_import_pack, ["POST"]),
         # v0.29.0：角色详情页印象语——只改 quote/quotes 的轻量保存 + 逐句校对
