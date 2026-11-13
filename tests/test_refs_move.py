@@ -405,9 +405,37 @@ def test_orphan_delete(root: Path):
     st.close()
 
 
+def test_draw_serial_queue(root: Path) -> None:
+    """v0.34.0：工坊出图串行队列——入队即返回位次、worker 按序执行。"""
+    async def run():
+        q = api._DrawSerialQueue()
+        order = []
+        started = []
+
+        async def factory(name: str, delay: float):
+            started.append(name)          # 进入执行（真正开跑）
+            await asyncio.sleep(delay)
+            order.append(name)
+
+        p1 = q.enqueue("j1", lambda: factory("a", 0.08))
+        p2 = q.enqueue("j2", lambda: factory("b", 0.0))
+        p3 = q.enqueue("j3", lambda: factory("c", 0.0))
+        await asyncio.sleep(0.02)
+        pos_during = q.position("j3")     # j1 已出队，j3 应排第 2
+        await asyncio.sleep(0.4)
+        return p1, p2, p3, pos_during, order, started
+
+    p1, p2, p3, pos_during, order, started = asyncio.run(run())
+    check("队列入队返回位次", (p1, p2, p3) == (1, 2, 3), f"{p1},{p2},{p3}")
+    check("队列串行按序执行", order == ["a", "b", "c"], str(order))
+    check("开跑即出队（位次前移）", pos_during == 2, str(pos_during))
+    check("开跑顺序即入队顺序", started == ["a", "b", "c"], str(started))
+
+
 def main():
     jobs = [("move_to_ref", test_move_to_ref),
             ("move_to_ref_meta", test_move_to_ref_carries_meta),
+            ("draw_serial_queue", test_draw_serial_queue),
             ("soft_delete_flow", test_soft_delete_flow),
             ("roundtrip", test_roundtrip),
             ("delete_legacy", test_delete_legacy_dirty_data),

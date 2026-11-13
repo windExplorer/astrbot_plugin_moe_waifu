@@ -1074,13 +1074,10 @@
                   <n-select v-model:value="galTheme" :options="themeOpts" size="small"
                             style="width: 190px;" filterable
                             @update:value="galPromptConfirmed = false"></n-select>
-                  <n-button type="primary" size="small" :loading="refillRunning"
+                  <n-button type="primary" size="small"
                             :disabled="!galCharId" @click="openPromptModal">
                     {{ galMode === "img2img" ? "按所选图生成…" : "开始补图…" }}
                   </n-button>
-                  <span class="bind-tip" style="margin-top: 0;" v-if="refillRunning">
-                    萌绘生成中，已等待 {{ tryElapsed }} 秒…
-                  </span>
                 </div>
                 <div v-if="galMode === 'img2img'">
                   <div class="bind-tip" style="margin-top: 0;">
@@ -1122,6 +1119,10 @@
                   按条目画法自动生成一张新立绘并入库{{ detailEntry ? "（" + stratLabel(detailEntry) + "）" : "" }}。
                 </div>
                 <n-alert v-if="refillError" type="error" :bordered="false">{{ refillError }}</n-alert>
+                <!-- v0.34.0：生图队列状态——提交即入队，可继续选主题 / 换角色提交 -->
+                <div class="bind-tip" v-if="galQueueTip">
+                  生图队列：{{ galQueueTip }}——可以继续换主题 / 换角色提交下一张，自动依次出图
+                </div>
               </n-space>
             </n-card>
 
@@ -2410,11 +2411,11 @@
           面板上的主按钮只负责打开本面板，在这里按下生成才真正开始）；换主题或附加要求后需重新生成。
         </div>
         <n-space>
-          <n-button type="primary" :loading="refillRunning"
+          <n-button type="primary" :loading="galSubmitting"
                     :disabled="!galPrompt || galPromptLoading"
                     @click="generateFromModal">开始生成</n-button>
-          <n-button :disabled="refillRunning" @click="galPromptOpen = false">取消</n-button>
-          <n-checkbox v-model:checked="galAsRef" :disabled="refillRunning"
+          <n-button @click="galPromptOpen = false">取消</n-button>
+          <n-checkbox v-model:checked="galAsRef"
                       style="margin-left: auto;">转为参考图（不入立绘库）</n-checkbox>
         </n-space>
       </n-space>
@@ -4311,16 +4312,24 @@
         var cap = ((Number(meta.value.draw_timeout) || 120) + 30) * 1000;
         tryPollTimer = setInterval(async function () {
           try {
-            var st = await apiGet("jobs/status", { job_id: jobId });
-            tryFailStreak = 0;
-            if (!st || !st.status) return; // 桩桥/瞬时失败：继续等
-            if (st.status === "running") {
-              if (Date.now() - tryStartedAt > cap) {
-                stopTryTimers();
-                onFail("等待超时（超过「生图超时」配置 + 30s），任务可能仍在后台跑，稍后可在立绘库查看");
-              }
+          var st = await apiGet("jobs/status", { job_id: jobId });
+          tryFailStreak = 0;
+          if (!st || !st.status) return; // 桩桥/瞬时失败：继续等
+          if (st.status === "running" || st.status === "queued") {
+            // v0.34.0：queued = 排队待跑（串行出图队列），不吃 draw_timeout；
+            // running 照旧受超时保护
+            if (st.status === "running" && Date.now() - tryStartedAt > cap) {
+              stopTryTimers();
+              onFail("等待超时（超过「生图超时」配置 + 30s），任务可能仍在后台跑，稍后可在立绘库查看");
               return;
             }
+            if (st.status === "queued" && Date.now() - tryStartedAt > 15 * 60 * 1000) {
+              stopTryTimers();
+              onFail("排队超过 15 分钟仍未开始，请检查出图队列状态");
+              return;
+            }
+            return;
+          }
             stopTryTimers();
             if (st.status === "ok") { onDone(st); } else { onFail(st.error || st.status); }
           } catch (e) {
@@ -4559,7 +4568,8 @@
       var galCharId = Vue.ref(null);   // v0.13.2：null 才显示「选择角色」placeholder
       var galItems = Vue.ref([]);
       var loadingGal = Vue.ref(false);
-      var refillRunning = Vue.ref(false);
+      // v0.34.0：refillRunning 移除——详情页提交即入队（galQueue 追踪），
+      // 不再阻塞后续提交
       var refillError = Vue.ref("");
       var galFrom = Vue.ref("chars");   // 角色详情的返回目标页签
 
@@ -5544,7 +5554,7 @@
         doDetailGenerate();
       }
       async function doDetailGenerate() {
-        if (!galCharId.value || refillRunning.value) return;
+        if (!galCharId.value) return;
         // v0.15.0：主题随任务下发，归档时写进立绘行（详情弹窗展示）
         var payload = { kind: "refill", id: galCharId.value, theme: galTheme.value || "" };
         if (galAsRef.value) { payload.no_archive = true; }   // v0.7.5：只生成不归档
@@ -5594,36 +5604,34 @@
         payload.dims = JSON.stringify((galDims.value || [])
           .filter(function (d) { return String(d.zh || "").trim(); })
           .map(function (d) { return [d.label, d.zh]; }));
-        refillRunning.value = true;
+        // v0.34.0：提交即入队（不再阻塞）——可以继续换主题 / 换角色提交下一张
+        var name = (detailEntry.value && detailEntry.value.name) || galCharId.value;
+        galSubmitting.value = true;
         refillError.value = "";
         try {
           var res = await apiPost("jobs/start", payload);
           var jobId = (res && res.job_id) || "";
           if (!jobId) {
-            refillRunning.value = false;
             refillError.value = "任务未创建成功，请稍后重试";
             return;
           }
-          pollJob(jobId, async function () {
-            refillRunning.value = false;
-            if (galAsRef.value) {
-              // v0.7.5：生成为参考图——转存 refs/ 并绑定，不进立绘列表
-              try {
-                var r2 = await apiPost("jobs/to_ref", { job_id: jobId });
-                message.success("已生成并转为参考图：" + ((r2 && r2.rel) || ""));
-              } catch (e2) { /* 已提示 */ }
-              galAsRef.value = false;
-              await refreshAll();
-            } else {
-              message.success("已生成并存入立绘库");
-              await refreshAll();
-              await loadGalSummary();   // v0.30.0：速览的立绘数 / 平均耗时随生成刷新
-            }
-          }, function (why) {
-            refillRunning.value = false;
-            refillError.value = String(why || "生成失败");
-          });
-        } catch (e) { refillRunning.value = false; }
+          var asRef = galAsRef.value;
+          trackGalJob(jobId, name, asRef ? async function (st) {
+            // v0.7.5：生成为参考图——转存 refs/ 并绑定，不进立绘列表
+            try {
+              var r2 = await apiPost("jobs/to_ref", { job_id: jobId });
+              message.success("已生成并转为参考图：" + ((r2 && r2.rel) || ""));
+            } catch (e2) { /* 已提示 */ }
+            galAsRef.value = false;
+            await refreshAll();
+          } : null);
+          message.success("已加入生图队列（第 " + ((res && res.queue_pos) || 1)
+            + " 位）——可继续提交下一张");
+        } catch (e) {
+          refillError.value = "提交失败，请稍后重试";
+        } finally {
+          galSubmitting.value = false;
+        }
       }
 
       Vue.watch(galCharId, function (cid) {
@@ -6033,6 +6041,70 @@
           galAvBatchTimer = null;
         }
       });
+      // ---- v0.34.0：生图队列（详情页多任务追踪）----
+      // 提交即入队返回（后端串行 worker），前端只追踪状态不阻塞新提交——
+      // 可以连续换主题 / 换角色提交，队列自动依次出图。
+      var galQueue = Vue.ref([]);       // [{job_id, name, status, pos, on_done}]
+      var galQueueTimer = null;
+      var galSubmitting = Vue.ref(false);
+      function trackGalJob(jobId, name, onDone) {
+        galQueue.value.push({ job_id: jobId, name: name || "",
+                              status: "queued", pos: 0, on_done: onDone || null });
+        pollGalQueue();
+      }
+      var galQueueTip = Vue.computed(function () {
+        var running = 0, queued = 0;
+        (galQueue.value || []).forEach(function (it) {
+          if (it.status === "running") { running += 1; } else { queued += 1; }
+        });
+        var parts = [];
+        if (running) parts.push("生成中 " + running + " 张");
+        if (queued) parts.push("排队 " + queued + " 张");
+        return parts.join("，");
+      });
+      function pollGalQueue() {
+        if (galQueueTimer) { clearTimeout(galQueueTimer); galQueueTimer = null; }
+        galQueueTimer = setTimeout(async function () {
+          var items = galQueue.value.slice();
+          var doneItems = [];
+          for (var i = 0; i < items.length; i++) {
+            var it = items[i];
+            try {
+              var st = await apiGet("jobs/status", { job_id: it.job_id });
+              if (!st || !st.status) { continue; }
+              if (st.status === "queued") {
+                it.status = "queued";
+                it.pos = st.queue_pos || 0;
+              } else if (st.status === "running") {
+                it.status = "running";
+              } else {
+                it.status = st.status;
+                it.error = String(st.error || "");
+                doneItems.push(it);
+              }
+            } catch (e) { /* 本轮跳过，下一轮再查 */ }
+          }
+          if (doneItems.length) {
+            galQueue.value = galQueue.value.filter(function (it) {
+              return !doneItems.some(function (d) { return d.job_id === it.job_id; });
+            });
+            for (var j = 0; j < doneItems.length; j++) {
+              var d = doneItems[j];
+              if (d.on_done) { d.on_done(d); continue; }
+              if (d.status === "ok") {
+                message.success((d.name || "立绘") + " 已生成入库");
+              } else {
+                message.error((d.name || "立绘") + " 生成失败："
+                  + (d.error || d.status || "未知错误"));
+              }
+            }
+            await refreshAll();
+            await loadGalSummary();
+          }
+          if (galQueue.value.length) { pollGalQueue(); }
+          else if (galQueueTimer) { clearTimeout(galQueueTimer); galQueueTimer = null; }
+        }, 2000);
+      }
       // ---- v0.32.1/2：补齐配额（详情页单角色批量补图，队列与列表页批量共用） ----
       // v0.32.2：改预览制——点「补齐配额」先弹 dry-run 弹窗列出逐张主题序列，
       // 可单张换一个 / 整体重随机，确认后的序列经 char_start 的 themes 原样
@@ -7363,7 +7435,8 @@
         workCoverCandidates: workCoverCandidates, openWorkCover: openWorkCover,
         setWorkCover: setWorkCover,
         galCharId: galCharId, galCharOpts: galCharOpts, galItems: galItems,
-        loadingGal: loadingGal, refillRunning: refillRunning, refillError: refillError,
+        loadingGal: loadingGal, refillError: refillError,
+        galQueueTip: galQueueTip, galSubmitting: galSubmitting,
         doDeletePortrait: doDeletePortrait, movePortraitToRef: movePortraitToRef,
         moveRefToPortrait: moveRefToPortrait,
         loadGallery: loadGallery,

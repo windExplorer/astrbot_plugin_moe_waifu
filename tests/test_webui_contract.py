@@ -61,6 +61,7 @@ onAvatarPanelFiles galAvBatchOpen galAvBatch startAvatarBatch stopAvatarBatch
 galFillBusy galFillLabel startGalFill stopGalFill
 galFillOpen galFillRows galFillHave galFillQuota galFillLoading
 rerollFillRow rerollFillAll doFillStart
+galQueueTip galSubmitting
 avatarOf hashColor thumbOf colorOf rerollLabel tv brandColor zhLocale
 bindRows bindSeriesOpts bindRawOpen bindLoading loadBindPools onBindRawInput
 addBindRow setRowGid setRowSeries removeBindRow

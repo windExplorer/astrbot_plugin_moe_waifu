@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import hashlib
 import io
 import json
@@ -1274,14 +1275,18 @@ async def h_job_start(plugin) -> dict:
     # v0.15.0：主题 id 随任务记录（未确认提示词时也参与生成），归档写进立绘行
     theme_id = str(body.get("theme") or "").strip()
     job_id = f"{kind}:{cid}:{int(time.time() * 1000)}"
-    plugin._jobs[job_id] = {"status": "running", "kind": kind, "char_id": cid,
+    plugin._jobs[job_id] = {"status": "queued", "kind": kind, "char_id": cid,
                             "entry_label": pool.entry_label(entry), "src_path": "",
                             "theme": theme_id}
     _prune_jobs(plugin)
-    loop = asyncio.get_running_loop()
-    loop.create_task(_run_job(plugin, job_id, entry, kind, prompt_override,
-                              no_archive, theme_id, dims_override))
-    return ok({"job_id": job_id, "label": pool.entry_label(entry)})
+    # v0.34.0：提交即入队返回（status=queued + queue_pos），前端可继续配置
+    # 下一张；worker 串行执行，排队等待不吃 draw_timeout
+    dq = _draw_queue(plugin)
+    pos = dq.enqueue(job_id, functools.partial(
+        _run_job, plugin, job_id, entry, kind, prompt_override,
+        no_archive, theme_id, dims_override))
+    return ok({"job_id": job_id, "label": pool.entry_label(entry),
+               "queued": True, "queue_pos": pos})
 
 
 def _prune_jobs(plugin) -> None:
@@ -1289,14 +1294,73 @@ def _prune_jobs(plugin) -> None:
     if len(jobs) <= _JOB_KEEP:
         return
     for jid in sorted(jobs, key=lambda k: k.rsplit(":", 1)[-1])[: max(0, len(jobs) - _JOB_KEEP)]:
-        if jobs[jid].get("status") != "running":
-            jobs.pop(jid, None)
+        # v0.34.0：queued（排队待跑）同样不可清理——清理会把队列里待执行的任务
+        # 丢掉状态；running / queued 都保留
+        if jobs[jid].get("status") in ("running", "queued"):
+            continue
+        jobs.pop(jid, None)
+
+
+class _DrawSerialQueue:
+    """工坊出图串行队列（v0.34.0）：提交即返回，worker 依次执行。
+
+    前端「生成立绘 / 试画 / 头像」提交后立即入队返回（status=queued +
+    queue_pos），用户可以继续选主题 / 换角色提交下一张，不用等上一张画完；
+    worker 串行执行，**排队等待不吃 draw_timeout**（任务真正开跑时才置
+    running、才开始计时）。与列表页批量补图（BatchRunner 自带串行）互不
+    影响；与抽卡主链路（main._gen_lock）在萌绘侧仍会串行。
+    """
+
+    def __init__(self) -> None:
+        self.pending: list[str] = []
+        self._q: asyncio.Queue = asyncio.Queue()
+        self._worker: "asyncio.Task | None" = None
+
+    def enqueue(self, job_id: str, factory) -> int:
+        """入队并确保 worker 在跑；返回当前排队位次（1 起）。"""
+        self.pending.append(job_id)
+        pos = self.pending.index(job_id) + 1
+        self.ensure_worker()
+        self._q.put_nowait((job_id, factory))
+        return pos
+
+    def position(self, job_id: str) -> int:
+        return self.pending.index(job_id) + 1 if job_id in self.pending else 0
+
+    def ensure_worker(self) -> None:
+        if self._worker is None or self._worker.done():
+            self._worker = asyncio.get_running_loop().create_task(self._run())
+
+    async def _run(self) -> None:
+        while True:
+            job_id, factory = await self._q.get()
+            if job_id in self.pending:
+                self.pending.remove(job_id)
+            try:
+                await factory()
+            except Exception:
+                logger.warning(f"[{PLUGIN_NAME}] 出图队列任务异常（job={job_id}）\n"
+                               f"{traceback.format_exc()}")
+            finally:
+                self._q.task_done()
+
+
+def _draw_queue(plugin) -> _DrawSerialQueue:
+    """插件实例上的串行队列（懒建；进程内存态，重启即清）。"""
+    q = getattr(plugin, "_webui_draw_queue", None)
+    if q is None:
+        q = _DrawSerialQueue()
+        plugin._webui_draw_queue = q
+    return q
 
 
 async def _run_job(plugin, job_id: str, entry: dict, kind: str,
                    prompt_override: str = "", no_archive: bool = False,
                    theme_id: str = "", dims_override: str = "") -> None:
     job = plugin._jobs.get(job_id, {})
+    # v0.34.0：worker 真正开跑时才置 running（排队阶段保持 queued，
+    # draw_timeout 从此刻起才开始有意义）
+    job["status"] = "running"
     char_id = entry["id"]
     date = plugin._today()
     salt = str(plugin._cfg("salt", "moe-waifu"))
@@ -1371,6 +1435,9 @@ async def h_job_status(plugin) -> dict:
     if job is None:
         return err("job 不存在（可能已过期）")
     out = {k: v for k, v in job.items()}
+    # v0.34.0：排队中的任务带回位次（前端显示「排队中（第 N 位）」）
+    if job.get("status") == "queued":
+        out["queue_pos"] = _draw_queue(plugin).position(jid)
     return ok(out)
 
 
@@ -4363,16 +4430,19 @@ async def h_avatar_generate(plugin) -> dict:
         return err(f"角色库里找不到「{cid}」")
     workflow = str(body.get("workflow") or "").strip()
     job_id = f"avatar:{cid}:{int(time.time() * 1000)}"
-    plugin._jobs[job_id] = {"status": "running", "kind": "avatar", "char_id": cid,
+    plugin._jobs[job_id] = {"status": "queued", "kind": "avatar", "char_id": cid,
                             "entry_label": pool.entry_label(entry), "src_path": ""}
     _prune_jobs(plugin)
-    loop = asyncio.get_running_loop()
-    loop.create_task(_run_avatar_job(plugin, job_id, entry, workflow))
-    return ok({"job_id": job_id, "label": pool.entry_label(entry)})
+    # v0.34.0：头像生成同样进出图串行队列（与生成立绘共用，互不并发）
+    pos = _draw_queue(plugin).enqueue(
+        job_id, functools.partial(_run_avatar_job, plugin, job_id, entry, workflow))
+    return ok({"job_id": job_id, "label": pool.entry_label(entry),
+               "queued": True, "queue_pos": pos})
 
 
 async def _run_avatar_job(plugin, job_id: str, entry: dict, workflow: str) -> None:
     job = plugin._jobs.get(job_id, {})
+    job["status"] = "running"   # v0.34.0：worker 真正开跑时才置 running
     t0 = time.monotonic()
     try:
         rel, w, h = await generate_avatar_for(plugin, entry, workflow=workflow)
