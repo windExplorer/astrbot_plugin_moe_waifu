@@ -1229,7 +1229,7 @@
                          会抛 TypeError → 整个立绘墙渲染中断（真机「只有标题没图片」
                          的根因；mock fixture 是字符串才一直没炸）——必须先 String() -->
                     <div class="gal-meta" :title="it.seed != null ? 'seed ' + it.seed : ''">
-                      #{{ it.display_no }} · {{ it.date }} · seed {{ String(it.seed == null ? "" : it.seed).slice(0, 8) }}{{ String(it.seed == null ? "" : it.seed).length > 8 ? "…" : "" }}{{ isCover(it) ? " · 封面" : "" }}{{ galDrawRefAbs === it.abs ? " · 出卡源" : "" }}{{ !it.active ? " · 已停用" : "" }}
+                      #{{ it.display_no }} · {{ it.date }} · seed {{ String(it.seed == null ? "" : it.seed).slice(0, 8) }}{{ String(it.seed == null ? "" : it.seed).length > 8 ? "…" : "" }}{{ it.duration_ms > 0 ? " · 耗时 " + fmtDur(it.duration_ms) : "" }}{{ isCover(it) ? " · 封面" : "" }}{{ galDrawRefAbs === it.abs ? " · 出卡源" : "" }}{{ !it.active ? " · 已停用" : "" }}
                     </div>
                   </div>
                 </n-gi>

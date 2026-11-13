@@ -317,6 +317,31 @@ class Store:
             "INSERT OR IGNORE INTO portrait_seq(char_id, next_seq) "
             "SELECT char_id, COALESCE(MAX(seq), -1) + 1 FROM portraits GROUP BY char_id")
 
+        # v0.33.1：为 v0.30.0 之前生成的历史立绘回填耗时（幂等，见方法 docstring）
+        self._backfill_portrait_durations()
+
+    def _backfill_portrait_durations(self) -> None:
+        """为 v0.30.0 之前生成的历史立绘回填耗时。
+
+        draw_jobs（生成任务流水）一直记录每张的 duration_ms 且带 char_id +
+        seed，与 portraits 的 (char_id, seed) 匹配回填；同键多条成功任务取
+        最小值（决定论）。只回填 duration_ms = 0 的行（参考图转入/恢复等非
+        生成路径没有对应任务，自然保持 0）；幂等：回填过的行 >0 不再进入
+        WHERE。种子不含 epoch，重置轮次后同键可能对应多次生成，取 MIN 为
+        可接受的展示近似。
+        """
+        self._conn.execute(
+            "UPDATE portraits SET duration_ms = ("
+            "  SELECT MIN(j.duration_ms) FROM draw_jobs j"
+            "  WHERE j.char_id = portraits.char_id"
+            "    AND j.seed = portraits.seed"
+            "    AND j.status = 'ok' AND j.duration_ms > 0)"
+            " WHERE duration_ms = 0 AND EXISTS ("
+            "  SELECT 1 FROM draw_jobs j2"
+            "  WHERE j2.char_id = portraits.char_id"
+            "    AND j2.seed = portraits.seed"
+            "    AND j2.status = 'ok' AND j2.duration_ms > 0)")
+
     def close(self):
         try:
             self._conn.close()

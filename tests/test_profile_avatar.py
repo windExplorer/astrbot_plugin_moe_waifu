@@ -192,6 +192,34 @@ def test_store_summary_and_trend():
         st.close()
 
 
+def test_backfill_duration():
+    """v0.33.1：历史立绘耗时回填——draw_jobs 的 (char_id, seed) 匹配。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        st = store.Store(Path(tmp) / "waifu.db")
+        st.add_portrait("a", "portraits/a/1.png", 111, "2026-11-01", 0, "base")
+        st.add_portrait("a", "portraits/a/2.png", 222, "2026-11-02", 1, "base",
+                        duration_ms=5000)
+        st.add_portrait("a", "portraits/a/3.png", 333, "2026-11-03", 2, "base")
+        st.log_job("a", "2026-11-01", "refill", "ok", "workshop", "base",
+                   111, "", 42000, "")
+        st.log_job("a", "2026-11-01", "try", "ok", "workshop", "base",
+                   111, "", 38000, "")   # 同键两条成功任务 → 取 MIN
+        st.log_job("a", "2026-11-02", "try", "error", "workshop", "base",
+                   222, "", 9000, "")    # 失败任务不参与回填
+        st.log_job("b", "2026-11-01", "refill", "ok", "workshop", "base",
+                   111, "", 30000, "")   # 别的角色不串用
+        st._conn.commit()
+        st._backfill_portrait_durations()
+        rows = {r["file"]: r["duration_ms"] for r in st._conn.execute(
+            "SELECT file, duration_ms FROM portraits")}
+        check("回填：0 值立绘从 draw_jobs 匹配（同键多条取最小）",
+              rows["portraits/a/1.png"] == 38000)
+        check("回填：已有值不覆盖", rows["portraits/a/2.png"] == 5000)
+        check("回填：无匹配任务的行保持 0（非生成路径）",
+              rows["portraits/a/3.png"] == 0)
+        st.close()
+
+
 def main():
     test_normalize_and_merge()
     test_sanitize_profile()
@@ -199,6 +227,7 @@ def main():
     test_avatars_helpers()
     test_avatar_prompt()
     test_store_summary_and_trend()
+    test_backfill_duration()
     if FAILURES:
         print(f"\ntest_profile_avatar: {len(FAILURES)} FAILED")
         sys.exit(1)
