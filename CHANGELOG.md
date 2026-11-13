@@ -2,6 +2,13 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.25.2 (2026-11-13)
+
+- **空卷不再出现在角色库的卷筛选里**：v0.25.1 把跨卷重复角色统一归到 `game` 卷后，v0.22.0 遗留的 `genshin` / `wuthering_waves` / `nte` 卷在 `packs` 表里还留着记录，界面上显示成一排「0 条」的空卷（用户截图里被红框标出的三个）。
+  - `sync_pack_file()` 在该卷没有任何「已纳入」角色时删除 `packs` 记录（返回值新增 `pack_dropped`）；`load_packs()` 再兜底跳过 0 条目卷，历史残留也会消失。
+  - **卷 JSON 文件一个都没删**：它们在 `data/plugin_data/astrbot_plugin_moe_waifu/pools/` 下，里面仍保留这些角色的原始条目；将来把作品加回 `series_scope` 重新迁移就会自动恢复。想彻底清掉可手动删对应 `<卷名>.json`（不可逆，自行决定）。
+  - 验证：18 个自检脚本全绿；`test_relational.py` 新增「空卷不保留记录 / 读路径不含空卷」守卫。
+
 ## v0.25.1 (2026-11-13)
 
 - **修跨卷重复角色的卷归属**：v0.25.0 切读路径后，`migrate_relational` 按文件名顺序逐卷同步（anime → game → genshin → nte → wuthering_waves…），而 `_upsert_character` 的 `ON CONFLICT` 会把 `pack_id` 改成后同步的卷——旧三游戏卷排在 `game` 之后，会把异环 20 位「抢」到 genshin 等遗留卷上，工坊按卷筛选和候选排序都跟着错位。

@@ -91,7 +91,8 @@ with tempfile.TemporaryDirectory() as td:
     r1 = st.migrate_relational(pools, root)
     check("首版只纳入三游戏 128 口径下的 4 条", r1["characters"] == 4, str(r1))
     check("只建立 3 个作品", r1["works"] == 3, str(r1))
-    check("两个合法卷入库", r1["packs"] == 2, str(r1))
+    check("只有含三游戏角色的卷入库（空卷 / 纯非范围卷不留记录）",
+          r1["packs"] == 1, str(r1))
     check("非范围作品被跳过", r1["skipped"] == 2, str(r1))
     r2 = st.migrate_relational(pools, root)
     check("重复迁移幂等（数量不变）",
@@ -229,6 +230,15 @@ with tempfile.TemporaryDirectory() as td:
           st._conn.execute(
               "SELECT COUNT(*) AS n FROM characters c JOIN packs p ON p.id=c.pack_id"
               " WHERE p.name='zolddup'").fetchone()["n"] == 0)
+
+    # 13) 空卷（遗留 / 只有非 scope 角色）不保留卷记录，读路径也不返回
+    dump(pools / "zempty.json", "zempty", [E("outsider", "外人", "VOCALOID")])
+    rs2 = st.sync_pack_file(pools / "zempty.json")
+    check("空卷同步后不留 packs 记录",
+          st._conn.execute(
+              "SELECT 1 FROM packs WHERE name='zempty'").fetchone() is None)
+    check("空卷 sync 返回 pack_dropped", rs2["pack_dropped"] is True, str(rs2))
+    check("读路径不含空卷", all(p["entries"] for p in st.load_packs()))
     st.close()
 
 print("test_relational: ALL OK")

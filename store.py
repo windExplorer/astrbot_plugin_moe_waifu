@@ -667,9 +667,15 @@ class Store:
         gone = existing - kept
         for cid in gone:
             self._conn.execute("DELETE FROM characters WHERE char_id=?", (cid,))
+        # v0.25.2：该卷没有任何「已纳入」角色（v0.22.0 遗留的 genshin/nte/
+        # wuthering_waves 旧卷、或只有非 scope 角色的卷）→ 删掉 packs 记录，
+        # 前端卷筛选不再出现一堆 0 条目的空卷。**卷 JSON 文件保持不动**，
+        # 将来把作品加回 series_scope 后重新迁移就会自动恢复。
+        if not kept:
+            self._conn.execute("DELETE FROM packs WHERE id=?", (pack_id,))
         self._conn.commit()
         return {"pack": pack_name, "kept": len(kept), "skipped": skipped,
-                "removed": len(gone)}
+                "removed": len(gone), "pack_dropped": not kept}
 
     def load_packs(self) -> list:
         """按 `pool.load_packs` 同构返回：卷 → 条目（原始形状，供 normalize_entry）。
@@ -715,6 +721,10 @@ class Store:
                 if r["cover_path"]:
                     e["cover"] = r["cover_path"]
                 entries.append(e)
+            if not entries:
+                # v0.25.2 兜底：历史版本可能留下 0 条目的卷记录（JSON 已删 /
+                # 角色全被合并到别的卷），不进筛选，避免界面上一排空卷。
+                continue
             out.append({"pack": p["name"], "title": p["title"] or p["name"],
                         "enabled": bool(p["enabled"]), "entries": entries})
         return out
