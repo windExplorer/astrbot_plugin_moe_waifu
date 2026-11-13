@@ -2353,9 +2353,12 @@
                     border-radius: 8px; padding: 6px 10px;">
           <div v-for="it in batchPreview.items" :key="it.char_id" class="batch-row">
             <b class="entry-name">{{ it.name }}</b>
-            <span class="bind-tip" style="margin-top: 0;">
+            <span class="bind-tip" style="margin-top: 0; flex: 1; min-width: 0;">
               {{ it.have }}/{{ batchPreview.quota }} → +{{ it.need }}　主题：{{ it.themes_text }}
             </span>
+            <!-- v0.28.3：单个角色换一组主题（启动时按同一 nonce 生效） -->
+            <n-button size="tiny" :loading="batchRerollBusy === it.char_id"
+                      :disabled="batchRunning" @click="doBatchReroll(it)">换一个</n-button>
           </div>
         </div>
         <div class="bind-tip" v-if="batchPreview && batchPreview.skipped_text">
@@ -4630,6 +4633,10 @@
       var batchPreview = Vue.ref(null);
       var batchPreviewLoading = Vue.ref(false);
       var batchStarting = Vue.ref(false);
+      // v0.28.3：预览里「换一个」——记每个角色点了几次，启动时按同一 nonce
+      // 派生盐（后端 batch_fill.char_salt），保证「预览看到的」就是「实跑的」。
+      var batchOverrides = Vue.ref({});
+      var batchRerollBusy = Vue.ref("");
       var batchProg = Vue.ref(null);
       var batchQuota = Vue.ref(5);
       var batchTimer = null;
@@ -4668,7 +4675,9 @@
         return { mode: batchMode.value,
                  packs: ids(batchPacks.value),
                  series: ids(batchSeries.value),
-                 chars: ids(batchChars.value) };
+                 chars: ids(batchChars.value),
+                 // v0.28.3：单角色「换一个」的覆盖（char_id → nonce）
+                 overrides: batchOverrides.value || {} };
       }
       function openBatchModal() {
         batchOpen.value = true;
@@ -4679,8 +4688,42 @@
         try {
           var res = await apiPost("batch/preview", batchPayload());
           batchPreview.value = res || null;
+          // 重新预览 = 新候选，旧的「换一个」覆盖作废
+          batchOverrides.value = {};
         } catch (e) { /* 已提示 */ } finally {
           batchPreviewLoading.value = false;
+        }
+      }
+      // v0.28.3：预览里给单个角色换一组主题（不写库、不生图）
+      async function doBatchReroll(it) {
+        var cid = String((it || {}).char_id || "");
+        if (!cid) return;
+        var next = (batchOverrides.value[cid] || 0) + 1;
+        batchRerollBusy.value = cid;
+        try {
+          var res = await apiPost("batch/reroll", {
+            char_id: cid, need: it.need, have: it.have, nonce: next,
+            used_themes: it.used_themes || []
+          });
+          var map = Object.assign({}, batchOverrides.value);
+          map[cid] = next;
+          batchOverrides.value = map;
+          var pv = batchPreview.value;
+          if (pv && pv.items) {
+            var items = pv.items.slice();
+            for (var i = 0; i < items.length; i++) {
+              if (items[i].char_id === cid) {
+                items[i] = Object.assign({}, items[i], {
+                  themes: res.themes || [],
+                  themes_text: res.themes_text || ""
+                });
+                break;
+              }
+            }
+            batchPreview.value = Object.assign({}, pv, { items: items });
+          }
+        } catch (e) { /* 已提示 */ } finally {
+          batchRerollBusy.value = "";
         }
       }
       async function doBatchStart() {
@@ -6481,6 +6524,7 @@
         batchChars: batchChars, batchBtnText: batchBtnText,
         batchPreview: batchPreview, batchPreviewLoading: batchPreviewLoading,
         batchStarting: batchStarting, batchProg: batchProg,
+        batchRerollBusy: batchRerollBusy, doBatchReroll: doBatchReroll,
         batchQuota: batchQuota, batchRunning: batchRunning, batchPct: batchPct,
         batchCharOpts: batchCharOpts, openBatchModal: openBatchModal,
         doBatchPreview: doBatchPreview, doBatchStart: doBatchStart,

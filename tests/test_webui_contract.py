@@ -58,7 +58,7 @@ galWidth galHeight
 importOverwrite dedupeOpen dedupeGroups dedupeSelected dedupeBusy dedupeResult
 dedupeSelectedCount dedupeDupCount openDedupe loadDuplicates doDedupe
 relStatus relBusy loadRelStatus
-batchSeriesOpts batchBtnText
+batchSeriesOpts batchBtnText batchRerollBusy doBatchReroll
 galBulk galSel galSelCount toggleGalBulk toggleGalSel galSelAllVisible
 doBulkPortrait bulkBusy bulkOffText bulkOnText
 trashGroups trashBusy trashLoaded trashTotalFiles trashTotalSizeText
@@ -79,6 +79,7 @@ ROUTES = """
 /works/discover /works/discover_add
 /pools/import /pools/duplicates /pools/dedupe /relational/status
 /portraits/set_active /trash/list /trash/restore /trash/purge
+/batch/preview /batch/reroll
 """.split()
 
 STORE_METHODS = """

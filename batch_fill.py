@@ -140,17 +140,35 @@ def pick_candidates(entries: list, have_count_fn, quota: int,
     return out
 
 
-def build_tasks(cands: list, salt: str, date: str = "") -> list:
+def char_salt(salt: str, char_id: str, nonce: int = 0) -> str:
+    """单角色「换一个」用的盐：nonce>0 时派生独立盐。
+
+    预览重随机与真正启动必须走同一套盐——否则界面显示换过了，实跑又按
+    原种子重放一遍。nonce=0（默认）返回原盐，行为与之前完全一致。
+    """
+    n = int(nonce or 0)
+    if n <= 0:
+        return str(salt)
+    raw = f"{salt}|reroll|{char_id}|{n}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def build_tasks(cands: list, salt: str, date: str = "",
+                overrides: dict | None = None) -> list:
     """候选 → 具体任务：每角色展开成逐张任务并附主题 id（theme_plan 决定）。
 
     v0.22.4：have / date / used_themes 一并交给 theme_plan；预览与实际启动
     必须传同样的 date，否则「预览写着校园、实出泳装」。
+    v0.28.3：overrides = {char_id: nonce}，预览里点过「换一个」的角色按
+    派生盐重算主题序列（见 char_salt）。
     """
+    ov = overrides if isinstance(overrides, dict) else {}
     tasks = []
     for c in cands or []:
         entry = c.get("entry") or {}
+        cid = str(entry.get("id") or "")
         themes = theme_plan(
-            str(entry.get("id") or ""), salt, int(c.get("need") or 0),
+            cid, char_salt(salt, cid, ov.get(cid, 0)), int(c.get("need") or 0),
             have=int(c.get("have") or 0), date=date,
             used=c.get("used_themes") or [])
         for i, theme_id in enumerate(themes):

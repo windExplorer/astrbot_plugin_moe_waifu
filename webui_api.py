@@ -2230,6 +2230,8 @@ async def h_batch_preview(plugin) -> dict:
             "char_id": e.get("id"), "name": e.get("name"),
             "series": e.get("series"), "pack": e.get("pack"),
             "have": c["have"], "need": c["need"],
+            # v0.28.3：重随机时继续避开这些已用主题，别换了个寂寞
+            "used_themes": list(c.get("used_themes") or []),
             "themes": labels_list,
             # v0.16.0：拼好的展示文本——⚠️ 工坊页跑在 sandbox iframe 里，
             # modal slot 内插值调用 .join()/.map() 会在数据更新时打断整块
@@ -2245,6 +2247,30 @@ async def h_batch_preview(plugin) -> dict:
                "quota": quota, "require_ref": require_ref})
 
 
+async def h_batch_reroll(plugin) -> dict:
+    """预览里给**单个角色**换一组主题（dry-run，不写库、不生图）。
+
+    body: {char_id, need, have, nonce, used_themes}。nonce 由前端递增；预览
+    与 `batch/start` 都靠它派生同一个盐（`batch_fill.char_salt`），所以这里
+    看到什么，实跑就是什么。
+    """
+    body = await _body()
+    cid = str(body.get("char_id") or "").strip()
+    if not cid:
+        return err("缺少 char_id")
+    salt = str(plugin._cfg("salt", "moe-waifu"))
+    nonce = int(body.get("nonce") or 0)
+    used = [str(x) for x in (body.get("used_themes") or []) if str(x).strip()]
+    themes = batch_fill.theme_plan(
+        cid, batch_fill.char_salt(salt, cid, nonce),
+        int(body.get("need") or 0), have=int(body.get("have") or 0),
+        date=plugin._today(), used=used)
+    labels = {t["id"]: t["label"] for t in prompt_gen.THEMES}
+    labels_list = [labels.get(t, t) for t in themes]
+    return ok({"char_id": cid, "nonce": nonce, "themes": labels_list,
+               "themes_text": " / ".join(labels_list)})
+
+
 async def h_batch_start(plugin) -> dict:
     """启动批量补图队列。running 时拒绝重复启动。"""
     if not plugin._store:
@@ -2254,7 +2280,10 @@ async def h_batch_start(plugin) -> dict:
     if not cands:
         return err("没有满足前提的角色：检查配额是否已满、或角色是否有可用参考图")
     salt = str(plugin._cfg("salt", "moe-waifu"))
-    tasks = batch_fill.build_tasks(cands, salt, date=plugin._today())
+    # v0.28.3：预览里「换一个」过的角色，启动时按同一个 nonce 派生盐
+    overrides = body.get("overrides") if isinstance(body.get("overrides"), dict) else {}
+    tasks = batch_fill.build_tasks(cands, salt, date=plugin._today(),
+                                   overrides=overrides)
     runner = _batch_runner(plugin)
     n = runner.start(plugin, tasks)
     if n < 0:
@@ -3525,6 +3554,8 @@ def register(plugin) -> None:
         ("/works/discover", h_works_discover, ["POST"]),
         ("/works/discover_add", h_works_discover_add, ["POST"]),
         ("/batch/preview", h_batch_preview, ["POST"]),
+        # v0.28.3：预览里给单个角色重新随机主题
+        ("/batch/reroll", h_batch_reroll, ["POST"]),
         ("/batch/start", h_batch_start, ["POST"]),
         ("/batch/status", h_batch_status, ["GET", "POST"]),
         ("/batch/stop", h_batch_stop, ["POST"]),
