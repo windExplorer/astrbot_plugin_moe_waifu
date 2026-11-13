@@ -1501,6 +1501,31 @@
           <!-- ============ 调试工具（v0.9.0） ============ -->
           <div v-if="menu === 'debug'">
             <n-space vertical size="medium">
+              <!-- v0.24.1：关系模型阶段 1 只读状态（常驻卡片，内部才用 v-if，
+                   避免给 n-space 增加 v-if 切换的槽位） -->
+              <n-card size="small" title="关系模型 · 阶段 1（只读）" :bordered="true">
+                <div class="stack">
+                  <div class="bind-tip" style="margin-top: 0;">
+                    全部图片登记在 assets 拿全局唯一编号，角色 / 作品 / 卷各有自增主键，语义化 char_id 保留。
+                    本阶段只建表 + 迁移，<b>不改变抽卡与工坊行为</b>；首版只纳入原神 / 鸣潮 / 异环。
+                  </div>
+                  <div>
+                    <n-button size="small" :loading="relBusy" @click="loadRelStatus">刷新状态</n-button>
+                    <span v-if="relStatus" style="margin-left:10px;font-size:12px;opacity:.7;">当前库实际计数</span>
+                  </div>
+                  <div v-if="relStatus">
+                    <table class="kv-table">
+                      <tbody>
+                        <tr><td>assets（全部图片唯一编号）</td><td>{{ relStatus.assets }}</td></tr>
+                        <tr><td>characters / works / packs</td><td>{{ relStatus.characters }} / {{ relStatus.works }} / {{ relStatus.packs }}</td></tr>
+                        <tr><td>portraits（立绘行）</td><td>{{ relStatus.portraits }}</td></tr>
+                        <tr><td>已挂 asset_id 的立绘</td><td>{{ relStatus.portraits_with_asset }} / {{ relStatus.portraits }}</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div v-else class="bind-tip">点「刷新状态」读取；读不到就去看 AstrBot 启动日志里的「关系模型迁移」。</div>
+                </div>
+              </n-card>
               <n-card size="small" title="状态查询" :bordered="true">
                 <n-space vertical size="small">
                   <n-space align="center" :wrap="true" size="small">
@@ -5310,6 +5335,17 @@
       }
 
       // ---- 调试工具 ----
+      // ---- 关系模型阶段 1 状态（只读，v0.24.1） ----
+      var relStatus = Vue.ref(null);
+      var relBusy = Vue.ref(false);
+      async function loadRelStatus() {
+        relBusy.value = true;
+        try {
+          var res = await apiGet("relational/status");
+          relStatus.value = (res && res.status) || null;
+        } catch (e) { relStatus.value = null; } finally { relBusy.value = false; }
+      }
+
       var dbgStateUid = Vue.ref("");
       var dbgState = Vue.ref(null);
       var dbgStateLoading = Vue.ref(false);
@@ -5595,7 +5631,7 @@
         if (m === "records") { loadFilterOpts(); loadRecords(); loadRecEvents(); loadRecJobs(); }
         else if (m === "stats") { loadStats(); }
         else if (m === "users") { loadUsers(); }
-        else if (m === "debug") { loadDebugHistory(); }
+        else if (m === "debug") { loadDebugHistory(); loadRelStatus(); }
         else if (m === "overview") { loadOverview(); }
         else if (m === "chars") { fetchPools(); }
         else if (m === "works") { loadWorks().then(resyncCurrentWork); }
@@ -6038,6 +6074,7 @@
         userCalendarMonths: userCalendarMonths, weekLabels: weekLabels,
         loadUsers: loadUsers, setUserPage: setUserPage, openUser: openUser,
         dbgStateUid: dbgStateUid, dbgState: dbgState, dbgStateLoading: dbgStateLoading,
+        relStatus: relStatus, relBusy: relBusy, loadRelStatus: loadRelStatus,
         dbgRecent: dbgRecent, dbgAudit: dbgAudit, dbgConfigRows: dbgConfigRows,
         loadDebugState: loadDebugState, loadDebugHistory: loadDebugHistory,
         pickRecentUser: pickRecentUser, doQuickAction: doQuickAction,

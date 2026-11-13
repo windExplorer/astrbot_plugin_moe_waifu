@@ -57,6 +57,7 @@ addBindRow setRowGid setRowSeries removeBindRow
 galWidth galHeight
 importOverwrite dedupeOpen dedupeGroups dedupeSelected dedupeBusy dedupeResult
 dedupeSelectedCount dedupeDupCount openDedupe loadDuplicates doDedupe
+relStatus relBusy loadRelStatus
 """.split()
 
 ROUTES = """
