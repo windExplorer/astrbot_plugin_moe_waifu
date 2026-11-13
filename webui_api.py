@@ -373,12 +373,18 @@ async def h_import_pack(plugin) -> dict:
       - 整卷对象：{"pack": "卷名", "title": "...", "entries": [ {...}, ... ]}
       - 纯数组：[{...}, ...]  → 用请求里的 pack 字段（或默认 "imported"）当卷名
     每条需含 id / name / tags_en（走 normalize_entry 校验，不合格整条跳过）。
-    写入 data/plugin_data/.../pools/<卷名>.json，插件更新也不会被覆盖
-    （种子卷只按 id 合并、永不覆盖用户卷）。
+
+    v0.23.0：查重范围从「目标卷」扩到**全库**——同 id 在别的卷已存在也算
+    重复（导入的旧卷后来并进新卷，界面上就会一人两份）。overwrite 默认关闭，
+    已存在一律跳过；开启时只用导入内容更新基础字段（name/series/tags 等），
+    `strategy` / `cover` / `verified` / `id` / `pack` 全部保留本地值，参考图
+    绑定与封面不会丢。同名同作品但 id 不同的不自动合并，交给「重复角色」
+    工具处理，避免误把两个不同角色并成一条。
     """
     body = await _body()
     text = str(body.get("text") or "").strip()
     pack_override = str(body.get("pack") or "").strip()
+    overwrite = bool(body.get("overwrite", False))
     if not text:
         return err("请粘贴或上传 JSON 文本")
     try:
@@ -405,46 +411,94 @@ async def h_import_pack(plugin) -> dict:
         if e:
             good.append(e)
         else:
-            skipped.append(str((raw or {}).get("id") or (raw or {}).get("name") or "?"))
+            skipped.append({"id": str((raw or {}).get("id")
+                                      or (raw or {}).get("name") or "?"),
+                            "reason": "字段不合法"})
     if not good:
         return err("没有合法条目（每条需 id / name / tags_en）")
+
     pools_dir = _pools_dir(plugin)
     pools_dir.mkdir(parents=True, exist_ok=True)
-    path = pools_dir / f"{pack_name}.json"
-    if path.exists():
-        try:
-            cur = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            cur = {"pack": pack_name, "title": title, "enabled": True, "entries": []}
-        if not isinstance(cur.get("entries"), list):
-            cur["entries"] = []
-        have = set()
-        for r in cur["entries"]:
-            ne = pool.normalize_entry(r, pack_name)
-            if ne:
-                have.add(ne["id"])
-        added = 0
-        for e in good:
-            if e["id"] not in have:
-                cur["entries"].append(e)
-                have.add(e["id"])
-                added += 1
-        cur["pack"] = pack_name
-        cur["title"] = cur.get("title") or title
-        cur["enabled"] = bool(cur.get("enabled", True))
-        data = cur
-        created = False
-    else:
-        data = {"pack": pack_name, "title": title, "enabled": True, "entries": good}
-        added = len(good)
-        created = True
-    _json_save(path, data)
+    # 全库索引（id / 名字+作品）→ (卷名, 条目下标)；同时缓存卷文件内容，
+    # 覆盖写回时按卷批量保存，避免逐条读写把同一卷改花。
+    by_id: dict = {}
+    by_ns: dict = {}
+    pack_data: dict = {}
+    for p in pool.load_packs(pools_dir, logger):
+        loaded = _load_pack_file(plugin, p["pack"])
+        if loaded is None:
+            continue
+        path, data = loaded
+        if not isinstance(data, dict):
+            continue
+        if not isinstance(data.get("entries"), list):
+            data["entries"] = []
+        pack_data[p["pack"]] = (path, data)
+        for idx, raw in enumerate(data["entries"]):
+            ne = pool.normalize_entry(raw, p["pack"])
+            if not ne:
+                continue
+            by_id.setdefault(ne["id"], (p["pack"], idx))
+            ns = (str(ne["name"]).strip().lower(),
+                  str(ne["series"] or "").strip().lower())
+            if ns[0]:
+                by_ns.setdefault(ns, (p["pack"], idx))
+
+    target_path = pools_dir / f"{pack_name}.json"
+    created = not target_path.exists()
+    if pack_name not in pack_data:
+        pack_data[pack_name] = (target_path, {
+            "pack": pack_name, "title": title, "enabled": True, "entries": []})
+    _, target_data = pack_data[pack_name]
+    if not isinstance(target_data.get("entries"), list):
+        target_data["entries"] = []
+    target_data["pack"] = pack_name
+    target_data["title"] = target_data.get("title") or title
+    target_data["enabled"] = bool(target_data.get("enabled", True))
+
+    added = updated = dup_skipped = 0
+    dirty: set = set()
+    for e in good:
+        cid = e["id"]
+        ns = (str(e["name"]).strip().lower(),
+              str(e["series"] or "").strip().lower())
+        if cid in by_id:
+            loc = by_id[cid]
+            if overwrite and loc[0] in pack_data:
+                _, data = pack_data[loc[0]]
+                lst = data["entries"]
+                if 0 <= loc[1] < len(lst):
+                    cur_e = pool.normalize_entry(lst[loc[1]], loc[0])
+                    # 索引可能因脏数据（非 dict 条目被装载层过滤）错位，
+                    # 写回前再对一次 id，绝不误改别的角色。
+                    if cur_e and cur_e["id"] == cid:
+                        lst[loc[1]] = pool.merge_imported_entry(lst[loc[1]], e)
+                        updated += 1
+                        dirty.add(loc[0])
+                        continue
+            dup_skipped += 1
+            skipped.append({"id": cid, "reason": "全库已存在"
+                            + ("" if overwrite else "（未开启覆盖）")})
+            continue
+        if ns[0] and ns in by_ns:
+            dup_skipped += 1
+            skipped.append({"id": cid,
+                            "reason": "同名同作品已存在（请用重复角色工具处理）"})
+            continue
+        target_data["entries"].append(e)
+        idx = len(target_data["entries"]) - 1
+        by_id[cid] = (pack_name, idx)
+        if ns[0]:
+            by_ns.setdefault(ns, (pack_name, idx))
+        added += 1
+        dirty.add(pack_name)
+    for name in dirty:
+        path, data = pack_data[name]
+        _json_save(path, data)
     return ok({
-        "pack": pack_name,
-        "created": created,
-        "imported": added,
-        "total": len(good),
-        "skipped": skipped,
+        "pack": pack_name, "created": created,
+        "imported": added, "updated": updated, "duplicates": dup_skipped,
+        "total": len(good), "skipped": skipped, "overwrite": overwrite,
     })
 
 
@@ -471,6 +525,125 @@ async def h_delete_entry(plugin) -> dict:
     _json_save(path, data)
     orphan = plugin._store.count_portraits(cid) if plugin._store else 0
     return ok({"removed": removed, "portraits_left": orphan})
+
+
+def _dedupe_snapshot(plugin) -> list:
+    """重复角色预览：重复组 + 每条资产信息 + 建议保留下标（只读）。
+
+    keep 规则：资产最全（立绘 > 参考图 > 封面 > 已验证）优先，同分取组内
+    靠前（items 已按 pack/index 排序，结果确定）。不改任何数据。
+    """
+    store = plugin._store
+    out = []
+    for g in pool.duplicate_groups(pool.load_packs(_pools_dir(plugin), logger)):
+        items = []
+        for m in g["items"]:
+            e = m["entry"]
+            pc = store.count_portraits(e["id"]) if store else 0
+            refs = len(pool.ref_paths(e))
+            cover = bool(str(e.get("cover") or "").strip())
+            items.append({
+                "pack": m["pack"], "index": m["index"],
+                "id": e["id"], "name": e["name"],
+                "series": str(e["series"] or ""),
+                "verified": bool(e["verified"]),
+                "portrait_count": pc, "refs_count": refs,
+                "has_cover": cover, "score": pool.asset_score(e, pc),
+                # modal slot 内插值调 .join()/.map() 会打断整块渲染（v0.16.0
+                # 实测），展示文本一律后端拼好，模板只做纯字段插值。
+                "asset_text": f"立绘 {pc}、参考图 {refs}"
+                              + ("、封面" if cover else ""),
+            })
+        keep = max(range(len(items)), key=lambda i: (items[i]["score"], -i))
+        first = items[0] if items else {}
+        out.append({"key": g["key"], "reasons": g["reasons"],
+                    "reasons_text": " + ".join(g["reasons"]),
+                    "title": f"{first.get('name', '')}（{first.get('series') or '无作品'}）",
+                    "items": items, "keep": keep})
+    return out
+
+
+async def h_duplicates(plugin) -> dict:
+    """扫描全库重复角色（只读预览，不改动数据）。"""
+    groups = _dedupe_snapshot(plugin)
+    return ok({"groups": groups, "total_groups": len(groups),
+               "total_dup": sum(len(g["items"]) - 1 for g in groups)})
+
+
+async def h_dedupe(plugin) -> dict:
+    """按预览结果清理重复角色（需 confirm + keys），保留资产最全的一条。
+
+    安全口径：① 执行前重新扫描，keep/drop 由后端按资产分数决定，不信任前端
+    传来的保留项；② 被移除条目的参考图/封面并入保留条目；③ 立绘行按
+    char_id 迁移到保留 id（图片文件一个不删），不产生孤儿立绘；④ 改动前的
+    全部卷文件备份到 data/dedupe_backups/<时间戳>/（不在 pools/ 内，不会被
+    当成角色卷装载）。
+    """
+    body = await _body()
+    if not bool(body.get("confirm", False)):
+        return err("请先扫描预览并确认后再清理")
+    wanted = {str(k) for k in (body.get("keys") or []) if str(k).strip()}
+    if not wanted:
+        return err("没有选择要清理的重复组")
+    groups = [g for g in _dedupe_snapshot(plugin) if g["key"] in wanted]
+    if not groups:
+        return err("选中的重复组已不存在，请重新扫描")
+    pack_data: dict = {}
+    for p in pool.load_packs(_pools_dir(plugin), logger):
+        loaded = _load_pack_file(plugin, p["pack"])
+        if loaded is None:
+            continue
+        path, data = loaded
+        if isinstance(data, dict) and isinstance(data.get("entries"), list):
+            pack_data[p["pack"]] = (path, data)
+    stamp = time.strftime("%Y%m%d_%H%M%S") + f"_{int(time.time() * 1000) % 1000}"
+    backup_dir = Path(plugin._data_dir) / "dedupe_backups" / stamp
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    for name, (_p, data) in pack_data.items():
+        (backup_dir / f"{name}.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    removed = moved = 0
+    drops: set = set()
+    touched: set = set()
+    for g in groups:
+        items = g["items"]
+        keep = items[g["keep"]]
+        if keep["pack"] not in pack_data:
+            continue
+        base_list = pack_data[keep["pack"]][1]["entries"]
+        if not (0 <= keep["index"] < len(base_list)):
+            continue
+        keep_raw = base_list[keep["index"]]
+        for i, it in enumerate(items):
+            if i == g["keep"] or it["pack"] not in pack_data:
+                continue
+            loc = (it["pack"], it["index"])
+            if loc in drops:
+                continue
+            plist = pack_data[it["pack"]][1]["entries"]
+            if not (0 <= it["index"] < len(plist)):
+                continue
+            drop_raw = plist[it["index"]]
+            ne = pool.normalize_entry(drop_raw, it["pack"])
+            if not ne or ne["id"] != it["id"]:
+                continue
+            keep_raw = pool.merge_entry_assets(keep_raw, drop_raw)
+            if it["id"] != keep["id"] and plugin._store:
+                moved += plugin._store.reassign_portraits(it["id"], keep["id"])
+            drops.add(loc)
+            removed += 1
+            touched.add(it["pack"])
+        base_list[keep["index"]] = keep_raw
+        touched.add(keep["pack"])
+    for name in touched:
+        path, data = pack_data[name]
+        for idx in sorted((i for p, i in drops if p == name), reverse=True):
+            if 0 <= idx < len(data["entries"]):
+                data["entries"].pop(idx)
+        _json_save(path, data)
+    return ok({"removed": removed, "moved_portraits": moved,
+               "groups": len(groups), "backup": str(backup_dir)})
 
 
 async def h_set_pack(plugin) -> dict:
@@ -3053,6 +3226,8 @@ def register(plugin) -> None:
         ("/batch/stop", h_batch_stop, ["POST"]),
         ("/pools/save_entry", h_save_entry, ["POST"]),
         ("/pools/import", h_import_pack, ["POST"]),
+        ("/pools/duplicates", h_duplicates, ["GET", "POST"]),
+        ("/pools/dedupe", h_dedupe, ["POST"]),
         ("/pools/delete_entry", h_delete_entry, ["POST"]),
         ("/pools/set_pack", h_set_pack, ["POST"]),
         ("/pools/set_verified", h_set_verified, ["POST"]),

@@ -284,6 +284,151 @@ def merge_saved_entry(raw: dict, normalized: dict) -> dict:
     return merged
 
 
+# ---------- 导入覆盖 / 重复角色（v0.23.0） ----------
+
+# 导入「覆盖」只允许改这些基础字段。strategy（参考图 ref/refs/gen_refs、
+# 画法、工作流）、cover（封面）、verified（本地验证状态）、id/pack 一律保留
+# 本地值——立绘在 portraits 表按 id 关联，参考图绑定在 strategy 里，
+# 整体替换条目会让这些资产在界面上凭空消失（v0.9.10 同类事故）。
+IMPORT_BASIC_KEYS = ("name", "series", "category", "tier", "tags_en",
+                     "quote", "quotes", "color")
+
+
+def merge_imported_entry(raw: dict, imported: dict) -> dict:
+    """导入覆盖：只更新基础信息，资产字段原样保留。纯函数。"""
+    out = dict(raw) if isinstance(raw, dict) else {}
+    for key in IMPORT_BASIC_KEYS:
+        if key in (imported or {}):
+            out[key] = imported[key]
+    return out
+
+
+def ref_paths(entry: dict) -> list:
+    """条目上绑定的全部参考图路径（refs 资料库 + gen_refs 图生图源 + ref 主参考）。"""
+    st = entry.get("strategy") if isinstance(entry.get("strategy"), dict) else {}
+    out: list = []
+    for key in ("ref", "refs", "gen_refs"):
+        val = st.get(key)
+        for x in (val if isinstance(val, list) else [val]):
+            s = str(x or "").strip()
+            if s and s not in out:
+                out.append(s)
+    return out
+
+
+def asset_score(entry: dict, portrait_count: int = 0) -> int:
+    """资产丰度：立绘 >> 参考图 > 封面 > 已验证。去重时保留分数最高的一条。"""
+    cover = str((entry or {}).get("cover") or "").strip()
+    return (int(portrait_count or 0) * 1000
+            + len(ref_paths(entry or {})) * 10
+            + (5 if cover else 0)
+            + (1 if (entry or {}).get("verified") else 0))
+
+
+def merge_entry_assets(base: dict, extra: dict) -> dict:
+    """把 extra 的参考图 / 封面 / 验证状态并入 base（只增不删）。纯函数。
+
+    用于去重：被移除条目的绑定不能跟着丢，合到保留条目上；图片文件本身
+    一个都不删（立绘在 portraits 表按 id 关联，由调用方迁移归属）。
+    """
+    out = dict(base) if isinstance(base, dict) else {}
+    bst = dict(out.get("strategy") or {}) if isinstance(out.get("strategy"), dict) else {}
+    est = (extra or {}).get("strategy") if isinstance((extra or {}).get("strategy"), dict) else {}
+    b_refs = [str(x) for x in (bst.get("refs") or []) if str(x or "").strip()]
+    for x in (est.get("refs") or []):
+        s = str(x or "").strip()
+        if s and s not in b_refs:
+            b_refs.append(s)
+    if b_refs:
+        bst["refs"] = b_refs
+    b_gen = [str(x) for x in (bst.get("gen_refs") or []) if str(x or "").strip()]
+    for x in (est.get("gen_refs") or []):
+        s = str(x or "").strip()
+        if s and s not in b_gen:
+            b_gen.append(s)
+    if b_gen:
+        bst["gen_refs"] = b_gen
+    if not str(bst.get("ref") or "").strip() and str(est.get("ref") or "").strip():
+        bst["ref"] = est["ref"]
+    out["strategy"] = bst
+    if not str(out.get("cover") or "").strip() and str((extra or {}).get("cover") or "").strip():
+        out["cover"] = extra["cover"]
+    if (extra or {}).get("verified"):
+        out["verified"] = True
+    return out
+
+
+def duplicate_groups(packs: list) -> list:
+    """并查集扫描全库重复：同 id，或同 (name, series) 视作一组。
+
+    一个条目只属于一个组（两种判重条件会连通，避免「按 id 清完又按名字
+    清一遍」把同一条处理两次）。返回
+    [{"key", "reasons": [...], "items": [{pack, index, raw, entry}]}]，
+    只含成员数 >= 2 的组；顺序确定（按 pack/index，组按 key）。纯函数。
+    """
+    items: list = []
+    for p in packs or []:
+        pack_name = str(p.get("pack") or "")
+        for idx, raw in enumerate(p.get("entries") or []):
+            e = normalize_entry(raw, pack_name)
+            if e is None:
+                continue
+            items.append({"pack": pack_name, "index": idx,
+                          "raw": raw, "entry": e})
+    n = len(items)
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    by_id: dict = {}
+    by_ns: dict = {}
+    for i, it in enumerate(items):
+        e = it["entry"]
+        if e["id"] in by_id:
+            union(i, by_id[e["id"]])
+        else:
+            by_id[e["id"]] = i
+        ns = (str(e.get("name") or "").strip().lower(),
+              str(e.get("series") or "").strip().lower())
+        if ns[0]:
+            if ns in by_ns:
+                union(i, by_ns[ns])
+            else:
+                by_ns[ns] = i
+    buckets: dict = {}
+    for i, it in enumerate(items):
+        buckets.setdefault(find(i), []).append(it)
+    groups = []
+    for members in buckets.values():
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda m: (m["pack"], m["index"]))
+        ids = {m["entry"]["id"] for m in members}
+        names = {(str(m["entry"]["name"]).strip().lower(),
+                  str(m["entry"]["series"] or "").strip().lower())
+                 for m in members}
+        reasons = []
+        if len(ids) < len(members):
+            reasons.append("同 id")
+        if len(names) < len(members):
+            reasons.append("同名同作品")
+        first = members[0]["entry"]
+        key = f"{first['id']}|{first['name']}|{first['series']}"
+        groups.append({"key": key, "reasons": reasons or ["关联重复"],
+                       "items": members})
+    groups.sort(key=lambda g: g["key"])
+    return groups
+
+
 def candidates_for(
     packs: list,
     group_id: str = "",

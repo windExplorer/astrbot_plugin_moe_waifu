@@ -434,6 +434,7 @@
               </n-radio-group>
               <n-button type="primary" size="small" @click="openNew">新增角色</n-button>
               <n-button size="small" @click="openImport">导入角色</n-button>
+              <n-button size="small" @click="openDedupe">重复角色</n-button>
               <n-button size="small" @click="openBatchModal">批量补图</n-button>
               <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
               <!-- v0.6.1：每行卡片数快捷调整（写回 ui_grid_cols，免去去配置页） -->
@@ -2414,28 +2415,59 @@
         <n-alert type="info" :show-icon="false">
           粘贴角色 JSON（支持「角色数组」<code>[...]</code> 或「整卷对象」<code>{"pack","entries"}</code>），或选 .json 文件。
           每条需含 <b>id / name / tags_en</b>。导入即写入 <b>pools/&lt;卷名&gt;.json</b>，
-          更新插件不会被覆盖；同卷按 id 合并，不重复。
+          更新插件不会被覆盖；<b>全库按 id 去重</b>，已存在的角色默认不导入。
         </n-alert>
         <n-input v-model:value="importPack" placeholder="卷名（可选；整卷对象的 pack 优先，缺省 imported）"></n-input>
         <n-input v-model:value="importText" type="textarea" :rows="12"
                  placeholder='例如：[{"id":"my_char_1","name":"角色A","tags_en":"1girl, long hair","series":"某作","tier":"S"}, {"id":"my_char_2","name":"角色B","tags_en":"1girl","tier":"A"}]'></n-input>
+        <n-checkbox v-model:checked="importOverwrite" style="font-size:13px;">覆盖已有角色的基础信息（默认关：已存在的一律跳过；开启也只改名字 / 作品 / 标签等，不动参考图、封面、验证状态）</n-checkbox>
         <label style="display:inline-block;margin-top:6px;padding:5px 14px;border:1px solid #d0d5dd;border-radius:6px;cursor:pointer;font-size:13px;">
           选择 .json 文件
           <input type="file" accept=".json,application/json" style="display:none;" @change="onImportFile">
         </label>
         <div v-if="importResult" style="margin-top:8px;">
-          <n-alert :type="importResult.ok ? 'success' : 'error'" :show-icon="false">
-            <template v-if="importResult.ok">
-              卷 <b>{{ importResult.pack }}</b>：新增 {{ importResult.imported }} 条（共合法 {{ importResult.total }} 条）
-              <span v-if="importResult.skipped && importResult.skipped.length">；跳过 {{ importResult.skipped.length }} 条不合法</span>
+          <n-alert :type="importResult.pack ? 'success' : 'error'" :show-icon="false">
+            <template v-if="importResult.pack">
+              卷 <b>{{ importResult.pack }}</b>：新增 {{ importResult.imported }} 条、更新 {{ importResult.updated }} 条、重复跳过 {{ importResult.duplicates }} 条（共合法 {{ importResult.total }} 条）
+              <span v-if="importResult.skipped && importResult.skipped.length">；不合法 / 跳过明细 {{ importResult.skipped.length }} 条</span>
             </template>
-            <template v-else>{{ importResult.error || '导入失败' }}</template>
+            <template v-else>{{ importResult.error || importResult.message || '导入失败' }}</template>
           </n-alert>
         </div>
       </div>
       <template #action>
         <n-button @click="importOpen=false">关闭</n-button>
         <n-button type="primary" :loading="importing" @click="doImport">导入</n-button>
+      </template>
+    </n-modal>
+
+    <!-- ============ 重复角色去重（v0.23.0：预览 → 勾选 → 清理） ============ -->
+    <n-modal v-model:show="dedupeOpen" preset="dialog" title="重复角色" style="width: 760px;">
+      <div class="stack">
+        <n-alert type="info" :show-icon="false">
+          按「同 id」或「同名同作品」扫描全库。清理时保留资产最全的一条（立绘 / 参考图 / 封面），
+          其余条目的参考图与封面并入保留条目、立绘自动改挂到保留 id，图片文件一个都不删。
+          改动前的卷文件会备份到 data/dedupe_backups/。
+        </n-alert>
+        <div>
+          <n-button size="small" :loading="dedupeBusy" @click="loadDuplicates">重新扫描</n-button>
+          <span v-if="dedupeGroups" style="margin-left:10px;font-size:12px;opacity:.7;">共 {{ dedupeGroups.length }} 组 / 可移除 {{ dedupeDupCount }} 条</span>
+        </div>
+        <div v-if="dedupeGroups && dedupeGroups.length" style="max-height:360px;overflow:auto;">
+          <div v-for="g in dedupeGroups" :key="g.key" class="stack" style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:8px;">
+            <n-checkbox v-model:checked="dedupeSelected[g.key]" style="font-size:13px;">{{ g.reasons_text }} · {{ g.title }}</n-checkbox>
+            <div v-for="(it, i) in g.items" :key="g.key + ':' + i"
+                 style="font-size:12px;line-height:1.7;"><b v-if="i === g.keep">保留</b><span v-else>移除</span> · {{ it.name }} / {{ it.id }} / 卷 {{ it.pack }} · {{ it.asset_text }}</div>
+          </div>
+        </div>
+        <n-empty v-else-if="dedupeGroups" description="没有发现重复角色"></n-empty>
+        <div v-if="dedupeResult" style="margin-top:6px;">
+          <n-alert type="success" :show-icon="false">已清理 {{ dedupeResult.removed }} 条，迁移立绘 {{ dedupeResult.moved_portraits }} 张；备份：{{ dedupeResult.backup }}</n-alert>
+        </div>
+      </div>
+      <template #action>
+        <n-button @click="dedupeOpen=false">关闭</n-button>
+        <n-button type="primary" :loading="dedupeBusy" :disabled="!dedupeSelectedCount" @click="doDedupe">清理选中（{{ dedupeSelectedCount }} 组）</n-button>
       </template>
     </n-modal>
 
@@ -3275,6 +3307,57 @@
       var importPack = Vue.ref("");
       var importing = Vue.ref(false);
       var importResult = Vue.ref(null);
+      var importOverwrite = Vue.ref(false);
+
+      // ---- 重复角色去重（v0.23.0：先预览，再按组清理） ----
+      var dedupeOpen = Vue.ref(false);
+      var dedupeGroups = Vue.ref(null);
+      var dedupeSelected = Vue.ref({});
+      var dedupeBusy = Vue.ref(false);
+      var dedupeResult = Vue.ref(null);
+      var dedupeSelectedCount = Vue.computed(function () {
+        var n = 0, sel = dedupeSelected.value || {};
+        (dedupeGroups.value || []).forEach(function (g) { if (sel[g.key]) n += 1; });
+        return n;
+      });
+      var dedupeDupCount = Vue.computed(function () {
+        return (dedupeGroups.value || []).reduce(function (s, g) {
+          return s + Math.max(0, (g.items || []).length - 1);
+        }, 0);
+      });
+      async function loadDuplicates() {
+        dedupeBusy.value = true;
+        try {
+          var res = await apiPost("pools/duplicates", {});
+          dedupeGroups.value = (res && res.groups) || [];
+          var sel = {};
+          dedupeGroups.value.forEach(function (g) { sel[g.key] = true; });
+          dedupeSelected.value = sel;
+        } catch (e) { /* 已提示 */ } finally { dedupeBusy.value = false; }
+      }
+      function openDedupe() {
+        dedupeGroups.value = null;
+        dedupeSelected.value = {};
+        dedupeResult.value = null;
+        dedupeOpen.value = true;
+        loadDuplicates();
+      }
+      async function doDedupe() {
+        var sel = dedupeSelected.value || {};
+        var keys = (dedupeGroups.value || []).filter(function (g) {
+          return !!sel[g.key];
+        }).map(function (g) { return g.key; });
+        if (!keys.length) { message.warning("请先勾选要清理的重复组"); return; }
+        dedupeBusy.value = true;
+        try {
+          var res = await apiPost("pools/dedupe", { keys: keys, confirm: true });
+          dedupeResult.value = res;
+          message.success("已清理 " + (res.removed || 0) + " 条重复角色");
+          await refreshAll();
+          await loadDuplicates();
+        } catch (e) { /* 已提示 */ } finally { dedupeBusy.value = false; }
+      }
+
       var quoteGenLoading = Vue.ref(false);
       async function doQuoteGen() {
         // AI 补写印象语：调对话模型生成 5 句，追加到表单（人工删改后再保存）
@@ -3387,10 +3470,14 @@
         importing.value = true;
         importResult.value = null;
         try {
-          var res = await apiPost("pools/import", { text: text, pack: String(importPack.value || "").trim() });
+          var res = await apiPost("pools/import", {
+            text: text,
+            pack: String(importPack.value || "").trim(),
+            overwrite: !!importOverwrite.value
+          });
           importResult.value = res;
-          if (res && res.ok) {
-            message.success("导入成功：" + res.pack + "（新增 " + res.imported + " 条）");
+          if (res && res.pack) {
+            message.success("导入成功：" + res.pack + "（新增 " + res.imported + " 条 / 更新 " + (res.updated || 0) + " 条 / 重复跳过 " + (res.duplicates || 0) + " 条）");
             await refreshAll();
           }
         } catch (e) { /* 已提示 */ } finally {
@@ -5878,7 +5965,13 @@
         designateRef: designateRef, unbindDrawerRef: unbindDrawerRef,
         importOpen: importOpen, importText: importText, importPack: importPack,
         importing: importing, importResult: importResult,
+        importOverwrite: importOverwrite,
         openImport: openImport, onImportFile: onImportFile, doImport: doImport,
+        dedupeOpen: dedupeOpen, dedupeGroups: dedupeGroups,
+        dedupeSelected: dedupeSelected, dedupeBusy: dedupeBusy,
+        dedupeResult: dedupeResult, dedupeSelectedCount: dedupeSelectedCount,
+        dedupeDupCount: dedupeDupCount, openDedupe: openDedupe,
+        loadDuplicates: loadDuplicates, doDedupe: doDedupe,
         catLabel: catLabel, stratLabel: stratLabel, portraitCount: portraitCount, delArm: delArm,
         tryCharId: tryCharId, charOpts: charOpts, tryEntry: tryEntry,
         tryRunning: tryRunning, tryError: tryError, tryPreview: tryPreview, tryOk: tryOk,

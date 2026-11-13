@@ -460,6 +460,20 @@ class Store:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def reassign_portraits(self, from_id: str, to_id: str) -> int:
+        """v0.23.0 去重：旧 id 的立绘行整体改挂到保留 id（不删行、不动文件）。
+
+        portraits 只有 (char_id, seq) 普通索引、无 UNIQUE 约束，两个 id 的
+        seq 撞号不会冲突；取图按 (seq, created_at, id) 排序由后两列决胜。
+        返回迁移行数。删掉重复角色条目后，这些立绘才不会变成孤儿。
+        """
+        if not from_id or not to_id or from_id == to_id:
+            return 0
+        cur = self._conn.execute(
+            "UPDATE portraits SET char_id=? WHERE char_id=?", (to_id, from_id))
+        self._conn.commit()
+        return int(cur.rowcount or 0)
+
     def delete_portrait(self, file: str) -> None:
         self._conn.execute("DELETE FROM portraits WHERE file=?", (file,))
         self._conn.commit()

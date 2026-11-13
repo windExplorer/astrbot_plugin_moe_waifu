@@ -55,6 +55,8 @@ avatarOf hashColor thumbOf colorOf rerollLabel tv brandColor zhLocale
 bindRows bindSeriesOpts bindRawOpen bindLoading loadBindPools onBindRawInput
 addBindRow setRowGid setRowSeries removeBindRow
 galWidth galHeight
+importOverwrite dedupeOpen dedupeGroups dedupeSelected dedupeBusy dedupeResult
+dedupeSelectedCount dedupeDupCount openDedupe loadDuplicates doDedupe
 """.split()
 
 ROUTES = """
@@ -67,6 +69,7 @@ ROUTES = """
 /prompt/pools
 /batch/preview /batch/start /batch/status /batch/stop
 /works/discover /works/discover_add
+/pools/import /pools/duplicates /pools/dedupe
 """.split()
 
 STORE_METHODS = """
