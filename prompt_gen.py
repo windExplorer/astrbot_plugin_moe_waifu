@@ -463,12 +463,26 @@ IDENTITY_FEATURES = (
 )
 
 
+# 特征 tag 的词边界匹配（v0.29.5）：裸子串匹配会闹「twintails 包含 tail →
+# 把双马尾当成尾巴、在每条编辑指令里点名『尾巴必须原样保留』」的笑话。
+# 规则：整词命中，容忍词尾复数（tails / antennae / fang…都在 danbooru 常见
+# 形态里）；复合词内部（twintails / ponytail / tailmouth）因无词边界不命中。
+_FEATURE_RES = tuple(
+    (en, zh, re.compile(r"\b" + re.escape(en) + r"(?:es|s|e)?\b"))
+    for en, zh in IDENTITY_FEATURES
+)
+
+
 def identity_features(entry: dict) -> list:
-    """从 tags_en 里挑出角色固有特征，返回 [(en, zh)]。纯函数。"""
+    """从 tags_en 里挑出角色固有特征，返回 [(en, zh)]。纯函数。
+
+    v0.29.5 起按词边界匹配（容忍复数），不再裸子串——`twintails` / `ponytail`
+    不得再触发「尾巴」，`unicorn horn` 这类单数复合词也不该命中复数特征名。
+    """
     tags = str((entry or {}).get("tags_en") or "").lower()
     if not tags:
         return []
-    return [(en, zh) for en, zh in IDENTITY_FEATURES if en in tags]
+    return [(en, zh) for en, zh, rx in _FEATURE_RES if rx.search(tags)]
 
 
 def identity_feature_text(entry: dict, lang: str = "zh") -> str:

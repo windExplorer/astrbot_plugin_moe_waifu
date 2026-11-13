@@ -607,6 +607,18 @@ check("编辑指令逐项锚定固有特征",
 check("英文特征串给 caption 用",
       "tail" in prompt_gen.identity_feature_text(_tail_entry, "en"))
 
+# v0.29.5：词边界匹配——twintails / ponytail 不得再误报成「尾巴」
+check("twintails 不误报尾巴",
+      prompt_gen.identity_features({"tags_en": "hatsune miku, twintails"}) == [])
+check("ponytail / long hair 不误报",
+      prompt_gen.identity_features({"tags_en": "1girl, ponytail, long hair"}) == [])
+check("复数形态 fox tails 仍命中尾巴",
+      ("tail", "尾巴") in prompt_gen.identity_features({"tags_en": "1girl, fox tails"}))
+check("antennae 复数命中触角",
+      ("antenna", "触角") in prompt_gen.identity_features({"tags_en": "1girl, antennae"}))
+check("真尾巴角色照常命中",
+      "尾巴" in prompt_gen.identity_feature_text(_tail_entry))
+
 # ③ 画风现代化：现代主题权重高于复古，复古 90s 已降权
 check("现代画风主题权重高于复古",
       prompt_gen.art_theme_weight("art_modern")
