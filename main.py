@@ -564,7 +564,8 @@ class MoeWaifuPlugin(Star):
                 dims=json.dumps(prompt_gen.describe_variations(
                     seed_int, force_single=(entry["strategy_type"] == "img2img")),
                     ensure_ascii=False),
-                width=_w, height=_h)
+                width=_w, height=_h,
+                duration_ms=dur)
             src = self._data_dir / rel_path
 
         # 落库与计数（先 upsert 再查同款，含自己）

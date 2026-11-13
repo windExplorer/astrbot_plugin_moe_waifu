@@ -51,6 +51,7 @@ galDrawRef galDrawRefAbs setDrawSource galRefsSel
 workKeyword workFilterCat workFilterVerified workSort workCatOpts workVerifiedOpts
 workSortOpts filteredWorks toggleWorkChar openNewForWork
 fmtTime cfgBoundGroups pickSimGroup simScopeText
+trendDurChart fmtDur
 avatarOf hashColor thumbOf colorOf rerollLabel tv brandColor zhLocale
 bindRows bindSeriesOpts bindRawOpen bindLoading loadBindPools onBindRawInput
 addBindRow setRowGid setRowSeries removeBindRow

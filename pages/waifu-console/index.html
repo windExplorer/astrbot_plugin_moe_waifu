@@ -1425,6 +1425,15 @@
                 </n-gi>
               </n-grid>
 
+              <!-- v0.30.0：逐日平均生成耗时（成功项口径，与 totals 平均耗时同源） -->
+              <div class="chart-card">
+                <div class="chart-title">每日平均生成耗时
+                  <span class="cnt">成功出图任务的耗时均值（秒）· 没有成功项的日子不画点</span>
+                </div>
+                <div v-html="trendDurChart"></div>
+                <div class="chart-axis"><span>{{ statsData.trend && statsData.trend.length ? statsData.trend[0].date.slice(5) : "" }}</span><span>{{ statsData.trend && statsData.trend.length ? statsData.trend[Math.floor(statsData.trend.length / 2)].date.slice(5) : "" }}</span><span>{{ statsData.trend && statsData.trend.length ? statsData.trend[statsData.trend.length - 1].date.slice(5) : "" }}</span></div>
+              </div>
+
               <n-grid :cols="2" :x-gap="10" :y-gap="10">
                 <n-gi>
                   <div class="chart-card">
@@ -2302,6 +2311,10 @@
           <span class="bind-tip" style="margin-top: 0;">{{ fmtTime(galDetail.created_at) }}</span>
           <n-tag size="small" :bordered="false" v-if="galDetail.width > 0">
             {{ galDetail.width }} × {{ galDetail.height }}
+          </n-tag>
+          <!-- v0.30.0：生成耗时（萌绘生成路径才有；参考图转入等 0 = 不显示） -->
+          <n-tag size="small" :bordered="false" v-if="galDetail.duration_ms > 0">
+            耗时 {{ fmtDur(galDetail.duration_ms) }}
           </n-tag>
           <span v-else class="bind-tip" style="margin-top: 0;">尺寸未知（v0.20.0 之前的旧图）</span>
           <n-tag size="small" type="warning" :bordered="false"
@@ -5593,6 +5606,14 @@
       function tv(v) {
         return (v === undefined || v === null || v === "") ? "—" : v;
       }
+      // v0.30.0：生成耗时（毫秒）→ 人话（90.5s / 1m05s）；0/缺失返回 ""（调用方 v-if 隐藏）
+      function fmtDur(ms) {
+        var v = Number(ms || 0);
+        if (!(v > 0)) { return ""; }
+        if (v < 60000) { return (v / 1000).toFixed(1) + "s"; }
+        var m = Math.floor(v / 60000), s = Math.round((v % 60000) / 1000);
+        return m + "m" + (s < 10 ? "0" : "") + s + "s";
+      }
 
       // ---- 抽签记录 ----
       // v0.13.2：四个筛选 select 的空值改 null（见 tryCharId 注释——placeholder 才会显示）
@@ -5800,8 +5821,46 @@
                "style=\"width:100%;height:180px;display:block;color:inherit\">" +
                parts.join("") + "</svg>" + axis;
       });
+      // v0.30.0：逐日平均生成耗时（秒）。avg_ms 来自 draw_jobs 成功项均值
+      // （store.stats_range），没有成功项的日子 avg_ms=0——不画点、断线展示，
+      // 别把「当天没出图」画成 0s。
+      var trendDurChart = Vue.computed(function () {
+        var rows = (statsData.value.trend || []).filter(function (r) {
+          return Number(r.avg_ms || 0) > 0;
+        });
+        if (!rows.length) { return "<div class=\"rec-note\">区间内没有成功出图记录</div>"; }
+        var W = 620, H = 160, P = 22;
+        var max = 1;
+        rows.forEach(function (r) { max = Math.max(max, Number(r.avg_ms) / 1000); });
+        max = Math.ceil(max * 10) / 10;
+        function x(i) { return rows.length === 1 ? W / 2 : P + i * (W - 2 * P) / (rows.length - 1); }
+        function y(sec) { return H - P - (sec / max) * (H - 2 * P); }
+        var parts = [];
+        [0, 0.5, 1].forEach(function (t) {
+          var gy = P + t * (H - 2 * P);
+          parts.push("<line x1=\"" + P + "\" y1=\"" + gy + "\" x2=\"" + (W - P) +
+                     "\" y2=\"" + gy + "\" stroke=\"currentColor\" stroke-opacity=\"0.12\" stroke-width=\"1\"/>");
+        });
+        var pts = rows.map(function (r, i) {
+          return x(i).toFixed(1) + "," + y(Number(r.avg_ms) / 1000).toFixed(1);
+        }).join(" ");
+        parts.push("<polyline points=\"" + pts + "\" fill=\"none\" stroke=\"#9b72c9\" " +
+                   "stroke-width=\"2\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>");
+        rows.forEach(function (r, i) {
+          var sec = Number(r.avg_ms) / 1000;
+          parts.push("<circle cx=\"" + x(i).toFixed(1) + "\" cy=\"" + y(sec).toFixed(1) +
+                     "\" r=\"2.6\" fill=\"#9b72c9\"><title>" + r.date + " · " +
+                     sec.toFixed(1) + "s</title></circle>");
+        });
+        return "<svg viewBox=\"0 0 " + W + " " + H + "\" preserveAspectRatio=\"none\" " +
+               "style=\"width:100%;height:160px;display:block;color:inherit\">" +
+               parts.join("") + "</svg>" +
+               "<div class=\"chart-legend\"><span><i style=\"background:#9b72c9\"></i>日均耗时（峰值 " +
+               max.toFixed(1) + "s）</span></div>";
+      });
       var hoursChart = Vue.computed(function () {
         var hs = statsData.value.hours || [];
+        if (!hs.length) { return "<div class=\"rec-note\">区间内没有数据</div>"; }
         if (!hs.length) { return "<div class=\"rec-note\">区间内没有数据</div>"; }
         var W = 620, H = 180, P = 12, bw = (W - 2 * P) / 24;
         var max = Math.max.apply(null, [1].concat(hs.map(function (h) { return h.n; })));
@@ -6768,6 +6827,7 @@
         recJobStatus: recJobStatus, jobStatusOpts: jobStatusOpts, loadRecJobs: loadRecJobs,
         statsDays: statsDays, statsRangeOpts: statsRangeOpts, statsData: statsData,
         statsLoading: statsLoading, statCards: statCards, trendChart: trendChart,
+        trendDurChart: trendDurChart, fmtDur: fmtDur,
         hoursChart: hoursChart, groupDonut: groupDonut, donutColors: donutColors,
         statsMaxChar: statsMaxChar, statsMaxDecision: statsMaxDecision,
         loadStats: loadStats, setStatsDays: setStatsDays,

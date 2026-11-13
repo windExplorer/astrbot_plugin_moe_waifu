@@ -796,6 +796,8 @@ async def h_portraits_list(plugin) -> dict:
             "dims": row.get("dims") or "",
             "width": int(row.get("width") or 0),
             "height": int(row.get("height") or 0),
+            # v0.30.0：生成耗时（毫秒，非生成路径为 0 = 未知）
+            "duration_ms": int(row.get("duration_ms") or 0),
             # v0.21.0：软删除标记（0 = 已停用）
             "active": int(row.get("active") or 0),
         })
@@ -1329,7 +1331,8 @@ async def _run_job(plugin, job_id: str, entry: dict, kind: str,
         rel = draw.archive_portrait(src, plugin._data_dir, char_id, date, seq, seed_int)
         plugin._store.add_portrait(char_id, rel, seed_int, date, seq,
                                    entry["strategy_type"], prompt=prompt_text, theme=theme_rec,
-                                   dims=dims_json, width=img_w, height=img_h)
+                                   dims=dims_json, width=img_w, height=img_h,
+                                   duration_ms=duration)
         job["archived"] = rel
     if src:
         # 试画缓存（v0.5.9）：萌绘产物在其自己的数据目录里，/image/data 只认本插件
@@ -1379,7 +1382,8 @@ async def h_job_archive(plugin) -> dict:
                                theme=str(job.get("theme") or ""),
                                dims=str(job.get("dims") or ""),
                                width=int(job.get("width") or 0),
-                               height=int(job.get("height") or 0))
+                               height=int(job.get("height") or 0),
+                               duration_ms=int(job.get("duration_ms") or 0))
     job["archived"] = rel
     return ok({"archived": rel})
 

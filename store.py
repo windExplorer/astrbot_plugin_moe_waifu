@@ -203,6 +203,9 @@ _MIGRATIONS = {
         "active": "INTEGER NOT NULL DEFAULT 1",
         # v0.24.0：关系模型阶段 1，指向 assets.id（全部图片统一编号）
         "asset_id": "INTEGER",
+        # v0.30.0：这张图的萌绘生成耗时（毫秒，成功生成才 >0；参考图转入/
+        # 手动恢复等非生成路径为 0）——立绘详情弹窗展示 + 统计逐日趋势
+        "duration_ms": "INTEGER NOT NULL DEFAULT 0",
     },
     # v0.25.0：v0.24.0 建的 characters 表只有基础列，切读路径需要完整条目字段
     # （工坊角色卡会显示分类 / 稀有度 / 印象语 / 颜色，缺了就全空）。
@@ -435,15 +438,19 @@ class Store:
     def add_portrait(self, char_id: str, file: str, seed: int, date: str,
                      seq: int, strategy: str,
                      prompt: str | None = None, theme: str = "",
-                     dims: str = "", width: int = 0, height: int = 0) -> None:
+                     dims: str = "", width: int = 0, height: int = 0,
+                     duration_ms: int = 0) -> None:
         # v0.15.0：prompt/theme 随档记录（立绘详情弹窗展示）；prompt 可空。
         # v0.20.0：dims（变化维度 JSON）/ 图片尺寸随档记录。
+        # v0.30.0：生成耗时（毫秒）随档记录——参考图转入/回收站恢复等非生成
+        # 路径不传（0），详情弹窗按 >0 显示。
         self._conn.execute(
             "INSERT INTO portraits (char_id, file, seed, date, seq, strategy, created_at,"
-            " prompt, theme, dims, width, height) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            " prompt, theme, dims, width, height, duration_ms)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (char_id, file, int(seed), date, int(seq), strategy, _now(),
              prompt, str(theme or ""), str(dims or ""),
-             int(width or 0), int(height or 0)),
+             int(width or 0), int(height or 0), max(0, int(duration_ms or 0))),
         )
         # v0.24.0：每张立绘登记进 assets（全局唯一编号）并回填 asset_id。
         # 同一路径被复用时 register_asset 只补哈希 / 尺寸，不重复建记录。
@@ -1391,18 +1398,28 @@ class Store:
         ):
             trend_map[r["date"]] = {"date": r["date"], "draws": int(r["n"]),
                                     "users": int(r["u"]), "rerolls": int(r["r"]),
-                                    "jobs_ok": 0, "jobs_fail": 0}
+                                    "jobs_ok": 0, "jobs_fail": 0, "avg_ms": 0}
         for r in self._conn.execute(
             "SELECT date, status, COUNT(*) AS n FROM draw_jobs WHERE date>=? AND date<=?"
             " GROUP BY date, status", span,
         ):
             item = trend_map.setdefault(r["date"], {
                 "date": r["date"], "draws": 0, "users": 0, "rerolls": 0,
-                "jobs_ok": 0, "jobs_fail": 0})
+                "jobs_ok": 0, "jobs_fail": 0, "avg_ms": 0})
             if r["status"] == "ok":
                 item["jobs_ok"] += int(r["n"])
             elif r["status"] in ("error", "timeout", "skipped_no_anima"):
                 item["jobs_fail"] += int(r["n"])
+        # v0.30.0：逐日平均生成耗时（成功项，毫秒；当天无成功项 = 0，前端跳过）
+        for r in self._conn.execute(
+            "SELECT date, COALESCE(AVG(duration_ms),0) AS avg_ms FROM draw_jobs"
+            " WHERE date>=? AND date<=? AND status='ok' AND duration_ms>0"
+            " GROUP BY date", span,
+        ):
+            trend_map.setdefault(r["date"], {
+                "date": r["date"], "draws": 0, "users": 0, "rerolls": 0,
+                "jobs_ok": 0, "jobs_fail": 0, "avg_ms": 0})
+            trend_map[r["date"]]["avg_ms"] = int(r["avg_ms"])
         # 补齐没有数据的日子，前端折线才不会把 7 天画成 2 个点
         try:
             start, end = _date.fromisoformat(lo), _date.fromisoformat(hi)
@@ -1410,7 +1427,8 @@ class Store:
                 for i in range((end - start).days + 1):
                     d = (start + timedelta(days=i)).isoformat()
                     trend_map.setdefault(d, {"date": d, "draws": 0, "users": 0,
-                                             "rerolls": 0, "jobs_ok": 0, "jobs_fail": 0})
+                                             "rerolls": 0, "jobs_ok": 0, "jobs_fail": 0,
+                                             "avg_ms": 0})
         except (ValueError, TypeError):
             pass
         trend = [trend_map[k] for k in sorted(trend_map)]

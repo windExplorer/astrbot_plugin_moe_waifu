@@ -299,7 +299,8 @@ class BatchRunner:
                                     force_single=(str(entry.get("strategy_type") or "")
                                                   == "img2img")),
                                     ensure_ascii=False),
-                                width=_w, height=_h)
+                                width=_w, height=_h,
+                                duration_ms=_dur)
                         item["status"] = "ok"
                         item["error"] = ""
                         item["file"] = rel
