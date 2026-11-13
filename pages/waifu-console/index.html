@@ -26,6 +26,15 @@
     background: rgba(128,128,128,.12);
     transition: transform .15s ease, box-shadow .15s ease; }
   .gal-item:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(120,80,120,.14); }
+  /* v0.26.1：立绘批量停用 / 启用的操作条与选择遮罩 */
+  .gal-bulk-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin: 6px 0 8px; padding: 6px 10px; border-radius: 8px;
+    background: rgba(128,128,128,.10); }
+  .gal-pick { position: absolute; inset: 0; z-index: 3; display: flex;
+    align-items: center; justify-content: center; cursor: pointer;
+    font-size: 12px; color: #fff; background: rgba(0,0,0,.30); }
+  .gal-pick.on { background: rgba(64,158,255,.45); }
+  .gal-item.is-picked { outline: 2px solid rgba(64,158,255,.85); outline-offset: -2px; }
   /* 立绘是 700×1200 竖图：缩略卡统一 7:12 竖版比例（横图裁切体验差，v0.5.10）。
      v0.6.1：同样 max-height 封顶（列数少时不疯长），偏上裁切保脸 */
   .gal-item img { width: 100%; height: auto; aspect-ratio: 7 / 12;
@@ -919,6 +928,18 @@
                           :options="[{ label: '最新在前', value: 'newest' },
                                       { label: '编号正序', value: 'seq' }]"
                           style="width: 100px; margin-left: 8px;"></n-select>
+                <!-- v0.26.1：批量停用 / 启用 -->
+                <n-button size="tiny" style="margin-left: 8px;"
+                          @click="toggleGalBulk">{{ galBulk ? "退出批量" : "批量停用/启用" }}</n-button>
+              </div>
+              <div v-if="galBulk" class="gal-bulk-bar">
+                <span class="bind-tip" style="margin-top: 0;">已选 {{ galSelCount }} 张</span>
+                <n-button size="tiny" @click="galSelAllVisible">全选 / 反选</n-button>
+                <n-button size="tiny" :disabled="!galSelCount"
+                          @click="doBulkPortrait(false)">停用选中</n-button>
+                <n-button size="tiny" :disabled="!galSelCount"
+                          @click="doBulkPortrait(true)">启用选中</n-button>
+                <span class="bind-tip" style="margin-top: 0;">停用只是不参与抽卡与配额，图片和记录都保留，可随时恢复</span>
               </div>
               <!-- v0.18.2：切换角色先立载入态（骨架 + 文字），不再拿上一位的立绘凑数 -->
               <div v-if="galSwitching">
@@ -933,7 +954,14 @@
               <n-grid v-else-if="galItems.length > 0" :cols="uiCols" :x-gap="10" :y-gap="10">
                 <n-gi v-for="it in galItemsView" :key="it.file">
                   <!-- v0.21.0：停用的立绘置灰展示（仅查看/恢复/彻底删除） -->
-                  <div class="gal-item" :class="{ 'is-disabled': !it.active }">
+                  <div class="gal-item" :class="{ 'is-disabled': !it.active,
+                        'is-picked': galBulk && galSel.indexOf(it.file) >= 0 }">
+                    <!-- v0.26.1：批量模式下点卡片选中 / 取消（不触发看大图） -->
+                    <div v-if="galBulk" class="gal-pick"
+                         :class="{ on: galSel.indexOf(it.file) >= 0 }"
+                         @click.stop="toggleGalSel(it)">
+                      {{ galSel.indexOf(it.file) >= 0 ? "✓ 已选" : "选择" }}
+                    </div>
                     <img v-if="it.thumb" :src="it.thumb" class="clickable-img"
                          title="点击查看大图" alt="立绘缩略"
                          @click.stop="openViewer(it.file, '#' + it.display_no)">
@@ -4181,6 +4209,8 @@
           // v0.15.0：排序统一收口到 galItemsView（默认最新在前；此处保持后端
           // seq 升序原样——满库取图 pool_index 的确定性依赖这个顺序，别动）
           galItems.value = (res && res.items) || [];
+          // v0.26.1：重载/切角色后清空批量选择（避免选中了上一角色的图）
+          if (typeof galSel !== "undefined") { galSel.value = []; }
         } catch (e) { if (seq === galLoadSeq) galItems.value = []; }
       }
 
@@ -4384,6 +4414,48 @@
       var galDisabledCount = Vue.computed(function () {
         return (galItems.value || []).filter(function (it) { return !it.active; }).length;
       });
+      // v0.26.1：批量停用 / 启用——进入批量模式后点卡片选中，再统一操作。
+      // 停用是软删除：文件与行都保留、可随时恢复，只是不参与抽卡与配额。
+      var galBulk = Vue.ref(false);
+      var galSel = Vue.ref([]);
+      var galSelCount = Vue.computed(function () {
+        return (galSel.value || []).length;
+      });
+      function toggleGalBulk() {
+        galBulk.value = !galBulk.value;
+        if (!galBulk.value) { galSel.value = []; }
+      }
+      function toggleGalSel(it) {
+        var f = String((it || {}).file || "");
+        if (!f) return;
+        var arr = (galSel.value || []).slice();
+        var i = arr.indexOf(f);
+        if (i >= 0) { arr.splice(i, 1); } else { arr.push(f); }
+        galSel.value = arr;
+      }
+      function galSelAllVisible() {
+        var files = (galItemsView.value || []).map(function (it) {
+          return String(it.file || "");
+        }).filter(function (f) { return !!f; });
+        var allPicked = files.length > 0
+          && (galSel.value || []).length >= files.length;
+        galSel.value = allPicked ? [] : files;
+      }
+      async function doBulkPortrait(active) {
+        var files = (galSel.value || []).slice();
+        if (!files.length) { message.warning("先选择要处理的立绘"); return; }
+        // 与单张停用同款两段确认（再点一次才真正执行）
+        if (!armDelete("bulk:" + (active ? "on" : "off") + ":" + files.length)) return;
+        try {
+          var res = await apiPost("portraits/set_active",
+            { files: files, active: !!active });
+          message.success((active ? "已启用 " : "已停用 ") + (res.changed || 0) + " 张"
+            + (res.skipped_count ? "，跳过 " + res.skipped_count + " 张" : ""));
+          delArm.value = "";
+          galSel.value = [];
+          await refreshAll();
+        } catch (e) { /* 已提示 */ }
+      }
       var galItemsView = Vue.computed(function () {
         var arr = (galItems.value || []).filter(function (it) {
           return galShowDisabled.value || it.active;
@@ -6178,6 +6250,10 @@
         galSort: galSort, galItemsView: galItemsView,
         // v0.21.0：软删除（停用/恢复/彻底删除）
         galShowDisabled: galShowDisabled, galDisabledCount: galDisabledCount,
+        // v0.26.1：批量停用 / 启用
+        galBulk: galBulk, galSel: galSel, galSelCount: galSelCount,
+        toggleGalBulk: toggleGalBulk, toggleGalSel: toggleGalSel,
+        galSelAllVisible: galSelAllVisible, doBulkPortrait: doBulkPortrait,
         doRestorePortrait: doRestorePortrait, doDeletePortraitHard: doDeletePortraitHard,
         // v0.18.2：切换角色的载入态（骨架 + 文案）
         galSwitching: galSwitching, galSwitchTip: galSwitchTip,

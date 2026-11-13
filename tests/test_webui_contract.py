@@ -59,6 +59,8 @@ importOverwrite dedupeOpen dedupeGroups dedupeSelected dedupeBusy dedupeResult
 dedupeSelectedCount dedupeDupCount openDedupe loadDuplicates doDedupe
 relStatus relBusy loadRelStatus
 batchSeriesOpts batchBtnText
+galBulk galSel galSelCount toggleGalBulk toggleGalSel galSelAllVisible
+doBulkPortrait
 """.split()
 
 ROUTES = """
@@ -72,6 +74,7 @@ ROUTES = """
 /batch/preview /batch/start /batch/status /batch/stop
 /works/discover /works/discover_add
 /pools/import /pools/duplicates /pools/dedupe /relational/status
+/portraits/set_active
 """.split()
 
 STORE_METHODS = """

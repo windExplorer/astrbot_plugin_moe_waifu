@@ -1128,6 +1128,34 @@ async def h_portrait_restore(plugin) -> dict:
         return err(f"恢复失败：{exc}")
 
 
+async def h_portraits_set_active(plugin) -> dict:
+    """批量停用 / 恢复立绘（v0.26.1）。
+
+    body: {files: [...], active: bool}。逐条走与单张相同的核心逻辑
+    （`_restore_portrait_core` / `_disable_portrait_core`），非法路径或不存在的
+    行单独计入 skipped，不影响其余条目——批量操作不能因为一条脏路径整批失败。
+    上限 500 张，避免一次传入过大批量。
+    """
+    body = await _body()
+    files = body.get("files")
+    if not isinstance(files, list) or not files:
+        return err("缺少 files（要处理的立绘路径列表）")
+    if not plugin._store:
+        return err("插件未初始化完成")
+    active = bool(body.get("active", True))
+    core = _restore_portrait_core if active else _disable_portrait_core
+    changed, skipped = 0, []
+    for raw in files[:500]:
+        rel = str(raw or "").strip()
+        try:
+            await asyncio.to_thread(core, plugin, rel)
+            changed += 1
+        except (ValueError, RuntimeError):
+            skipped.append(rel)
+    return ok({"changed": changed, "active": active,
+               "skipped": skipped[:20], "skipped_count": len(skipped)})
+
+
 async def h_portrait_delete_hard(plugin) -> dict:
     """彻底删除（文件进回收站 + 删行）。只对已停用的立绘开放，且必须带
     confirm=true（前端两段确认 + 服务端强校验，对齐调试区危险操作口径）。"""
@@ -3294,6 +3322,7 @@ def register(plugin) -> None:
         ("/portraits/delete", h_portrait_delete, ["POST"]),
         # v0.21.0：软删除的恢复 / 彻底删除
         ("/portraits/restore", h_portrait_restore, ["POST"]),
+        ("/portraits/set_active", h_portraits_set_active, ["POST"]),
         ("/portraits/delete_hard", h_portrait_delete_hard, ["POST"]),
         # v0.9.1：真·移动语义的互转（旧 /refs/bind 保留给上传/外部调用）
         ("/portraits/move_to_ref", h_portrait_move_to_ref, ["POST"]),
