@@ -465,7 +465,9 @@ class MoeWaifuPlugin(Star):
         # 与「参考图列表」strategy.refs 无关——没指定就不规划图生图、
         # 不播图生图台词，更不会从列表里私自挑一张。
         draw_src = draw.draw_source(entry, data_dir)
-        decision = draw.decision_of(char_id, date, today_row, pool_size, quota)
+        # v0.19.3：mode 一并传入——img2img（只用图生图模板）不能被「满配额取库」
+        # 短路，否则库满后永远取旧立绘（用户实报）
+        decision = draw.decision_of(char_id, date, today_row, pool_size, quota, mode)
         if decision == "generate":
             decision = draw.plan_source(mode, pool_size, quota,
                                         bool(draw_src),

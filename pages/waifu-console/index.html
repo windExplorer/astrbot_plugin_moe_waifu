@@ -317,13 +317,23 @@
           <!-- ============ 总览（v0.10.0，第一栏；v0.13.2 去重信息 + 角色缩略 + 头像） ============ -->
           <div v-if="menu === 'overview'" class="stack">
             <div class="sec-title">总览
-              <!-- v0.13.2：版本/萌绘状态与顶部状态栏重复，只留出图方式（一信息一显示） -->
-              <span class="cnt">出图方式 {{ ov.gen_source_mode }} · 图生图命中 {{ ov.img2img_prob }}%</span>
+              <!-- v0.13.2：版本/萌绘状态与顶部状态栏重复，只留出图方式（一信息一显示）
+                   v0.19.3：出图方式显示中文；「图生图命中」只在 mix 模式有意义 -->
+              <span class="cnt">出图方式 {{ ovGenModeLabel }}<span
+                v-if="ov.gen_source_mode === 'mix'"> · 图生图命中 {{ ov.img2img_prob }}%</span><span
+                v-if="ov.gen_source_mode === 'img2img'"> · 每次都现画（库存满也画）</span></span>
               <n-button size="tiny" secondary :loading="refreshing" @click="refreshAll">刷新</n-button>
             </div>
             <div v-if="!ov.anima_ready"
                  style="padding: 8px 12px; border-radius: 8px; background: rgba(230,162,60,.12); color: #c47f17; font-size: 13px;">
               萌绘（astrbot_plugin_comfyui_anima）未就绪：需要现画立绘时会失败，已有立绘库的角色不受影响。
+            </div>
+            <!-- v0.19.3：img2img 模式下一个角色都没指定出卡源 → 实际会回退取立绘，
+                 这属于「配置了但不会按预期生效」，必须显式说出来 -->
+            <div v-if="ovNoSourceTip"
+                 style="padding: 8px 12px; border-radius: 8px; background: rgba(230,162,60,.12); color: #c47f17; font-size: 13px;">
+              已设「只用图生图模板」，但<b>还没有任何角色指定「出卡图生图源」</b>：这些角色抽卡时会回退到立绘库取图。
+              去角色详情 → 参考图区，点卡片上的靶心按钮指定一张出卡源即可。
             </div>
             <n-grid :cols="4" :x-gap="12" :y-gap="12">
               <n-gi>
@@ -2874,6 +2884,22 @@
         img2img_prob: 50, packs: 0, chars: 0, verified: 0, portraits: 0,
         chars_full: 0, refs_bound: 0, orphans: 0, draw_sources: 0,
         no_source: [], today_draws: 0, total_draws: 0, recent: []
+      });
+      // v0.19.3：出图方式的中文标签 + 两种「配了却不会按预期生效」的提示。
+      // 用户实报：「配置的是只用图生图模板，但还是取的立绘」——两条真实原因：
+      // ① 立绘库满配额被短路（后端已修）；② 角色没指定「出卡图生图源」，按设计
+      // 回退立绘库取图（这条是配置事实，只能提示，不能替用户瞎指定一张图）。
+      var GEN_MODE_LABELS = {
+        mix: "混合（按概率分配）", pool: "只用立绘库", img2img: "只用图生图模板"
+      };
+      var ovGenModeLabel = Vue.computed(function () {
+        var m = String((ov.value && ov.value.gen_source_mode) || "mix");
+        return GEN_MODE_LABELS[m] || m;
+      });
+      var ovNoSourceTip = Vue.computed(function () {
+        var m = String((ov.value && ov.value.gen_source_mode) || "mix");
+        // ⚠️ 纯字段比较，不在模板里调方法（sandbox iframe 下的老坑）
+        return m === "img2img" && Number((ov.value || {}).draw_sources || 0) === 0;
       });
       async function loadOverview() {
         try {
@@ -5431,6 +5457,8 @@
         menu: menu, menuOpts: menuOpts, onMenu: onMenu,
         refreshing: refreshing, refreshAll: refreshAll,
         ov: ov, loadOverview: loadOverview, goMenu: goMenu,
+        // v0.19.3：出图方式中文标签 + 「img2img 但没指定出卡源」提示
+        ovGenModeLabel: ovGenModeLabel, ovNoSourceTip: ovNoSourceTip,
         meta: meta, loadingAll: loadingAll, loadAll: loadAll, rowKey: rowKey,
         charsMode: charsMode, cardPage: cardPage, cardPageSize: cardPageSize,
         pagedEntries: pagedEntries, gotoTryFromChars: gotoTryFromChars,

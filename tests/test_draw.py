@@ -43,6 +43,16 @@ check("关闭则不传", draw.resolve_negative({"draw_negative_enabled": False})
 check("当日已有→复用", draw.decision_of("a", "d", {"file": "x"}, 3, 5) == "reuse_today")
 check("未满配额→生成", draw.decision_of("a", "d", None, 3, 5) == "generate")
 check("满配额→取库", draw.decision_of("a", "d", None, 5, 5) == "from_pool")
+# v0.19.3：img2img 模式不受满配额短路（用户实报：配了只用图生图模板却一直取立绘）
+check("img2img 满配额→仍走生成决策",
+      draw.decision_of("a", "d", None, 5, 5, "img2img") == "generate")
+check("img2img 当日已有→仍复用（一人一天一位）",
+      draw.decision_of("a", "d", {"file": "x"}, 5, 5, "img2img") == "reuse_today")
+check("mix 满配额→取库（mode 参与判定后行为不变）",
+      draw.decision_of("a", "d", None, 5, 5, "mix") == "from_pool")
+check("pool 满配额→取库", draw.decision_of("a", "d", None, 9, 5, "pool") == "from_pool")
+check("未知 mode 按老规则（满配额取库）",
+      draw.decision_of("a", "d", None, 5, 5, "what") == "from_pool")
 
 # 图生图源判定（v0.10.0：与「参考图列表」彻底解耦）
 # 用户口径：没显式指定图生图参考图，就不能私自拿参考图列表里的图去生成老婆。
@@ -170,8 +180,14 @@ with tempfile.TemporaryDirectory() as ref_td:
           "width" not in eff_h["strategy"] and "height" not in eff_h["strategy"])
 
 # plan_source（v0.9.6 出图方式规划：mix/pool/img2img 三模式 + 回退链）
-# 满配额一律取库
-check("满配额→取库", draw.plan_source("img2img", 5, 5, True, 0, 100) == "from_pool")
+# v0.19.3：满配额短路只对 mix / pool 生效；img2img 语义是「每次都按出卡源现画」
+check("img2img 满配额仍现画（v0.19.3 修「配了只用图生图模板却一直取立绘」）",
+      draw.plan_source("img2img", 5, 5, True, 0, 100) == "generate_i2i")
+check("img2img 满配额且没出卡源→回退取库",
+      draw.plan_source("img2img", 5, 5, False, 0, 100) == "from_pool")
+check("mix 满配额→取库（不浪费算力）",
+      draw.plan_source("mix", 5, 5, True, 0, 100) == "from_pool")
+check("pool 满配额→取库", draw.plan_source("pool", 6, 5, True, 0, 100) == "from_pool")
 # mix
 check("mix 命中 i2i 概率", draw.plan_source("mix", 2, 5, True, 30, 50) == "generate_i2i")
 check("mix 未中→取库", draw.plan_source("mix", 2, 5, True, 80, 50) == "from_pool")

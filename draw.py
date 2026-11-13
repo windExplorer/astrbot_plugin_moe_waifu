@@ -13,6 +13,8 @@
 - **硬依赖**：未装萌绘 / 超时 / 异常 → 报错不出卡（PRD 铁律 1），不做无图降级。
 
 立绘库决策（PRD §5.2）：当日已生成 → 复用；< 配额 → 生成并存档；满配额 → 取模取库存图。
+例外（v0.19.3）：出图方式配置为 img2img（只用图生图模板）时不再受配额短路——
+每次都按出卡源现画，库满也画（否则「只用图生图模板」永远不生效）。
 """
 from __future__ import annotations
 
@@ -629,10 +631,22 @@ def resolve_portrait_rel(data_dir: Path, rel: str) -> Path:
 
 
 def decision_of(char_id: str, date_str: str, today_row: dict | None,
-                pool_size: int, quota: int) -> str:
-    """出图决策（纯函数，可测）：reuse_today / generate / from_pool。"""
+                pool_size: int, quota: int, mode: str = "") -> str:
+    """出图决策（纯函数，可测）：reuse_today / generate / from_pool。
+
+    v0.19.3：`mode`（配置 gen_source_mode）必须参与判定。旧实现只按配额走
+    （< 配额 → generate，满配额 → from_pool），于是「只用图生图模板」在立绘库
+    攒满之后被「满配额取库」短路——用户实报：配了 img2img，抽卡却一直是库里的
+    旧立绘、再没画过新图。语义修正：
+      - img2img（只用图生图模板）→ 每次都走 generate（是否真能图生图交给
+        plan_source：没指定出卡源才回退取库）；
+      - 其它模式（mix / pool）→ 维持原「集满配额就取图、不浪费算力」。
+    `mode` 默认空串 = 老行为（debug 模拟等未传的旧调用点安全）。
+    """
     if today_row is not None:
         return "reuse_today"
+    if str(mode) == "img2img":
+        return "generate"
     if pool_size < max(1, int(quota)):
         return "generate"
     return "from_pool"
@@ -657,12 +671,15 @@ def plan_source(mode: str, pool_size: int, quota: int, has_ref: bool,
       间分配——概率命中图生图但没绑模板图 → 回退库存取图；
     - pool：只从立绘库取图（库存空 → 按角色画法生成，老链路）；
     - img2img：只用模板图生图（没绑模板图 → 回退库存取图，库存也空 → 老链路）。
-    满配额一律库存取图（不浪费算力）；generate_i2i 产出照常归档进立绘库。
+    ⚠️ v0.19.3：满配额短路只对 mix / pool 生效——img2img 的语义就是「每次都按
+    出卡源现画」，不能被库存已满短路掉（用户实报的「配置了只用图生图模板却一直
+    取立绘」）；代价是 img2img 模式下立绘库会随抽卡持续增长。
+    generate_i2i 产出照常归档进立绘库。
     """
-    if pool_size >= max(1, int(quota)):
-        return "from_pool"
     if str(mode) == "img2img":
         return "generate_i2i" if has_ref else ("from_pool" if pool_size > 0 else "generate")
+    if pool_size >= max(1, int(quota)):
+        return "from_pool"
     if str(mode) == "pool":
         return "from_pool" if pool_size > 0 else "generate"
     # mix（非法 mode 也当 mix）

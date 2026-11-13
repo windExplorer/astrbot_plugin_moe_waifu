@@ -2,6 +2,40 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.19.3 (2026-11-13)
+
+修复「只用图生图模板」被满配额短路：img2img 模式不再取立绘库旧图（版本 v0.19.2 -> v0.19.3）。
+
+- **现象（用户）**：出图方式配成 `img2img`（只用图生图模板），抽卡却一直拿立绘库
+  里的旧图，再没画过新图。
+- **根因（真实链路走查）**：`decision_of` 只按配额决策——`pool_size >= quota`
+  直接返回 `from_pool`，**根本没看 `gen_source_mode`**；即使进到
+  `plan_source`，函数开头也是「满配额一律 from_pool」短路，`img2img` 分支排在它后面
+  永远走不到。于是「只用图生图模板」在立绘攒满配额（默认 5 张）之后就彻底失效。
+  v0.9.6 引入这条短路的本意是「满配额省算力」，但它不该覆盖管理员显式选择的模式。
+- **修复**：
+  - `draw.decision_of(..., mode="")` 新增 `mode` 参数：`img2img` → 一律走 `generate`
+    （当日已抽过仍 `reuse_today`，一人一天一位的规则不变）；mix / pool / 未知模式
+    维持「满配额取库」。参数默认空串，旧调用点行为不变。
+  - `draw.plan_source` 把满配额短路挪到 `img2img` 分支之后：img2img 有出卡源 →
+    `generate_i2i`（库满也画），没出卡源 → 回退取库（无库存才回老链路）。
+  - `main.py::_produce`、`webui_api.py` 调试模拟两处调用点都传入 `gen_source_mode`
+    （模拟与真实出卡同口径，否则模拟结论会骗人）。
+- **代价与口径（写清楚，别当 bug 再报）**：img2img 模式下立绘库**会随抽卡持续增长**
+  （每天每个角色的第一张都是新图，无淘汰）；想收住就改回 mix / pool，或在工坊删图。
+  mix / pool 的「满配额取库、不浪费算力」保持不变。
+- **前端提示（防同一困惑复发）**：总览的「出图方式」改成中文标签；mix 才显示
+  「图生图命中 x%」，img2img 显示「每次都现画（库存满也画）」；并新增一条橙色提示
+  ——**已设 img2img 但没有任何角色指定「出卡图生图源」**时，明确告诉用户这些角色会
+  回退取立绘库，以及去哪指定（角色详情 → 参考图区 → 卡片上的靶心按钮）。
+- **配置文案**：`gen_source_mode` 的 hint 按模式逐条写清「库存满了会怎样」，不再让
+  「只用图生图模板」的语义含糊。
+- **守卫**：`tests/test_draw.py` 新增 8 条（img2img 满配额仍现画 / 无源回退 /
+  当日复用优先 / mix 与 pool 满配额仍取库 / 未知 mode 按老规则）。
+- **验证**：`test_draw` / `test_records` / `test_webui_contract` / `test_schema` /
+  `test_template_structure` / `test_inline_js` / `test_html_integrity` 全 OK；
+  `draw.py` / `main.py` / `webui_api.py` compileall 通过。
+
 ## v0.19.2 (2026-11-13)
 
 维度下拉加高度上限 + 内部滚动条：不再把整个页面撑出滚动（版本 v0.19.1 -> v0.19.2）。

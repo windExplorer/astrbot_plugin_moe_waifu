@@ -2401,8 +2401,9 @@ def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
     today_row = s.portrait_by_date(entry["id"], date)
     pool_size = s.count_portraits(entry["id"])
     quota = max(1, int(plugin._cfg("portraits_per_char", 5)))
-    decision = draw.decision_of(entry["id"], date, today_row, pool_size, quota)
     gen_mode = str(plugin._cfg("gen_source_mode", "mix") or "mix")
+    # v0.19.3：mode 参与决策（img2img 不受满配额短路），模拟与真实出卡同口径
+    decision = draw.decision_of(entry["id"], date, today_row, pool_size, quota, gen_mode)
     try:
         i2i_prob = int(plugin._cfg("img2img_prob", 50))
     except (TypeError, ValueError):
