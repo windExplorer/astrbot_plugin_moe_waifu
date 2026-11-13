@@ -37,9 +37,9 @@ ENTRY = {"id": "miku", "name": "初音未来", "series": "Vocaloid",
 p1 = prompt_gen.pick_variations(12345)
 p2 = prompt_gen.pick_variations(12345)
 check("同种子同选择", p1 == p2)
-check("九个维度齐全（v0.25.7 加取景，v0.32.0 加鞋袜）",
+check("十个维度齐全（v0.25.7 加取景，v0.32.0 加鞋袜，v0.33.0 加帽子外套）",
       set(p1.keys()) == {"compose", "framing", "artstyle", "outfit", "footwear",
-                         "background", "pose", "expression", "body"})
+                         "outer", "background", "pose", "expression", "body"})
 check("维度取自池内", p1["background"] in prompt_gen.BACKGROUNDS
       and p1["body"] in prompt_gen.BODY
       and p1["compose"] in prompt_gen.COMPOSE
@@ -570,6 +570,72 @@ check("qwen 中文描述含鞋袜",
 check("自填穿搭命中家族（女仆装 → 玛丽珍）",
       "玛丽珍" in prompt_gen.pick_variations(
           42, None, outfit_override="女仆装")["footwear"]["zh"])
+
+# ---------- v0.33.0：帽子外套维度——摘掉为主 + 按穿搭偶尔戴帽 + tags 剥离 ----------
+# 用户实测：角色 tags_en 带 hat/jacket → 文生图每次都画；img2img 只换服装不提
+# 帽子外套，编辑模型原样保留——泳装戴帽子、婚纱套夹克就是这么来的。
+_OUTER_E = {"id": "x", "name": "测试娘",
+            "tags_en": "1girl, baseball cap, black jacket, blue hair, fox ears"}
+check("帽子外套进维度表与展示序",
+      "outer" in prompt_gen.DIMS
+      and any(t == "outer" for _l, t in prompt_gen.DIM_ORDER))
+check("穿搭家族全覆盖（帽子外套无一漏到泛用兜底）",
+      all(prompt_gen.outer_candidates(str(it.get("zh") or ""))
+          is not prompt_gen._FOUT_GENERIC for it in prompt_gen.OUTFITS))
+_outer_inv_bad = []
+for tid in prompt_gen.content_theme_ids() + ["tpl_3view", "tpl_single"]:
+    _ot = prompt_gen.get_theme(tid)
+    for _os in range(60):
+        _op = prompt_gen.pick_variations(_os, _ot)
+        _oz = str(_op["outfit"]["zh"] or "").strip()
+        _fz = str(_op["outer"]["zh"] or "").strip()
+        _cand = {it["zh"] for it in prompt_gen.outer_candidates(_oz)}
+        if (_oz and _fz not in _cand) or (not _oz and _fz):
+            _outer_inv_bad.append((tid, _os, _oz, _fz))
+check("帽子外套跟随实际穿搭的家族（主题+模板各 60 种子零违例）",
+      not _outer_inv_bad, str(_outer_inv_bad[:3]))
+_outer_rem = sum(1 for s in range(400)
+                 if prompt_gen.pick_variations(s)["outer"]["zh"]
+                 == "摘掉帽子，脱掉外套")
+check("摘掉为主（400 种子占比 > 70%）", _outer_rem > 280, f"{_outer_rem}/400")
+check("偶尔戴帽（非一成不变：400 种子 >= 3 种帽子外套状态）",
+      len({prompt_gen.pick_variations(s)["outer"]["zh"]
+           for s in range(400)}) >= 3)
+check("模板底稿帽子外套置空（保留角色原本）",
+      prompt_gen.pick_variations(42, tpl3)["outer"]["zh"] == "")
+_op_sw = prompt_gen.pick_variations(11, prompt_gen.get_theme("swimsuit"))
+check("编辑指令含帽子外套条款（祈使短语直入）",
+      "摘掉帽子" in prompt_gen.build_local_instruction(
+          _OUTER_E, _op_sw, ref_mode="none")
+      or "戴上草帽" in prompt_gen.build_local_instruction(
+          _OUTER_E, _op_sw, ref_mode="none"))
+_stripped = prompt_gen.build_t2i_prompt(_OUTER_E, _op_sw)
+check("danbooru tags 已剥离 hat/jacket（保留其余与固有特征）",
+      "cap" not in _stripped and "jacket" not in _stripped
+      and "blue hair" in _stripped)
+check("qwen 中文描述已剥离 hat/jacket",
+      "cap" not in prompt_gen.build_t2i_qwen_local(_OUTER_E, _op_sw).lower()
+      and "jacket" not in prompt_gen.build_t2i_qwen_local(_OUTER_E, _op_sw))
+check("元提示词 tags 同步剥离（不与维度指令矛盾）",
+      "cap" not in prompt_gen.build_t2i_meta_prompt(_OUTER_E, _op_sw, "qwen")
+      and "jacket" not in prompt_gen.build_t2i_meta_prompt(_OUTER_E, _op_sw, "qwen"))
+_op_keep = prompt_gen.pick_variations(11)
+_op_keep["outfit"] = {"w": 0, "zh": "", "en": ""}
+_op_keep["outer"] = {"w": 0, "zh": "", "en": ""}
+check("空穿搭（跟随角色原本）保留 hat/jacket tags",
+      "baseball cap" in prompt_gen._entry_tags(_OUTER_E, _op_keep)
+      and "black jacket" in prompt_gen._entry_tags(_OUTER_E, _op_keep))
+check("词边界剥离不误伤（twintails/fox ears 完整保留）",
+      "twintails" in prompt_gen.strip_outer_tags("1girl, witch hat, twintails")
+      and "fox ears" in prompt_gen.strip_outer_tags("fox ears, black coat"))
+_or_rer = prompt_gen.apply_dim_state(
+    prompt_gen.pick_variations(42), 42, {"attempts": {"outer": 1}}, None)
+check("帽子外套可单独重摇且非空", _or_rer["outer"]["zh"].strip() != "")
+_or_fx = prompt_gen.apply_dim_state(
+    prompt_gen.pick_variations(42), 42, {"fixed": {"outfit": "旗袍"}}, None)
+check("锁定旗袍 → 帽子外套落在礼服族（摘掉）",
+      _or_fx["outer"]["zh"]
+      in {it["zh"] for it in prompt_gen._FOUT_HEELS})
 
 
 _orig_detect = prompt_gen.detect_t2i_style

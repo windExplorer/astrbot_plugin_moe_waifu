@@ -557,12 +557,99 @@ FOOTWEAR = _dedupe_by_zh([
     *_F_HOME, *_F_IDOL, *_F_OFFICE, *_F_WINTER, *_F_HEELS, *_FEET_GENERIC,
 ])
 
+# ---------- 帽子外套维度（v0.33.0）：摘掉为主 + 按穿搭偶尔戴合适的帽子 ----------
+# 用户实测：角色 tags_en 里带 hat / jacket 等外观 tag → 文生图每次都画帽子外套，
+# 与主题穿搭完全无关；img2img 编辑指令只说「换服装」从不提帽子外套，编辑模型
+# 又默认保留配饰——「泳装还戴帽子、婚纱外面套着夹克」就是这么来的。
+# 机制：outfit 家族派生（摘掉为主，偶尔戴该穿搭合适的帽子）；**文生图侧把
+# 帽子/外套类外观 tag 从角色 tags_en 里剥掉**（strip_outer_tags，词边界匹配，
+# 不会误伤 wardro-be 这类复合词，也不碰耳机/发饰等角色固有物）；img2img 的
+# zh 条目本身是祈使短语（「摘掉帽子，脱掉外套」），直接作为指令子句。
+# 穿搭空项（跟随角色原本 / 模板底稿）时该维度不提及 = 帽子外套照旧保留。
+_FOUT_REMOVE = {"w": 8, "zh": "摘掉帽子，脱掉外套", "en": "", "strip": 1}
+_FOUT_BERET = {"w": 2, "zh": "脱掉外套，戴上贝雷帽", "en": "beret", "strip": 1}
+_FOUT_STRAW = {"w": 1, "zh": "脱掉外套，戴上草帽", "en": "straw hat", "strip": 1}
+_FOUT_KNIT = {"w": 2, "zh": "脱掉外套，戴上毛线帽", "en": "knit cap", "strip": 1}
+_FOUT_CAP = {"w": 1, "zh": "脱掉外套，戴上棒球帽", "en": "baseball cap", "strip": 1}
+_FOUT_ALL = (_FOUT_REMOVE, _FOUT_BERET, _FOUT_STRAW, _FOUT_KNIT, _FOUT_CAP)
+
+_FOUT_JK = (_FOUT_REMOVE, _FOUT_BERET)
+_FOUT_SWIM = (_FOUT_REMOVE, _FOUT_STRAW)
+_FOUT_SPORT = (_FOUT_REMOVE, _FOUT_CAP)
+_FOUT_KIMONO = (_FOUT_REMOVE,)
+_FOUT_MAID = (_FOUT_REMOVE,)
+_FOUT_GOTHIC = (_FOUT_REMOVE,)
+_FOUT_HOME = (_FOUT_REMOVE,)
+_FOUT_IDOL = (_FOUT_REMOVE,)
+_FOUT_OFFICE = (_FOUT_REMOVE,)
+_FOUT_WINTER = (_FOUT_REMOVE, _FOUT_KNIT)
+_FOUT_HEELS = (_FOUT_REMOVE,)
+_FOUT_GENERIC = (_FOUT_REMOVE, _FOUT_BERET, _FOUT_STRAW)
+
+# 剥离用的外观词干（词边界匹配；耳机/发饰/眼镜等角色固有物不在名单里）
+_OUTER_STRIP_STEMS = ("hat", "cap", "beret", "hood", "hoodie", "helmet",
+                      "jacket", "coat", "cape", "cloak", "robe", "cardigan",
+                      "poncho", "blazer")
+
+_OUTER_FAMILIES = (
+    (("JK", "水手", "校服", "背带", "学院"), _FOUT_JK),
+    (("泳装", "泳衣", "比基尼", "纱笼", "防晒泳"), _FOUT_SWIM),
+    (("体操服", "运动", "拉拉队"), _FOUT_SPORT),
+    (("浴衣", "和服", "振袖", "访问着", "巫女", "袴"), _FOUT_KIMONO),
+    (("女仆", "围裙"), _FOUT_MAID),
+    (("哥特", "女巫", "吸血鬼", "魔法学院", "朋克"), _FOUT_GOTHIC),
+    (("睡衣", "睡袍", "睡裙", "居家", "家居服", "T恤", "卫衣"), _FOUT_HOME),
+    (("偶像", "打歌服", "舞台", "演出服"), _FOUT_IDOL),
+    (("大衣", "冬", "毛衣"), _FOUT_WINTER),
+    (("西装", "通勤", "铅笔裙", "航空", "职业", "衬衫"), _FOUT_OFFICE),
+    (("婚纱", "礼服", "秀禾", "白无垢", "旗袍", "连衣裙"), _FOUT_HEELS),
+)
+
+
+def outer_candidates(outfit_zh: str):
+    """穿搭 zh → 帽子外套候选（纯函数，可直测）。空穿搭返回空元组。"""
+    z = str(outfit_zh or "")
+    if not z.strip():
+        return ()
+    for keys, cands in _OUTER_FAMILIES:
+        if any(k in z for k in keys):
+            return cands
+    return _FOUT_GENERIC
+
+
+def strip_outer_tags(tags_en: str) -> str:
+    """从 tags 串里剥掉帽子/外套类外观 tag（词边界匹配，保留其余与顺序）。"""
+    out = []
+    for seg in str(tags_en or "").split(","):
+        s = seg.strip()
+        if not s:
+            continue
+        low = s.lower()
+        if any(re.search(r"\b" + re.escape(st) + r"\b", low)
+               for st in _OUTER_STRIP_STEMS):
+            continue
+        out.append(s)
+    return ", ".join(out)
+
+
+def _entry_tags(entry: dict, picks: dict | None = None) -> str:
+    """角色外观 tags：本轮帽子外套为「摘掉/更换」时剥掉对应外观 tag。"""
+    tags = str((entry or {}).get("tags_en") or "").strip().rstrip(",")
+    outer = (picks or {}).get("outer") or {}
+    if outer.get("strip"):
+        tags = strip_outer_tags(tags)
+    return tags
+
+
+OUTER = _dedupe_by_zh(list(_FOUT_ALL))
+
 DIMS = {
     "compose": COMPOSE,
     "framing": FRAMING,
     "artstyle": ARTSTYLES,
     "outfit": OUTFITS,
     "footwear": FOOTWEAR,
+    "outer": OUTER,
     "background": BACKGROUNDS,
     "pose": POSES,
     "expression": EXPRESSIONS,
@@ -648,7 +735,8 @@ def art_theme_weight(theme_id: str) -> int:
 # 「模板是固定提示词，不能充满随机性」——随机感全部收回。想给模板换装 / 换画风，
 # 用预览面板显式指定（outfit_override 与维度 chip / fixed 锁定不受 plain 影响）。
 # v0.32.0：鞋袜一并置空（character sheet 惯例：鞋袜跟随角色原始设定）。
-_TPL_PLAIN = ["outfit", "footwear", "artstyle", "body", "framing"]
+# v0.33.0：帽子外套一并置空（模板底稿保留角色原始的帽子与外套）。
+_TPL_PLAIN = ["outfit", "footwear", "outer", "artstyle", "body", "framing"]
 THEMES = (
     {"id": "random", "label": "随机（按种子变化）", "outfit_kw": [], "bg_kw": []},
     {"id": "tpl_standing", "label": "【模板】纯色背景 · 正常站姿",
@@ -946,11 +1034,12 @@ def pick_variations(seed_int: int, theme: dict | None = None,
     LLM 通道与文生图 caption 都能吃中文，danbooru tag 串为次优兜底）。
     空串 = 不干预（主题子集重摇或全池随机）。
     v0.32.0：鞋袜维度不参与独立随机——先定穿搭，再按「穿搭家族」派生鞋袜
-    （见 feet_candidates）；穿搭空项（跟随角色原本 / 模板底稿 plain_dims）时
-    鞋袜同样不提及。
+    （见 feet_candidates）；穿搭空项（跟随角色原本 / 模板底稿）时鞋袜同样
+    不提及。
+    v0.33.0：帽子外套维度同构（outer_candidates，摘掉为主偶尔戴帽）。
     """
     picks = {tag: _pick_dim(tag, seed_int, theme) for tag in DIMS
-             if tag != "footwear"}
+             if tag not in ("footwear", "outer")}
     # plain_dims：列出的维度直接置空（机制保留，当前无主题使用）
     for dim in ((theme or {}).get("plain_dims") or []):
         if str(dim) in DIMS:
@@ -964,13 +1053,16 @@ def pick_variations(seed_int: int, theme: dict | None = None,
         picks["outfit"] = {"w": 0, "zh": text, "en": text}
     # v0.32.0：鞋袜跟随穿搭——穿搭 zh 非空才派生（家族候选内按种子摇）；
     # 空穿搭（含模板 plain_dims）置空 = 鞋袜跟随角色原本设定。
+    # v0.33.0：帽子外套同构派生（摘掉为主，偶尔戴该穿搭合适的帽子）。
     _plain = {str(d) for d in ((theme or {}).get("plain_dims") or [])}
     out_zh = str((picks.get("outfit") or {}).get("zh") or "").strip()
-    if "footwear" in _plain or not out_zh:
-        picks["footwear"] = {"w": 0, "zh": "", "en": ""}
-    else:
-        picks["footwear"] = _weighted_pick(
-            feet_candidates(out_zh), _sub(seed_int, f"feet|{out_zh}", 2 ** 30))
+    for tag, cands_fn in (("footwear", feet_candidates),
+                          ("outer", outer_candidates)):
+        if tag in _plain or not out_zh:
+            picks[tag] = {"w": 0, "zh": "", "en": ""}
+        else:
+            picks[tag] = _weighted_pick(
+                cands_fn(out_zh), _sub(seed_int, f"{tag}|{out_zh}", 2 ** 30))
     # v0.26.3：纯画风主题（art_*）只锁画风、不约束表情，实测会出现「婚纱 +
     # 困倦惺忪」这类违和。给一个通用立绘表情池（排除需要特定情境的困倦 /
     # 惊讶 / 疑惑），让纯画风主题下的表情也落在自然范围。
@@ -1053,25 +1145,28 @@ def apply_dim_state(picks: dict, seed_int: int, dim_state: dict | None,
             color = _weighted_pick(
                 OUTFIT_COLORS, _sub(sub_seed, "outfit_color", 2 ** 30))
             _apply_outfit_color(out, color)
-            # v0.32.0：重摇穿搭后鞋袜跟着新穿搭的家族候选重摇（鞋袜被锁定 /
-            # 禁用时不动——用户显式操作优先）
-            if "footwear" not in fixed and "footwear" not in disabled:
-                new_zh = str((out.get("outfit") or {}).get("zh") or "").strip()
-                out["footwear"] = (
-                    _weighted_pick(feet_candidates(new_zh),
-                                   _sub(sub_seed, f"feet|{new_zh}", 2 ** 30))
+            # v0.32.0/v0.33.0：重摇穿搭后鞋袜、帽子外套跟着新穿搭的家族候选
+            # 重摇（该维度被锁定/禁用时不动——用户显式操作优先）
+            new_zh = str((out.get("outfit") or {}).get("zh") or "").strip()
+            for tag, fn in (("footwear", feet_candidates),
+                            ("outer", outer_candidates)):
+                if tag in fixed or tag in disabled:
+                    continue
+                out[tag] = (
+                    _weighted_pick(fn(new_zh), _sub(sub_seed, f"{tag}|{new_zh}",
+                                                    2 ** 30))
                     if new_zh else {"w": 0, "zh": "", "en": ""})
     for dim in enabled:
         dim = str(dim)
         if dim not in DIMS or dim in fixed:
             continue
         if not str((out.get(dim) or {}).get("zh") or "").strip():
-            if dim == "footwear":
-                # v0.32.0：鞋袜重新启用 = 跟随当前穿搭的家族候选（不是全池乱摇）
+            if dim in ("footwear", "outer"):
+                # v0.32.0/v0.33.0：重新启用 = 跟随当前穿搭的家族候选（不是全池乱摇）
                 z = str((out.get("outfit") or {}).get("zh") or "").strip()
-                out["footwear"] = (
-                    _weighted_pick(feet_candidates(z),
-                                   _sub(seed_int, f"feet|{z}", 2 ** 30))
+                fn = feet_candidates if dim == "footwear" else outer_candidates
+                out[dim] = (
+                    _weighted_pick(fn(z), _sub(seed_int, f"{dim}|{z}", 2 ** 30))
                     if z else {"w": 0, "zh": "", "en": ""})
             else:
                 out[dim] = _pick_dim(dim, seed_int, theme, non_empty_only=True)
@@ -1079,21 +1174,27 @@ def apply_dim_state(picks: dict, seed_int: int, dim_state: dict | None,
         dim = str(dim)
         if dim in DIMS:
             out[dim] = _fixed_item(dim, zh)
-            if dim == "outfit" and "footwear" not in fixed:
-                # v0.32.0：锁定穿搭后鞋袜跟随锁定的穿搭家族重派生
+            if dim == "outfit":
+                # v0.32.0/v0.33.0：锁定穿搭后鞋袜、帽子外套跟随锁定穿搭重派生
                 z = str((out.get("outfit") or {}).get("zh") or "").strip()
-                out["footwear"] = (
-                    _weighted_pick(feet_candidates(z),
-                                   _sub(seed_int, f"feet|{z}", 2 ** 30))
-                    if z else {"w": 0, "zh": "", "en": ""})
+                for tag, fn in (("footwear", feet_candidates),
+                                ("outer", outer_candidates)):
+                    if tag in fixed:
+                        continue
+                    out[tag] = (
+                        _weighted_pick(fn(z), _sub(seed_int, f"{tag}|{z}",
+                                                   2 ** 30))
+                        if z else {"w": 0, "zh": "", "en": ""})
     for dim in disabled:
         dim = str(dim)
         if dim in DIMS:
             out[dim] = {"w": 0, "zh": "", "en": ""}
-        if dim == "outfit" and "footwear" not in fixed \
-                and "footwear" not in disabled:
-            # v0.32.0：本轮不提穿搭 → 鞋袜也不提（否则鞋袜与未提及的穿搭脱节）
-            out["footwear"] = {"w": 0, "zh": "", "en": ""}
+        if dim == "outfit":
+            # v0.32.0/v0.33.0：本轮不提穿搭 → 鞋袜、帽子外套也不提（否则与
+            # 未提及的穿搭脱节；该维度自身被锁定/禁用时不动）
+            for tag in ("footwear", "outer"):
+                if tag not in fixed and tag not in disabled:
+                    out[tag] = {"w": 0, "zh": "", "en": ""}
     return out
 
 
@@ -1170,9 +1271,10 @@ def _ref_clause_single_view(mode: str) -> str:
 # 维度展示顺序（预览面板 chip 与变化短语列表共用；v0.14.0 提取为常量单一来源）
 # v0.19.0：新增「画风」维度，排在构图之后（先定风格，再定穿什么/在哪）
 # v0.32.0：新增「鞋袜」维度，紧跟服装（鞋袜跟随穿搭家族派生）
+# v0.33.0：新增「帽子外套」维度（摘掉为主偶尔戴帽；文生图剥离对应外观 tag）
 DIM_ORDER = (("构图视图", "compose"), ("构图取景", "framing"),
              ("画风", "artstyle"), ("服装", "outfit"),
-             ("鞋袜", "footwear"),
+             ("鞋袜", "footwear"), ("帽子外套", "outer"),
              ("背景与光照", "background"), ("姿势动作", "pose"),
              ("表情", "expression"), ("体型", "body"))
 
@@ -1234,6 +1336,10 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "",
         elif label == "鞋袜":
             # v0.32.0：鞋袜跟随穿搭（danbooru legwear/footwear 两族逐项点名）
             parts.append(f"把鞋袜改为{zh}")
+        elif label == "帽子外套":
+            # v0.33.0：zh 本身是祈使短语（「摘掉帽子，脱掉外套」/「脱掉外套，
+            # 戴上贝雷帽」），直接作为子句；文生图侧同步剥离对应外观 tag
+            parts.append(zh)
         elif label == "背景与光照":
             parts.append(f"把背景改为{zh}")
         elif label == "姿势动作":
@@ -1297,17 +1403,19 @@ def build_t2i_prompt(entry: dict, picks: dict) -> str:
 
     v0.19.0：画风 tag 紧跟质量词（booru 惯例：质量/风格 → 角色 → 其余），
     这样底模更容易把整张图往该画风上拉。
+    v0.33.0：帽子外套维度为「摘掉/更换」时，先从角色 tags 里剥掉 hat/jacket
+    等外观 tag（否则底模按 tag 照画，主题换装也去不掉）。
     """
     base = "1girl, solo, best quality, looking at viewer"
-    tags = str(entry.get("tags_en") or "").strip().rstrip(",")
+    tags = _entry_tags(entry, picks)
     extra = []
     # v0.25.7：取景紧跟质量词；姿势 tag 里与取景矛盾的 "full body" 要摘掉
     # （否则「upper body」+「full body」同串，底模会按后者画全身）
     framing_en = str((picks.get("framing") or {}).get("en") or "").strip().strip(",")
     if framing_en:
         extra.append(framing_en)
-    for tag in ("artstyle", "compose", "outfit", "footwear", "background",
-                "pose", "expression", "body"):
+    for tag in ("artstyle", "compose", "outfit", "footwear", "outer",
+                "background", "pose", "expression", "body"):
         en = str((picks.get(tag) or {}).get("en") or "").strip().strip(",")
         if tag == "pose" and en and framing_en and "full body" not in framing_en:
             en = re.sub(r",\s*,", ",", en.replace("full body", "")).strip(", ")
@@ -1336,11 +1444,11 @@ def build_t2i_natural_local(entry: dict, picks: dict, custom: str = "") -> str:
     framing_en = str((picks.get("framing") or {}).get("en") or "").strip().strip(",")
     if framing_en:
         segs.append(framing_en)
-    tags = str(entry.get("tags_en") or "").strip().rstrip(",")
+    tags = _entry_tags(entry, picks)
     if tags:
         segs.append(tags)
-    for tag in ("compose", "outfit", "footwear", "background", "pose",
-                "expression", "body"):
+    for tag in ("compose", "outfit", "footwear", "outer", "background",
+                "pose", "expression", "body"):
         en = str((picks.get(tag) or {}).get("en") or "").strip().strip(",")
         if tag == "pose" and en and framing_en and "full body" not in framing_en:
             en = re.sub(r",\s*,", ",", en.replace("full body", "")).strip(", ")
@@ -1372,12 +1480,13 @@ def build_t2i_qwen_local(entry: dict, picks: dict, custom: str = "") -> str:
     feats = identity_feature_text(entry, "zh")
     if feats:
         subj += f"，角色的{feats}清晰可见、不可省略"
-    tags = str(entry.get("tags_en") or "").strip().rstrip(",")
+    tags = _entry_tags(entry, picks)
     if tags:
         subj += f"，外观参照这些特征：{tags}"
-    # ③ 动作 / 服装 / 鞋袜 / 表情
+    # ③ 动作 / 服装 / 鞋袜 / 帽子外套 / 表情
     acts = [str((picks.get(k) or {}).get("zh") or "").strip().strip("。")
-            for k in ("pose", "outfit", "footwear", "expression", "body")]
+            for k in ("pose", "outfit", "footwear", "outer", "expression",
+                      "body")]
     acts = [s for s in acts if s]
     if acts:
         subj += "，" + "；".join(acts)
@@ -1466,7 +1575,9 @@ def build_meta_prompt(entry: dict, picks: dict, custom: str = "",
                       ref_mode: str = "") -> str:
     name = str(entry.get("name") or "").strip() or "该角色"
     series = str(entry.get("series") or "").strip() or "未知作品"
-    tags = str(entry.get("tags_en") or "").strip() or "无"
+    # v0.33.0：帽子外套为「摘掉/更换」时剥掉对应外观 tag，避免元提示词里的
+    # tags 与维度指令（摘掉帽子）自相矛盾
+    tags = _entry_tags(entry, picks) or "无"
     # v0.29.4：参考图形态分流（none/single/multi）。旧版对所有情况都说
     # 「若参考图是多视角设定稿必须收敛为单张立绘」——三/四视图模板撞上这句
     # 就是自相矛盾（前面要求并列多视角、后面要求收敛单图）；无参考图时更是
@@ -1654,7 +1765,8 @@ def build_t2i_meta_prompt(entry: dict, picks: dict, style: str,
                           custom: str = "") -> str:
     name = str(entry.get("name") or "").strip() or "该角色"
     series = str(entry.get("series") or "").strip()
-    tags = str(entry.get("tags_en") or "").strip() or "无"
+    # v0.33.0：帽子外套为「摘掉/更换」时剥掉对应外观 tag
+    tags = _entry_tags(entry, picks) or "无"
     extra = str(custom or "").strip()
     feat_zh = identity_feature_text(entry, "zh")
     feat_en = identity_feature_text(entry, "en")
