@@ -2065,6 +2065,41 @@ def _delete_card_files(plugin, paths) -> int:
     return n
 
 
+def _trash_files(plugin, paths) -> tuple:
+    """把 data 目录内的文件**移进回收站**而非直接删除，返回 (移动数, 回收站目录)。
+
+    v0.19.5 事故教训（用户实测）：调试页「清空老婆立绘库」直接把 portraits/
+    下的文件 unlink 了，误点之后角色的立绘彻底找不回来。调试类破坏性动作一律
+    先搬到 `data/_trash/<时间戳>/<原相对路径>`——误点还能手动搬回原处，
+    而且不会悄悄占着 portraits/（不影响库存计数与配额判定）。
+    """
+    moved = 0
+    if not paths:
+        return moved, ""
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    trash_root = Path(plugin._data_dir) / "_trash" / stamp
+    try:
+        data_root = Path(plugin._data_dir).resolve()
+    except Exception:
+        return moved, ""
+    for p in paths:
+        fp = _safe_data_file(plugin, str(p or ""))
+        if fp is None:
+            continue
+        try:
+            rel = fp.resolve().relative_to(data_root)
+        except Exception:
+            rel = Path(fp.name)
+        dest = trash_root / rel
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(fp), str(dest))
+            moved += 1
+        except Exception:
+            logger.warning(f"[{PLUGIN_NAME}] 移入回收站失败：{fp}")
+    return moved, (str(trash_root) if moved else "")
+
+
 async def h_records_draws(plugin) -> dict:
     """抽取记录分页（draws 表，updated_at 倒序）。可按 user_id / date 过滤。"""
     if not plugin._store:
@@ -2134,12 +2169,14 @@ async def h_debug_clear_draws(plugin) -> dict:
     if not uid and not date:
         return err("清空全部签属于高危操作：请明确指定 user_id 或 date")
     rows = plugin._store.clear_draws(uid, date)
-    deleted = _delete_card_files(plugin, [r.get("card_path") for r in rows])
+    # v0.19.5：卡图也进回收站（误清还能手动找回），不再 unlink
+    trashed, trash_dir = _trash_files(plugin, [r.get("card_path") for r in rows])
     users_reset = len({r.get("user_id") for r in rows if r.get("user_id")})
     plugin._store.debug_log("reset", uid or date,
                             f"清抽取签 {len(rows)} 条（{date or '全部日期'}），"
                             f"扣减计数并重派 {users_reset} 位用户种子")
-    return ok({"cleared": len(rows), "cards_deleted": deleted,
+    return ok({"cleared": len(rows), "cards_deleted": trashed,
+               "cards_trashed": trashed, "trash_dir": trash_dir,
                "users_reset": users_reset})
 
 
@@ -2201,24 +2238,42 @@ async def h_debug_reset_char_day(plugin) -> dict:
         return err("缺少 char_id")
     date = str(body.get("date") or plugin._today()).strip()
     res = plugin._store.reset_char_day(cid, date)
-    deleted = _delete_card_files(plugin, res["removed_files"])
-    plugin._store.debug_log("reset", cid, f"{date} 重试当日生成，删图 {deleted} 张")
+    trashed, trash_dir = _trash_files(plugin, res["removed_files"])
+    plugin._store.debug_log("reset", cid,
+                            f"{date} 重试当日生成，移入回收站 {trashed} 张")
     return ok({"char_id": cid, "date": date, "cleared_draws": res["cleared_draws"],
-               "files_deleted": deleted})
+               "files_deleted": trashed, "files_trashed": trashed,
+               "trash_dir": trash_dir})
 
 
 async def h_debug_clear_portraits(plugin) -> dict:
-    """清空某角色全部立绘库存（文件 + 行），下次抽取从 0 开始重新生成。"""
+    """清空某角色全部立绘库存（行 + 文件移入回收站），下次抽取从 0 重新生成。
+
+    ⚠️ 作用对象是**角色**，不是某个 QQ 用户的抽签记录：
+    清掉的是「角色详情」里那面立绘墙（所有用户共用），与 draws/draw_events 无关。
+    v0.19.5 事故：用户点调试页的「清空老婆立绘库」以为是清某个用户的抽取记录，
+    结果角色立绘全没了（当时是直接 unlink，无法恢复）。两道修正：
+      ① 必须显式带 confirm=true 才执行（防误点/误调）；
+      ② 文件 `shutil.move` 进 data/_trash/<时间戳>/，误点还能手动搬回。
+    """
     if not plugin._store:
         return err("插件未初始化完成")
     body = await _body()
     cid = str(body.get("char_id") or "").strip()
     if not cid:
         return err("缺少 char_id")
+    if not bool(body.get("confirm")):
+        return err("该操作清空的是「角色」的立绘库（不是某个用户的抽签记录），"
+                   "请带 confirm=true 再次提交")
     files = plugin._store.clear_char_portraits(cid)
-    deleted = _delete_card_files(plugin, files)
-    plugin._store.debug_log("reset", cid, f"清空立绘库 {len(files)} 张")
-    return ok({"char_id": cid, "cleared": len(files), "files_deleted": deleted})
+    trashed, trash_dir = _trash_files(plugin, files)
+    plugin._store.debug_log(
+        "reset", cid,
+        f"清空立绘库 {len(files)} 张（回收站：{trash_dir or '—'}）")
+    logger.warning(f"[{PLUGIN_NAME}] 清空角色立绘库 {cid}：{len(files)} 张，"
+                   f"已移入 {trash_dir or '（无文件）'}")
+    return ok({"char_id": cid, "cleared": len(files), "files_deleted": trashed,
+               "files_trashed": trashed, "trash_dir": trash_dir})
 
 
 # ---------- 抽签记录 / 统计 / 用户查询 / 调试（v0.9.0） ----------

@@ -183,6 +183,21 @@ def main():
           "String(it.seed" in template
           and '(it.seed || "").slice' not in template)
 
+    # 12) 危险操作分域（v0.19.5 事故）：调试页「清空老婆立绘库」作用对象是**角色**，
+    #     却被放在「今日签操作（某个 QQ）」那一排，用户误点后该角色的立绘库（所有用户
+    #     共用）被清空且文件被 unlink 无法恢复。三条守卫：
+    #     ① 清角色立绘库必须服务端 confirm；② 破坏性删除走回收站（shutil.move）；
+    #     ③ 前端把「按角色清库」与「按用户清签」拆成两个入口。
+    check("清角色立绘库需服务端 confirm",
+          'body.get("confirm")' in api and "confirm: true" in page)
+    check("破坏性删除走回收站（_trash_files + shutil.move）",
+          "_trash_files" in api and "shutil.move" in api and "_trash" in page)
+    check("前端按角色清库独立入口", "doClearCharPortraits" in page
+          and "按角色清库（危险 · 与 QQ 用户无关）" in page)
+    check("前端有按用户清空全部签", "clear_all_draws" in page)
+    check("clear_portraits 不再挂在今日签快捷操作里",
+          "doQuickAction('clear_portraits')" not in page)
+
     if FAILURES:
         print(f"test_webui_contract: {len(FAILURES)} FAILED")
         sys.exit(1)

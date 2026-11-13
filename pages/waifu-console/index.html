@@ -1539,16 +1539,46 @@
                               :disabled="!dbgState.draw" @click="doQuickAction('reset_char_day')">
                       {{ delArm === "quick:reset_char_day" ? "再点确认：重试今日老婆立绘" : "重试今日老婆立绘" }}
                     </n-button>
+                    <!-- v0.19.5：用户真正要的「清某个 QQ 用户的抽取记录」——这里明确补上。
+                         原来这条需求被误当成「清空老婆立绘库」（那是按角色清库，见下一张卡） -->
                     <n-button size="small" type="error" :loading="dbgBusy"
-                              :disabled="!dbgState.draw" @click="doQuickAction('clear_portraits')">
-                      {{ delArm === "quick:clear_portraits" ? "再点确认：清空老婆立绘库" : "清空老婆立绘库" }}
+                              @click="doQuickAction('clear_all_draws')">
+                      {{ delArm === "quick:clear_all_draws"
+                         ? "再点确认：删除该用户全部签（所有日期）"
+                         : "清空该用户全部签（所有日期）" }}
                     </n-button>
                   </n-space>
                   <div class="rec-note">
                     「重置」只删今天这一条签（连带卡图与当天流水），历史记录不动；
-                    「强制换签」把 nonce+1 重派种子，下次「今日老婆」出新角色，不受每日换签上限限制。
+                    「清空该用户全部签」才是把这个 QQ 的所有抽签记录都删掉（连带卡图，种子重派）；
+                    「强制换签」把 nonce+1 重派种子，下次「今日老婆」出新的角色，不受每日换签上限限制。
                   </div>
                 </n-space>
+              </n-card>
+
+              <!-- v0.19.5 事故修正：按角色清库独立成块。
+                   原「清空老婆立绘库」和「今日签操作」混在同一排，用户以为它清的是
+                   某个 QQ 用户的抽取记录，点了之后该角色（所有用户共用）的立绘全没了。 -->
+              <n-card size="small" :bordered="true" v-if="dbgState && dbgState.draw">
+                <template #header>
+                  <div class="sec-title" style="margin: 0;">按角色清库（危险 · 与 QQ 用户无关）</div>
+                </template>
+                <n-alert type="error" :bordered="false" style="margin-bottom: 10px;">
+                  清空的是<b>角色本人</b>的立绘库：{{ dbgState.draw.char_name }}（{{ dbgState.draw.char_id }}）名下
+                  <b>{{ portraitCount(dbgState.draw.char_id) }}</b> 张立绘——「角色详情」里那面立绘墙会变空，
+                  <b>所有 QQ 用户</b>都受影响。它<b>不是</b>「清除某个用户的抽签记录」，
+                  那个是上一张卡的「清空该用户全部签」。
+                </n-alert>
+                <n-button size="small" type="error" :loading="dbgBusy"
+                          @click="doClearCharPortraits">
+                  {{ delArm === "quick:clear_portraits"
+                     ? "再点确认：删除该角色全部立绘"
+                     : "清空该角色立绘库（含文件）" }}
+                </n-button>
+                <div class="rec-note">
+                  文件不会被真删：会移到 data/_trash/（按时间戳分目录、保留原相对路径），误点可手动搬回。
+                  清空后该角色下次抽卡按「立绘不足配额」重新生成。
+                </div>
               </n-card>
 
               <n-card size="small" :bordered="true">
@@ -1656,8 +1686,12 @@
                   </n-gi>
                   <n-gi>
                     <div class="debug-card">
-                      <b>清抽取签</b>
-                      <div class="bind-tip">删除签记录、对应流水并连带删卡图文件；用户与日期至少填一个（都空会被拒绝，防误清全部）。</div>
+                      <b>清抽取签（按用户 / 日期）</b>
+                      <div class="bind-tip">
+                        <b>这才是「清某个 QQ 用户的抽取记录」</b>：删签记录 + 流水，
+                        卡图移入 data/_trash/（可找回）；<b>立绘库完全不动</b>。
+                        用户与日期至少填一个（都空会被拒绝，防误清全部）。
+                      </div>
                       <n-space size="small" align="center" :wrap="true">
                         <n-input v-model:value="dbgUid2" size="small" placeholder="用户 ID（可空）" style="width: 150px;"></n-input>
                         <n-input v-model:value="dbgDate2" size="small" placeholder="日期（可空）" style="width: 160px;"></n-input>
@@ -1669,7 +1703,7 @@
                   <n-gi>
                     <div class="debug-card">
                       <b>重试角色当日生成</b>
-                      <div class="bind-tip">删该角色当日立绘与卡图（签保留），下次有人抽到即重新生成；失败出图后用它重画。</div>
+                      <div class="bind-tip">把该角色<b>当日</b>立绘与卡图移入回收站（签保留），下次有人抽到即重新生成；失败出图后用它重画。</div>
                       <n-space size="small" align="center" :wrap="true">
                         <n-select v-model:value="dbgChar" size="small" filterable :options="galCharOpts"
                                   placeholder="选择角色" style="width: 200px;"></n-select>
@@ -5023,6 +5057,14 @@
                             ((res && res.cleared) || 0) + " 条，连带删卡 " +
                             ((res && res.cards_deleted) || 0) +
                             " 张；统计次数已同步扣减，下次抽取种子已重派）");
+          } else if (kind === "clear_all_draws") {
+            // v0.19.5：不带 date = 清该用户所有日期的签（用户口径：清「所选 QQ 用户
+            // 抽取的老婆记录」）；卡图进回收站，可找回
+            res = await apiPost("debug/clear_draws", { user_id: uid });
+            message.success("已清空 " + uid + " 的全部签记录（" +
+                            ((res && res.cleared) || 0) + " 条，卡图移入回收站 " +
+                            ((res && res.cards_trashed) || 0) + " 张；统计次数已扣减、" +
+                            "种子已重派）。立绘库不受影响。");
           } else if (kind === "rerender") {
             await apiPost("debug/rerender", { user_id: uid, date: today });
             message.success("已按现有立绘重绘卡片，可到「抽签记录」查看");
@@ -5031,10 +5073,35 @@
               { char_id: row.char_id, date: today });
             message.success("已重试今日老婆的立绘生成：" +
                             (row.char_name || row.char_id));
-          } else if (kind === "clear_portraits") {
-            res = await apiPost("debug/clear_portraits", { char_id: row.char_id });
-            message.success("已清空 " + (row.char_name || row.char_id) + " 的立绘库");
           }
+          delArm.value = "";
+          refreshAfterDebug();
+        } catch (e) { /* 已提示 */ } finally {
+          dbgBusy.value = false;
+        }
+      }
+      // v0.19.5：按角色清空立绘库（独立入口，必须两段确认 + 弹窗里点名角色与张数）。
+      // 事故背景：这个动作原来是「今日签操作」里的一颗按钮，用户以为是清某个 QQ
+      // 用户的抽取记录，点了之后该角色的立绘墙（所有用户共用）被清空、文件也没了。
+      async function doClearCharPortraits() {
+        if (!dbgState.value || !dbgState.value.draw) {
+          message.error("今天还没有抽签记录，不知道该清哪个角色");
+          return;
+        }
+        var row = dbgState.value.draw;
+        if (!armDelete("quick:clear_portraits")) {
+          message.warning("这是按角色清空立绘库（" + (row.char_name || row.char_id) +
+                          " 共 " + portraitCount(row.char_id) +
+                          " 张，所有用户共用），再点一次确认");
+          return;
+        }
+        dbgBusy.value = true;
+        try {
+          var res = await apiPost("debug/clear_portraits",
+                                  { char_id: row.char_id, confirm: true });
+          message.success("已清空 " + (row.char_name || row.char_id) + " 的立绘库（" +
+                          ((res && res.cleared) || 0) + " 张，已移入回收站" +
+                          ((res && res.trash_dir) ? "：" + res.trash_dir : "") + "）");
           delArm.value = "";
           refreshAfterDebug();
         } catch (e) { /* 已提示 */ } finally {
@@ -5546,6 +5613,7 @@
         dbgRecent: dbgRecent, dbgAudit: dbgAudit, dbgConfigRows: dbgConfigRows,
         loadDebugState: loadDebugState, loadDebugHistory: loadDebugHistory,
         pickRecentUser: pickRecentUser, doQuickAction: doQuickAction,
+        doClearCharPortraits: doClearCharPortraits,
         simF: simF, simResult: simResult, simBusy: simBusy,
         simScopeText: simScopeText, cfgBoundGroups: cfgBoundGroups,
         doSimulate: doSimulate, simulateNext: simulateNext, pickSimGroup: pickSimGroup,

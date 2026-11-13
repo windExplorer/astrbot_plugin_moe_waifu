@@ -371,6 +371,28 @@ def test_discover_add_core(tmp: Path):
     st.close()
 
 
+def test_trash_files(tmp: Path):
+    """v0.19.5：调试破坏性动作一律移入回收站，不再 unlink（误点可手动找回）。"""
+    st, plugin = fresh(tmp)
+    img_rel = "portraits/a_char/0.png"
+    (tmp / "portraits" / "a_char").mkdir(parents=True, exist_ok=True)
+    (tmp / img_rel).write_bytes(b"PNG0")
+    card_rel = "cards/u1.png"
+    (tmp / "cards").mkdir(parents=True, exist_ok=True)
+    (tmp / card_rel).write_bytes(b"CARD")
+    moved, trash_dir = api._trash_files(plugin, [img_rel, card_rel])
+    check("回收站移动数量", moved == 2, str(moved))
+    check("原位置已清空（库存计数不受影响）",
+          not (tmp / img_rel).exists() and not (tmp / card_rel).exists())
+    check("文件在 _trash/<时间戳>/ 下保留原相对路径",
+          trash_dir and (Path(trash_dir) / img_rel).is_file()
+          and (Path(trash_dir) / card_rel).is_file(), trash_dir)
+    check("越界路径不搬（data 目录外）",
+          api._trash_files(plugin, ["../escape.png"])[0] == 0)
+    check("空清单安全", api._trash_files(plugin, [])[0] == 0)
+    st.close()
+
+
 def main():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
@@ -384,6 +406,7 @@ def main():
                      ("debug_history", test_debug_history),
                      ("portraits_seq_meta", test_portraits_seq_and_meta),
                      ("discover_add", test_discover_add_core),
+                     ("trash_files", test_trash_files),
                      ("cores", test_cores)):
         with tempfile.TemporaryDirectory() as td:
             print(f"--- {name} ---")
