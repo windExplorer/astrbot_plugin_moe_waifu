@@ -198,10 +198,13 @@ def main():
           and ':options="batchSeriesOpts"' in page)
     # v0.28.0：调试页分页（按使用频率排序，回收站最后）
     check("调试页分页存在且回收站排最后",
-          '{ key: "state", label: "状态查询" }' in page
+          '{ key: "state", label: "状态与修签" }' in page
           and '{ key: "trash", label: "回收站" }' in page
           and page.index('{ key: "state"')
           < page.index('{ key: "trash"'))
+    check("状态查询与修签合并在同一页（不再拆成 fix）",
+          "修签 / 重渲染" not in page
+          and page.count("dbgTab === 'state'") >= 5)
     check("调试页九张卡片都受分页控制", page.count("dbgTab === ") >= 8,
           str(page.count("dbgTab === ")))
     # v0.26.2：批量停用/启用的两段确认必须看得见（旧版首次点击静默 return）

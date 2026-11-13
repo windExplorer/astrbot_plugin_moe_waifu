@@ -1562,8 +1562,8 @@
           <!-- ============ 调试工具（v0.9.0） ============ -->
           <div v-if="menu === 'debug'">
             <!-- v0.28.0：调试页改成分页——原来一页堆了 9 张卡，找功能要滚半天。
-                 tab 顺序按使用频率排：状态查询 → 修签/重渲染 → 操作审计 →
-                 诊断 → 回收站（最后）。
+                 tab 顺序按使用频率排：状态与修签 → 操作审计 → 诊断 →
+                 回收站（最后）。
                  ⚠️ 容器用普通 div + flex（stack-v），不用 n-space：vendored
                  naive 的 Space 给槽子元素包固定 key，v-if 切 tab 会撞 key
                  导致内容串页。 -->
@@ -1700,7 +1700,7 @@
               </n-card>
 
               <!-- 星语式：查到状态后才出现，按钮自动带上当前 QQ 与今天，不用重复填参数 -->
-              <n-card size="small" :bordered="true" v-if="dbgTab === 'fix' && dbgState">
+              <n-card size="small" :bordered="true" v-if="dbgTab === 'state' && dbgState">
                 <template #header>
                   <div class="sec-title" style="margin: 0;">今日签操作 · {{ dbgStateUid }}
                     <span class="cnt">查到状态才出现 · 已带好 QQ 号与 {{ dbgState.today }} · 均需两段确认</span>
@@ -1753,7 +1753,7 @@
               <!-- v0.19.5 事故修正：按角色清库独立成块。
                    原「清空老婆立绘库」和「今日签操作」混在同一排，用户以为它清的是
                    某个 QQ 用户的抽取记录，点了之后该角色（所有用户共用）的立绘全没了。 -->
-              <n-card size="small" :bordered="true" v-if="dbgTab === 'fix' && dbgState && dbgState.draw">
+              <n-card size="small" :bordered="true" v-if="dbgTab === 'state' && dbgState && dbgState.draw">
                 <template #header>
                   <div class="sec-title" style="margin: 0;">按角色清库（危险 · 与 QQ 用户无关）</div>
                 </template>
@@ -1849,7 +1849,7 @@
                 </n-space>
               </n-card>
 
-              <n-card size="small" title="重渲染 · 指定其它日期" :bordered="true" v-if="dbgTab === 'fix' && dbgState">
+              <n-card size="small" title="重渲染 · 指定其它日期" :bordered="true" v-if="dbgTab === 'state' && dbgState">
                 <div class="bind-tip" style="margin-top: 0;">已自动带上当前 QQ 号；只有想重画往日卡片时才改日期，今天的卡直接用上面的「重绘卡片」。不重抽、不生图、不写抽签流水。</div>
                 <n-space size="small" align="center" :wrap="true" style="margin-top: 8px;">
                   <n-input v-model:value="dbgRenderUid" size="small" placeholder="用户 ID"
@@ -1860,7 +1860,7 @@
                 </n-space>
               </n-card>
 
-              <n-card size="small" title="高级 · 指定任意目标（两段确认）" :bordered="true" v-if="dbgTab === 'fix' && dbgState">
+              <n-card size="small" title="高级 · 指定任意目标（两段确认）" :bordered="true" v-if="dbgTab === 'state' && dbgState">
                 <div class="bind-tip" style="margin-top: 0; margin-bottom: 10px;">
                   上面的按钮已自动带好当前 QQ 与今天；这里用于清理其它日期、其它用户或其它角色，
                   输入框在查询状态时已尽量预填。同样需要两段确认。
@@ -5568,8 +5568,9 @@
       // ---- 调试工具 ----
       // ---- 调试页分页（v0.28.0）：按使用频率排序，回收站压最后 ----
       var dbgTabs = [
-        { key: "state", label: "状态查询" },
-        { key: "fix", label: "修签 / 重渲染" },
+        // 状态查询与修签本是同一条工作流（查到状态 → 下面直接操作），
+        // 拆成两页要来回切，v0.28.1 合并。
+        { key: "state", label: "状态与修签" },
         { key: "audit", label: "操作审计" },
         { key: "diag", label: "诊断" },
         { key: "trash", label: "回收站" },
