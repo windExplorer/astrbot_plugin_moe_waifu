@@ -62,6 +62,7 @@ galFillBusy galFillLabel startGalFill stopGalFill
 galFillOpen galFillRows galFillHave galFillQuota galFillLoading
 rerollFillRow rerollFillAll doFillStart
 galQueueTip galSubmitting
+queueTopCount queuePanelOpen queueRows
 avatarOf hashColor thumbOf colorOf rerollLabel tv brandColor zhLocale
 bindRows bindSeriesOpts bindRawOpen bindLoading loadBindPools onBindRawInput
 addBindRow setRowGid setRowSeries removeBindRow
@@ -88,6 +89,7 @@ ROUTES = """
 /prompt/pools
 /batch/preview /batch/start /batch/status /batch/stop
 /batch/char_start /batch/char_preview
+/queue/list
 /works/discover /works/discover_add
 /pools/import /pools/duplicates /pools/dedupe /relational/status
 /portraits/set_active /trash/list /trash/restore /trash/purge

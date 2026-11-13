@@ -243,6 +243,10 @@
      page-top（状态栏）固定、page-scroll 独立滚动、page-foot（分页）固定。 */
   .page-top { flex: none; padding: 12px 22px 10px;
     border-bottom: 1px solid rgba(128,128,128,.14); }
+  /* v0.34.2：顶部队列指示器（点击展开队列面板） */
+  .top-queue { cursor: pointer; user-select: none; font-size: 13px; opacity: .75; }
+  .top-queue:hover { opacity: 1; text-decoration: underline; }
+  .top-queue.busy { color: #d63384; font-weight: 600; opacity: 1; }
   .page-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 16px 22px 22px; }
   .page-foot { flex: none; padding: 10px 22px; display: flex; justify-content: center;
     border-top: 1px solid rgba(128,128,128,.14); }
@@ -380,6 +384,12 @@
               {{ meta.anima_ready ? "萌绘已就绪" : "萌绘未安装/未启用" }}
             </n-tag>
             <n-tag :bordered="false" size="small">立绘配额 {{ meta.quota }}/角色</n-tag>
+            <!-- v0.34.2：全局出图队列指示器（点击展开队列面板，全局可见） -->
+            <span class="top-queue" :class="{ busy: queueTopCount > 0 }"
+                  title="点击查看出图队列（生成立绘 / 试画 / 头像 / 批量）"
+                  @click="queuePanelOpen = true">
+              出图队列 {{ queueTopCount > 0 ? "· " + queueTopCount : "· 空闲" }}
+            </span>
             <n-button size="tiny" secondary :loading="refreshing" @click="refreshAll">
               刷新全部
             </n-button>
@@ -2757,6 +2767,32 @@
           <n-button size="small" @click="galFillOpen = false">取消</n-button>
           <span class="bind-tip" style="margin-top: 0;"
                 v-if="batchRunning">批量队列运行中，请等待完成</span>
+        </n-space>
+      </n-space>
+    </n-modal>
+
+    <!-- ============ 全局出图队列面板（v0.34.2）：合并生成立绘 / 试画 / 头像 /
+         批量补图 / 批量头像；顶部队列指示器点击展开。preset 须 dialog ============ -->
+    <n-modal v-model:show="queuePanelOpen" preset="dialog" title="出图队列"
+             style="width: 620px;">
+      <n-space vertical size="medium">
+        <div class="bind-tip" v-if="queueRows.length === 0">
+          当前没有排队 / 进行中的出图任务。
+        </div>
+        <div class="stack" v-if="queueRows.length > 0"
+             style="max-height: 340px; overflow-y: auto;">
+          <div v-for="row in queueRows" :key="row.key"
+               style="display: flex; align-items: center; gap: 8px;">
+            <n-tag size="small" :bordered="false" :type="row.tagType"
+                   style="flex: none;">{{ row.kindLabel }}</n-tag>
+            <span style="flex: 1; font-size: 13px;">{{ row.label }}</span>
+            <span class="bind-tip" style="margin-top: 0;">{{ row.statusText }}</span>
+          </div>
+        </div>
+        <n-space align="center">
+          <n-button size="small" @click="queuePanelOpen = false">关闭</n-button>
+          <n-button size="small" v-if="batchRunning" type="warning"
+                    @click="doBatchStop">停止批量补图</n-button>
         </n-space>
       </n-space>
     </n-modal>
@@ -6105,6 +6141,78 @@
           else if (galQueueTimer) { clearTimeout(galQueueTimer); galQueueTimer = null; }
         }, 2000);
       }
+      // ---- v0.34.2：全局出图队列（顶部指示器 + 队列面板，跨页签可见）----
+      // 合并三个来源：单张任务（jobs：试画/生成立绘/头像）、批量补图、批量头像。
+      var queueTop = Vue.ref({ jobs: [], batch: null, avatar_batch: null });
+      var queuePanelOpen = Vue.ref(false);
+      var queueTopTimer = null;
+      function pollQueueTop() {
+        return apiPost("queue/list", {}).then(function (res) {
+          if (res) { queueTop.value = res; }
+        }).catch(function () { /* 静默：指示器不打扰 */ });
+      }
+      var queueTopCount = Vue.computed(function () {
+        var qt = queueTop.value || {};
+        var n = (qt.jobs || []).filter(function (j) {
+          return j.status === "running" || j.status === "queued";
+        }).length;
+        var b = qt.batch;
+        if (b && b.running) { n += Math.max(0, (b.total || 0) - (b.done || 0)); }
+        var ab = qt.avatar_batch;
+        if (ab && ab.running) { n += Math.max(0, (ab.total || 0) - (ab.done || 0)); }
+        return n;
+      });
+      var KIND_LABELS = { try: "试画", refill: "生成立绘", avatar: "头像" };
+      var queueRows = Vue.computed(function () {
+        var qt = queueTop.value || {};
+        var rows = [];
+        var jobs = (qt.jobs || []).slice();
+        var active = jobs.filter(function (j) {
+          return j.status === "running" || j.status === "queued";
+        });
+        var done = jobs.filter(function (j) {
+          return j.status !== "running" && j.status !== "queued";
+        });
+        active.sort(function (a, b) {
+          if (a.status !== b.status) return a.status === "running" ? -1 : 1;
+          return (a.queue_pos || 0) - (b.queue_pos || 0);
+        });
+        done.sort(function (a, b) { return (b.created || 0) - (a.created || 0); });
+        active.forEach(function (j) {
+          rows.push({
+            key: j.job_id, kindLabel: KIND_LABELS[j.kind] || "生成立绘",
+            label: j.label || j.char_id || "",
+            statusText: j.status === "running"
+              ? "生成中" : "排队中（第 " + (j.queue_pos || 1) + " 位）",
+            tagType: j.status === "running" ? "info" : "default"
+          });
+        });
+        done.slice(0, 6).forEach(function (j) {
+          rows.push({
+            key: j.job_id, kindLabel: KIND_LABELS[j.kind] || "生成立绘",
+            label: j.label || j.char_id || "",
+            statusText: j.status === "ok"
+              ? "完成 · 耗时 " + fmtDur(j.duration_ms)
+              : "失败：" + String(j.error || j.status || "").slice(0, 40),
+            tagType: j.status === "ok" ? "success" : "error"
+          });
+        });
+        var b = qt.batch;
+        if (b && b.running) {
+          rows.push({ key: "__batch__", kindLabel: "批量补图",
+                      label: "共 " + b.total + " 张（已完成 " + (b.done || 0)
+                             + "，失败 " + (b.failed || 0) + "）",
+                      statusText: "进行中", tagType: "info" });
+        }
+        var ab = qt.avatar_batch;
+        if (ab && ab.running) {
+          rows.push({ key: "__avbatch__", kindLabel: "批量头像",
+                      label: "共 " + ab.total + " 张（已完成 " + (ab.done || 0)
+                             + "，失败 " + (ab.failed || 0) + "）",
+                      statusText: "进行中", tagType: "info" });
+        }
+        return rows;
+      });
       // ---- v0.32.1/2：补齐配额（详情页单角色批量补图，队列与列表页批量共用） ----
       // v0.32.2：改预览制——点「补齐配额」先弹 dry-run 弹窗列出逐张主题序列，
       // 可单张换一个 / 整体重随机，确认后的序列经 char_start 的 themes 原样
@@ -7365,6 +7473,10 @@
                             loadLlmProviders(), loadThemes()]);
       });
 
+      // v0.34.2：全局出图队列轮询（顶部指示器 + 队列面板共用一份数据）
+      pollQueueTop();
+      queueTopTimer = setInterval(pollQueueTop, 3000);
+
       return {
         theme: theme, themeOverrides: themeOverrides,
         zhLocale: zhLocale, brandColor: brandColor,
@@ -7437,6 +7549,8 @@
         galCharId: galCharId, galCharOpts: galCharOpts, galItems: galItems,
         loadingGal: loadingGal, refillError: refillError,
         galQueueTip: galQueueTip, galSubmitting: galSubmitting,
+        queueTopCount: queueTopCount, queuePanelOpen: queuePanelOpen,
+        queueRows: queueRows,
         doDeletePortrait: doDeletePortrait, movePortraitToRef: movePortraitToRef,
         moveRefToPortrait: moveRefToPortrait,
         loadGallery: loadGallery,

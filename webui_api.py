@@ -1277,7 +1277,7 @@ async def h_job_start(plugin) -> dict:
     job_id = f"{kind}:{cid}:{int(time.time() * 1000)}"
     plugin._jobs[job_id] = {"status": "queued", "kind": kind, "char_id": cid,
                             "entry_label": pool.entry_label(entry), "src_path": "",
-                            "theme": theme_id}
+                            "theme": theme_id, "created": time.time()}
     _prune_jobs(plugin)
     # v0.34.0：提交即入队返回（status=queued + queue_pos），前端可继续配置
     # 下一张；worker 串行执行，排队等待不吃 draw_timeout
@@ -1426,6 +1426,45 @@ async def _run_job(plugin, job_id: str, entry: dict, kind: str,
     if job.get("src_path"):
         job["preview"] = _thumb_data_url(job["src_path"], 420)
     plugin._jobs[job_id] = job
+
+
+async def h_queue_list(plugin) -> dict:
+    """全局出图队列快照（v0.34.2）：工坊顶部指示器 + 队列面板共用。
+
+    合并三类来源：单张任务（_jobs：试画 / 生成立绘 / 头像，含排队位次）、
+    批量补图队列（BatchRunner）、批量头像队列（AvatarRunner）。
+    活跃（queued / running）在前；最近完成的任务带一段（最多 8 条，供面板
+    展示结果，随 _prune_jobs 自然淡出）。
+    """
+    dq = _draw_queue(plugin)
+    active, finished = [], []
+    for jid, job in (getattr(plugin, "_jobs", {}) or {}).items():
+        status = str(job.get("status") or "")
+        row = {
+            "job_id": jid, "kind": str(job.get("kind") or "refill"),
+            "label": str(job.get("entry_label") or ""),
+            "char_id": str(job.get("char_id") or ""),
+            "status": status,
+            "created": float(job.get("created") or 0),
+            "duration_ms": int(job.get("duration_ms") or 0),
+        }
+        if status == "queued":
+            row["queue_pos"] = dq.position(jid)
+            active.append(row)
+        elif status == "running":
+            active.append(row)
+        elif status in ("ok", "error", "timeout"):
+            row["error"] = str(job.get("error") or "")[:120]
+            finished.append(row)
+    active.sort(key=lambda r: (0 if r["status"] == "running" else 1,
+                               r.get("queue_pos") or 0))
+    finished.sort(key=lambda r: -r["created"])
+    runner = getattr(plugin, "_batch_runner", None)
+    batch = runner.snapshot() if runner is not None else None
+    av = getattr(plugin, "_avatar_runner", None)
+    avatar_batch = av.snapshot() if av is not None else None
+    return ok({"jobs": active + finished[:8], "batch": batch,
+               "avatar_batch": avatar_batch})
 
 
 async def h_job_status(plugin) -> dict:
@@ -4431,7 +4470,8 @@ async def h_avatar_generate(plugin) -> dict:
     workflow = str(body.get("workflow") or "").strip()
     job_id = f"avatar:{cid}:{int(time.time() * 1000)}"
     plugin._jobs[job_id] = {"status": "queued", "kind": "avatar", "char_id": cid,
-                            "entry_label": pool.entry_label(entry), "src_path": ""}
+                            "entry_label": pool.entry_label(entry), "src_path": "",
+                            "created": time.time()}
     _prune_jobs(plugin)
     # v0.34.0：头像生成同样进出图串行队列（与生成立绘共用，互不并发）
     pos = _draw_queue(plugin).enqueue(
@@ -4571,6 +4611,8 @@ def register(plugin) -> None:
         ("/works/set_cover", h_works_set_cover, ["POST"]),
         ("/jobs/start", h_job_start, ["POST"]),
         ("/jobs/status", h_job_status, ["GET", "POST"]),
+        # v0.34.2：全局出图队列快照（顶部指示器 + 队列面板）
+        ("/queue/list", h_queue_list, ["GET", "POST"]),
         ("/jobs/archive", h_job_archive, ["POST"]),
         ("/jobs/to_ref", h_job_to_ref, ["POST"]),
         ("/records/draws", h_records_draws, ["GET", "POST"]),
