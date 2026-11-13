@@ -128,6 +128,14 @@
   .dropzone.drag { background: rgba(214,51,132,.07); border-color: #d63384; }
   .ref-selected { outline: 3px solid #d63384; outline-offset: -1px; }
   .draw-ref { outline: 3px solid #e0a23c; outline-offset: -1px; }
+  /* v0.19.8：主参考/出卡源固定排前两位，卡片加框 + 淡色底以示区分
+     （inset 阴影做框，背景色只在卡片下部 meta 条可见，图片区域被 img 盖住） */
+  .pin-main { background: rgba(214,51,132,.10);
+    box-shadow: inset 0 0 0 2px rgba(214,51,132,.50); }
+  .pin-draw { background: rgba(224,162,60,.12);
+    box-shadow: inset 0 0 0 2px rgba(224,162,60,.50); }
+  .pin-main.pin-draw { background: rgba(214,51,132,.10);
+    box-shadow: inset 0 0 0 2px rgba(214,51,132,.50), inset 0 0 0 4px rgba(224,162,60,.50); }
   .drag-overlay { position: fixed; inset: 0; background: rgba(214,51,132,.10);
     border: 2.5px dashed #d63384; z-index: 9999; display: flex;
     align-items: center; justify-content: center; pointer-events: none; }
@@ -973,8 +981,11 @@
                 </div>
               </div>
               <n-grid v-else-if="galRefs.length > 0" :cols="6" :x-gap="8" :y-gap="8">
-                <n-gi v-for="r in galRefs" :key="r.path">
-                  <div class="gal-item" :class="{ 'ref-selected': galMainRef === r.path, 'draw-ref': galDrawRef === r.path }">
+                <!-- v0.19.8：主参考第一、出卡源第二，其余保持原序（新传在前） -->
+                <n-gi v-for="r in galRefsView" :key="r.path">
+                  <div class="gal-item"
+                       :class="{ 'ref-selected': galMainRef === r.path, 'draw-ref': galDrawRef === r.path,
+                                 'pin-main': galMainRef === r.path, 'pin-draw': galDrawRef === r.path }">
                     <img v-if="r.thumb" :src="r.thumb" class="clickable-img"
                          title="点击查看大图" alt="参考图"
                          @click.stop="openViewer(r.path, '参考图')">
@@ -3920,6 +3931,19 @@
       // v0.12.0：改由卡片上的靶心按钮直接指定/取消（下拉框全是路径，没法用）。
       var galDrawRef = Vue.ref("");       // 归一后的相对路径（参考图卡比较用）
       var galDrawRefAbs = Vue.ref("");    // 绝对路径（立绘卡比较用）
+      // v0.19.8：展示序——主参考第一、出卡源第二（同一张兼任时只排一次），其余保持原序。
+      // 参考图网格与顶部「生成源」条共用这个序，原 galRefs 只作为数据源不再直接进模板。
+      var galRefsView = Vue.computed(function () {
+        var refs = galRefs.value;
+        var first = refs.filter(function (r) { return r.path && r.path === galMainRef.value; });
+        var second = refs.filter(function (r) {
+          return r.path && r.path === galDrawRef.value && r.path !== galMainRef.value;
+        });
+        var rest = refs.filter(function (r) {
+          return r.path !== galMainRef.value && r.path !== galDrawRef.value;
+        });
+        return first.concat(second, rest);
+      });
       async function setDrawSource(path) {
         if (!galCharId.value || !path) return;
         var target = (galDrawRef.value === path || galDrawRefAbs.value === path)
@@ -4030,7 +4054,8 @@
       var galHeight = Vue.ref(null);
       var genSources = Vue.computed(function () {
         var out = [];
-        galRefs.value.forEach(function (r) {
+        // v0.19.8：用 galRefsView 的展示序（主参考第一、出卡源第二）
+        galRefsView.value.forEach(function (r) {
           out.push({ kind: "ref", path: r.path, thumb: r.thumb, seq: 0 });
         });
         galItems.value.forEach(function (it) {
@@ -5717,6 +5742,7 @@
         galFrom: galFrom, backFromGallery: backFromGallery, detailEntry: detailEntry,
         gotoTryFromDetail: gotoTryFromDetail,
         galRefs: galRefs, galRefsLoading: galRefsLoading, galMainRef: galMainRef,
+        galRefsView: galRefsView,
         galOrphans: galOrphans, bindOrphan: bindOrphan,
         galOrphansOpen: galOrphansOpen, deleteOrphan: deleteOrphan,
         galDrawRef: galDrawRef, galDrawRefAbs: galDrawRefAbs, setDrawSource: setDrawSource,

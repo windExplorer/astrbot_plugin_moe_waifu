@@ -2,6 +2,24 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.19.8 (2026-11-13)
+
+参考图区排序：主参考第一、出卡源第二，两张卡片加框 + 淡色底区分；顶部「生成源」条同序（版本 v0.19.7 -> v0.19.8）。
+
+- **需求（用户）**：角色详情的参考图墙目前按「新传在前」排，主参考 / 出卡源混在中间
+  不显眼，要求把这两张固定排在最前，并视觉上框起来区分；顶部「生成源」条也按同样顺序。
+- **实现**（`pages/waifu-console/index.html`，纯前端展示层，不动后端数据序）：
+  - 新增 `galRefsView` computed：`galRefs` 重排——主参考（`galMainRef`）第一、
+    出卡源（`galDrawRef`）第二（同一张兼任时只排一次、占第一位），其余保持原序；
+    参考图网格 `v-for` 与 `genSources`（生成源条）都改用它，原 `galRefs` 只作数据源。
+    存储层 `strategy.refs` 顺序不变，纯展示层重排。
+  - 卡片样式：新增 `.pin-main`（粉框 + 淡粉底）/ `.pin-draw`（橙框 + 淡橙底），
+    兼任时双框叠加；用 `inset box-shadow` 做框（与既有 `ref-selected` / `draw-ref`
+    outline 共存），淡色底在卡片下部 meta 条可见。meta 文字本就显示「主参考 · 出卡源」。
+- **验证**：`test_template_compile` / `test_inline_js`（node --check）/
+  `test_template_structure` / `test_html_integrity` / `test_webui_contract`
+  （含 BINDINGS ↔ 模板 ↔ store 三向校验，`galRefsView` 已同步暴露）全过。
+
 ## v0.19.7 (2026-11-13)
 
 维度值下拉改为自绘列表：真正封顶 280px + 内部滚动（版本 v0.19.6 -> v0.19.7）。
