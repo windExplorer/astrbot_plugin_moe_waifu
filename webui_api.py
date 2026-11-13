@@ -2671,6 +2671,8 @@ def _trash_scan(plugin) -> list:
             row = meta.get(rel) if isinstance(meta.get(rel), dict) else {}
             files.append({
                 "rel": rel,
+                # v0.28.0：可直接给 openViewer 用的相对 data 路径（看大图）
+                "path": f"_trash/{stamp_dir.name}/{rel}",
                 "name": fp.name,
                 "size": size,
                 "thumb": _thumb_data_url(str(fp), 120),

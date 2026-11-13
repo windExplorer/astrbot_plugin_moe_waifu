@@ -98,6 +98,14 @@
      「预览」按钮会随范围左右平移，切范围时不好定位 */
   .batch-scope-slot { width: 248px; flex: 0 0 auto; display: flex;
     align-items: center; }
+  /* v0.28.0：调试页分页条 */
+  .dbg-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .dbg-tab { padding: 5px 14px; border-radius: 999px; font-size: 13px;
+    cursor: pointer; user-select: none;
+    border: 1px solid rgba(128,128,128,.28); background: rgba(128,128,128,.08); }
+  .dbg-tab:hover { border-color: rgba(64,158,255,.55); }
+  .dbg-tab.on { background: rgba(64,158,255,.16);
+    border-color: rgba(64,158,255,.65); color: #2080f0; font-weight: 600; }
   /* v0.27.0：回收站清单 */
   .trash-group { border: 1px solid rgba(128,128,128,.22); border-radius: 8px;
     padding: 8px 10px; margin-bottom: 8px; }
@@ -106,7 +114,7 @@
   .trash-row { display: flex; align-items: center; gap: 10px;
     padding: 4px 0; border-top: 1px dashed rgba(128,128,128,.18); }
   .trash-thumb { width: 42px; height: 42px; object-fit: cover; border-radius: 6px;
-    flex: none; background: rgba(128,128,128,.12); }
+    flex: none; background: rgba(128,128,128,.12); cursor: pointer; }
   .trash-meta { flex: 1; min-width: 0; }
   .trash-rel { font-size: 12px; word-break: break-all; }
   /* v0.16.0：批量补图弹窗行 */
@@ -1553,10 +1561,20 @@
 
           <!-- ============ 调试工具（v0.9.0） ============ -->
           <div v-if="menu === 'debug'">
-            <n-space vertical size="medium">
-              <!-- v0.24.1：关系模型阶段 1 只读状态（常驻卡片，内部才用 v-if，
-                   避免给 n-space 增加 v-if 切换的槽位） -->
-              <n-card size="small" title="关系模型 · 阶段 1（只读）" :bordered="true">
+            <!-- v0.28.0：调试页改成分页——原来一页堆了 9 张卡，找功能要滚半天。
+                 tab 顺序按使用频率排：状态查询 → 修签/重渲染 → 操作审计 →
+                 诊断 → 回收站（最后）。
+                 ⚠️ 容器用普通 div + flex（stack-v），不用 n-space：vendored
+                 naive 的 Space 给槽子元素包固定 key，v-if 切 tab 会撞 key
+                 导致内容串页。 -->
+            <div class="dbg-tabs">
+              <div v-for="t in dbgTabs" :key="t.key" class="dbg-tab"
+                   :class="{ on: dbgTab === t.key }"
+                   @click="switchDbgTab(t.key)">{{ t.label }}</div>
+            </div>
+            <div class="stack-v">
+              <!-- v0.24.1：关系模型阶段 1 只读状态（诊断分页） -->
+              <n-card v-if="dbgTab === 'diag'" size="small" title="关系模型 · 阶段 1（只读）" :bordered="true">
                 <div class="stack">
                   <div class="bind-tip" style="margin-top: 0;">
                     全部图片登记在 assets 拿全局唯一编号，角色 / 作品 / 卷各有自增主键，语义化 char_id 保留。
@@ -1580,7 +1598,7 @@
                 </div>
               </n-card>
               <!-- v0.27.0：回收站（删除的文件在 data/_trash，可查看 / 还原 / 清空） -->
-              <n-card size="small" title="回收站" :bordered="true">
+              <n-card v-if="dbgTab === 'trash'" size="small" title="回收站" :bordered="true">
                 <div class="stack">
                   <div class="bind-tip" style="margin-top: 0;">
                     彻底删除、清空立绘库、清签带走的文件都会移到
@@ -1606,7 +1624,8 @@
                                   @click="doTrashPurgeGroup(g)">清空该组</n-button>
                       </div>
                       <div v-for="f in g.files" :key="g.stamp + '|' + f.rel" class="trash-row">
-                        <img v-if="f.thumb" :src="f.thumb" class="trash-thumb">
+                        <img v-if="f.thumb" :src="f.thumb" class="trash-thumb"
+                             title="点击查看大图" @click="openViewer(f.path, f.rel)">
                         <div class="trash-meta">
                           <div class="trash-rel">{{ f.rel }}</div>
                           <div class="bind-tip" style="margin-top: 0;">
@@ -1622,7 +1641,7 @@
                   <div v-else class="bind-tip">点「刷新」读取回收站内容。</div>
                 </div>
               </n-card>
-              <n-card size="small" title="状态查询" :bordered="true">
+              <n-card v-if="dbgTab === 'state'" size="small" title="状态查询" :bordered="true">
                 <n-space vertical size="small">
                   <n-space align="center" :wrap="true" size="small">
                     <n-input v-model:value="dbgStateUid" size="small" clearable
@@ -1681,7 +1700,7 @@
               </n-card>
 
               <!-- 星语式：查到状态后才出现，按钮自动带上当前 QQ 与今天，不用重复填参数 -->
-              <n-card size="small" :bordered="true" v-if="dbgState">
+              <n-card size="small" :bordered="true" v-if="dbgTab === 'fix' && dbgState">
                 <template #header>
                   <div class="sec-title" style="margin: 0;">今日签操作 · {{ dbgStateUid }}
                     <span class="cnt">查到状态才出现 · 已带好 QQ 号与 {{ dbgState.today }} · 均需两段确认</span>
@@ -1734,7 +1753,7 @@
               <!-- v0.19.5 事故修正：按角色清库独立成块。
                    原「清空老婆立绘库」和「今日签操作」混在同一排，用户以为它清的是
                    某个 QQ 用户的抽取记录，点了之后该角色（所有用户共用）的立绘全没了。 -->
-              <n-card size="small" :bordered="true" v-if="dbgState && dbgState.draw">
+              <n-card size="small" :bordered="true" v-if="dbgTab === 'fix' && dbgState && dbgState.draw">
                 <template #header>
                   <div class="sec-title" style="margin: 0;">按角色清库（危险 · 与 QQ 用户无关）</div>
                 </template>
@@ -1756,7 +1775,7 @@
                 </div>
               </n-card>
 
-              <n-card size="small" :bordered="true">
+              <n-card v-if="dbgTab === 'state'" size="small" :bordered="true">
                 <template #header>
                   <div class="sec-title" style="margin: 0;">模拟抽签（只读 dry-run）
                     <span class="cnt">复用真实种子链路，不写库、不生图、不消耗换老婆次数</span>
@@ -1830,7 +1849,7 @@
                 </n-space>
               </n-card>
 
-              <n-card size="small" title="重渲染 · 指定其它日期" :bordered="true" v-if="dbgState">
+              <n-card size="small" title="重渲染 · 指定其它日期" :bordered="true" v-if="dbgTab === 'fix' && dbgState">
                 <div class="bind-tip" style="margin-top: 0;">已自动带上当前 QQ 号；只有想重画往日卡片时才改日期，今天的卡直接用上面的「重绘卡片」。不重抽、不生图、不写抽签流水。</div>
                 <n-space size="small" align="center" :wrap="true" style="margin-top: 8px;">
                   <n-input v-model:value="dbgRenderUid" size="small" placeholder="用户 ID"
@@ -1841,7 +1860,7 @@
                 </n-space>
               </n-card>
 
-              <n-card size="small" title="高级 · 指定任意目标（两段确认）" :bordered="true" v-if="dbgState">
+              <n-card size="small" title="高级 · 指定任意目标（两段确认）" :bordered="true" v-if="dbgTab === 'fix' && dbgState">
                 <div class="bind-tip" style="margin-top: 0; margin-bottom: 10px;">
                   上面的按钮已自动带好当前 QQ 与今天；这里用于清理其它日期、其它用户或其它角色，
                   输入框在查询状态时已尽量预填。同样需要两段确认。
@@ -1902,7 +1921,7 @@
                 </n-grid>
               </n-card>
 
-              <n-card size="small" title="操作审计" :bordered="true">
+              <n-card v-if="dbgTab === 'audit'" size="small" title="操作审计" :bordered="true">
                 <template #header-extra>
                   <n-button size="small" @click="loadDebugHistory">刷新</n-button>
                 </template>
@@ -1915,7 +1934,7 @@
                 </table>
                 <n-empty v-else description="暂无调试操作" size="small"></n-empty>
               </n-card>
-            </n-space>
+            </div>
           </div>
 
           <!-- 单条抽签详情抽屉 -->
@@ -5547,6 +5566,23 @@
       }
 
       // ---- 调试工具 ----
+      // ---- 调试页分页（v0.28.0）：按使用频率排序，回收站压最后 ----
+      var dbgTabs = [
+        { key: "state", label: "状态查询" },
+        { key: "fix", label: "修签 / 重渲染" },
+        { key: "audit", label: "操作审计" },
+        { key: "diag", label: "诊断" },
+        { key: "trash", label: "回收站" },
+      ];
+      var dbgTab = Vue.ref("state");
+      function switchDbgTab(key) {
+        dbgTab.value = String(key || "state");
+        // 按需加载：切到哪页才拉哪页的数据，别一次打三个接口
+        if (dbgTab.value === "audit") { loadDebugHistory(); }
+        else if (dbgTab.value === "diag") { loadRelStatus(); }
+        else if (dbgTab.value === "trash") { loadTrash(); }
+      }
+
       // ---- 关系模型阶段 1 状态（只读，v0.24.1） ----
       var relStatus = Vue.ref(null);
       var relBusy = Vue.ref(false);
@@ -5920,7 +5956,12 @@
         if (m === "records") { loadFilterOpts(); loadRecords(); loadRecEvents(); loadRecJobs(); }
         else if (m === "stats") { loadStats(); }
         else if (m === "users") { loadUsers(); }
-        else if (m === "debug") { loadDebugHistory(); loadRelStatus(); loadTrash(); }
+        else if (m === "debug") {
+          // v0.28.0：只加载当前分页的数据，别一次打三个接口
+          if (dbgTab.value === "audit") { loadDebugHistory(); }
+          else if (dbgTab.value === "diag") { loadRelStatus(); }
+          else if (dbgTab.value === "trash") { loadTrash(); }
+        }
         else if (m === "overview") { loadOverview(); }
         else if (m === "chars") { fetchPools(); }
         else if (m === "works") { loadWorks().then(resyncCurrentWork); }
@@ -6365,6 +6406,7 @@
         userCalendarMonths: userCalendarMonths, weekLabels: weekLabels,
         loadUsers: loadUsers, setUserPage: setUserPage, openUser: openUser,
         dbgStateUid: dbgStateUid, dbgState: dbgState, dbgStateLoading: dbgStateLoading,
+        dbgTabs: dbgTabs, dbgTab: dbgTab, switchDbgTab: switchDbgTab,
         relStatus: relStatus, relBusy: relBusy, loadRelStatus: loadRelStatus,
         // v0.27.0：回收站
         trashGroups: trashGroups, trashBusy: trashBusy, trashLoaded: trashLoaded,

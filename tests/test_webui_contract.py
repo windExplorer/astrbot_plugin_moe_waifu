@@ -64,6 +64,7 @@ doBulkPortrait bulkBusy bulkOffText bulkOnText
 trashGroups trashBusy trashLoaded trashTotalFiles trashTotalSizeText
 trashPurgeText loadTrash doTrashRestoreOne doTrashRestoreGroup
 doTrashPurgeGroup doTrashPurgeAll
+dbgTabs dbgTab switchDbgTab
 """.split()
 
 ROUTES = """
@@ -133,7 +134,8 @@ def main():
           "PRAGMA table_info" in store and "ALTER TABLE" in store)
 
     # 6) 星语式调试交互：重置类按钮只在「查到状态」之后出现，且高级区不再常驻
-    gate = page.count('v-if="dbgState"')
+    # v0.28.0：调试页分页后条件变成 `dbgTab === 'fix' && dbgState`，两种形态都算
+    gate = page.count('v-if="dbgState"') + page.count("&& dbgState")
     check("重置 / 重绘 / 高级区都受 dbgState 约束", gate >= 4, f"实际 {gate} 处")
     check("旧常驻危险操作区已改为上下文式",
           'title="高级 · 指定任意目标（两段确认）"' in page
@@ -194,6 +196,14 @@ def main():
           "batchSeriesOpts" in page
           and "return !!o.value" in page
           and ':options="batchSeriesOpts"' in page)
+    # v0.28.0：调试页分页（按使用频率排序，回收站最后）
+    check("调试页分页存在且回收站排最后",
+          '{ key: "state", label: "状态查询" }' in page
+          and '{ key: "trash", label: "回收站" }' in page
+          and page.index('{ key: "state"')
+          < page.index('{ key: "trash"'))
+    check("调试页九张卡片都受分页控制", page.count("dbgTab === ") >= 8,
+          str(page.count("dbgTab === ")))
     # v0.26.2：批量停用/启用的两段确认必须看得见（旧版首次点击静默 return）
     check("批量立绘确认态有可见文案与提示",
           "bulkOffText" in page and "确认停用 " in page
