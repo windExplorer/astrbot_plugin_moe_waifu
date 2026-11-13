@@ -302,7 +302,10 @@ def _synthetic_event():
         meta = PlatformMetadata(name="webui", description="萌萌今日老婆 工坊", id="moe_waifu_workshop")
         return AstrMessageEvent("", msg, meta, "moe_waifu_workshop")
     except Exception:
-        logger.warning(f"[{PLUGIN_NAME}] 试画桩事件构造失败\n{traceback.format_exc()}")
+        # 构造失败返回 None：萌绘 v7.8.4 起会把「外部调用 + 无事件」按无头模式
+        # 处理，不再直接报「未能获取到会话事件」；这里留日志便于排查原因。
+        logger.warning(f"[{PLUGIN_NAME}] 合成事件构造失败（萌绘将按无会话模式处理）\n"
+                       f"{traceback.format_exc()}")
         return None
 
 
