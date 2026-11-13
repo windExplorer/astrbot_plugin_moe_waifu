@@ -2,6 +2,35 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.19.7 (2026-11-13)
+
+维度值下拉改为自绘列表：真正封顶 280px + 内部滚动（版本 v0.19.6 -> v0.19.7）。
+
+- **现象（用户，附截图）**：v0.19.2 号称给下拉加了高度上限，真机上**完全没生效**——
+  点「画风」chip 的值，31 项一次铺开，菜单比弹窗还高、把整页撑出滚动条。
+- **根因**：v0.19.2 的修法是「改 naive 内部类名」——给 `.n-popselect-menu` /
+  `.n-base-select-menu` 兜底 `--n-height: 300px`，再给内层 `.n-scrollbar` /
+  `.n-virtual-list` 钉 `max-height !important`。实测 vendored naive 的 popselect
+  菜单结构与假设不一致：`--n-height` 由组件**内联样式**写入（类选择器压不过内联），
+  且内层滚动容器的类名不稳（没有稳定命中的 `.n-scrollbar`），于是两条规则都空转。
+  **教训：不要靠改第三方组件内部类名控高。**
+- **修复（自绘下拉）**：chip 的值改用 `n-popover`（`trigger="manual"` + 受控 `:show`）
+  包一层**我们自己渲染的列表** `.dim-menu`：
+  - `.dim-menu { max-height: 280px; overflow-y: auto; }` —— 高度与滚动完全归我们管；
+  - 列表项来自预计算 `galDimOptsMap`（`galPools` → `{dim: [{label,value}]}），
+    模板里**不调方法**（modal slot 内方法调用的老坑），只做 `galDimOptsMap[d.dim]`
+    取值 + `o.value === d.zh` 比较；
+  - 当前选中的值高亮（`.is-on`）、点击后自动收起（`pickDimValue` 里置空 `galDimOpen`）、
+    点外面收起（`@clickoutside`）、关弹窗也清展开态（`@update:show`）。
+  - 仍走 popover 的 **Teleport 到 body**，所以不会被弹窗的滚动容器裁掉（这是当初用
+    popselect 的原因，保留）。
+- **验证（jsdom 真 DOM，非静态断言）**：临时装 jsdom 跑最小复现（vendored
+  `vue.global.prod.js` + `naive-ui.min.js`，同样的 `n-popover` 受控写法 + 61 项列表）：
+  初始不展开 → 点击展开 → 列表 61 项齐全 → `getComputedStyle` 得到
+  `max-height: 280px` / `overflow-y: auto` → 点选项写回值并自动收起，全部通过。
+- **守卫**：`test_inline_js`（node --check）/ `test_template_structure`（标签配对）/
+  `test_html_integrity` / `test_webui_contract` / `test_template_compile` 全 OK。
+
 ## v0.19.6 (2026-11-13)
 
 img2img 模式不再被「当日已有立绘」拦掉 + 重置连带清当日立绘 + 流水/任务审计分页（版本 v0.19.5 -> v0.19.6）。

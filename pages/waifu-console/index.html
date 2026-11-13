@@ -63,21 +63,20 @@
   .dim-chip-x { cursor: pointer; opacity: .4; flex: none; font-size: 14px; line-height: 1;
     padding: 0 2px; }
   .dim-chip-x:hover { opacity: 1; color: #d63384; }
-  /* v0.19.2：下拉菜单高度封顶 + 内部滚动。
-     问题（用户）：生成立绘弹窗里点「维度」chip 的值，下拉（n-popselect）把服装池
-     50+ 项一次全铺开，菜单比视口还高，连带整个页面被撑出滚动条。
-     根因：vendored naive 的菜单高度靠 CSS 变量 --n-height 控制
-     （`.n-base-select-menu` 里 `.n-scrollbar / .n-virtual-list { max-height:
-     var(--n-height) }`），而这个变量只在调用方显式传 height 时才由内联样式写入；
-     n-popselect 不传 → var 未定义 → max-height 失效 → 菜单无限高。
-     做法：给菜单根类兜底 --n-height，并把内层滚动容器也钉一次 max-height
-     （双保险，去掉任一条都还能正常封顶）。n-select 的主题下拉（37 项）同样受益。 */
-  .n-popselect-menu,
-  .n-base-select-menu { --n-height: 300px; }
-  .n-popselect-menu .n-scrollbar,
-  .n-popselect-menu .n-virtual-list,
-  .n-base-select-menu .n-scrollbar,
-  .n-base-select-menu .n-virtual-list { max-height: 300px !important; }
+  /* v0.19.7：维度值下拉改成自绘列表（n-popover + 自己的滚动容器）。
+     ⚠️ v0.19.2 试过的纯 CSS 方案（给 .n-popselect-menu / .n-base-select-menu 兜底
+     --n-height，再钉 .n-scrollbar/.n-virtual-list 的 max-height）真机无效：vendored
+     naive 的 popselect 菜单结构与我们假设的不一致，既没有稳定命中的滚动容器类名，
+     --n-height 也被内联样式压着，结果服装池 50+ 项照旧一次铺满、把整页撑出滚动条。
+     结论：**不要靠改 naive 内部类名控高**，改成自己渲染列表（.dim-menu），
+     高度/滚动/选中态都归我们管。 */
+  .dim-menu { max-height: 280px; overflow-y: auto; min-width: 168px;
+    max-width: 280px; margin: -6px -10px; }
+  .dim-menu-item { padding: 6px 12px; font-size: 12px; line-height: 1.5;
+    cursor: pointer; white-space: normal; word-break: break-all; }
+  .dim-menu-item:hover { background: rgba(150,90,130,.12); }
+  .dim-menu-item.is-on { color: #d63384; font-weight: 600; }
+  .dim-menu-empty { padding: 6px 12px; font-size: 12px; opacity: .6; }
   /* v0.16.0：批量补图弹窗纵向堆叠（替代 n-space——modal slot 内 n-space
      在 sandbox iframe 下整块 content 静默不渲染，见弹窗内注释） */
   .stack-v { display: flex; flex-direction: column; gap: 8px; }
@@ -1950,7 +1949,8 @@
          疑似 vendored naive 自带 Vue 与页面 Vue 双运行时下 Teleport 插槽的监听器问题），
          而生产验证过的 workCoverModal 正是 dialog。新弹窗一律 dialog。 ============ -->
     <n-modal v-model:show="galPromptOpen" preset="dialog" title="生成立绘"
-             style="width: 680px;">
+             style="width: 680px;"
+             @update:show="v => (v || (galDimOpen = ''))">
       <n-space vertical size="medium">
         <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
           <span class="bind-tip" style="margin-top: 0;">主题</span>
@@ -1975,13 +1975,31 @@
         <div class="dim-chip-row" v-if="galDimsVisible.length > 0">
           <div v-for="d in galDimsVisible" :key="d.dim" class="dim-chip">
             <span class="dim-chip-label">{{ d.label }}</span>
-            <n-popselect v-if="d.dim !== 'outfit' || !galOutfit"
-                         :value="d.fixed ? d.zh : null"
-                         :options="galDimOpts(d.dim)" size="small" trigger="click"
-                         @update:value="v => onDimPick(d.dim, v)">
-              <span class="dim-chip-val"
-                    :title="d.fixed ? '已锁定（下拉可改选或转随机）' : '点击：单独随机一项，或从池里选定值锁定'">{{ d.zh }}</span>
-            </n-popselect>
+            <!-- v0.19.7：改自绘下拉（n-popover + 自己的 .dim-menu 滚动容器）。
+                 原来用 n-popselect：vendored naive 的菜单高度不受控（--n-height 被
+                 内联样式压着、也没有稳定命中的滚动容器类名），服装池 50+ 项一次铺满，
+                 把整个弹窗/页面一起撑出滚动条——纯 CSS 兜底两版都没生效，故自绘。 -->
+            <n-popover v-if="d.dim !== 'outfit' || !galOutfit"
+                       :show="galDimOpen === d.dim" trigger="manual"
+                       placement="bottom-start" :show-arrow="false"
+                       @clickoutside="galDimOpen = ''">
+              <template #trigger>
+                <span class="dim-chip-val"
+                      :title="d.fixed ? '已锁定（下拉可改选或转随机）' : '点击：单独随机一项，或从池里选定值锁定'"
+                      @click="galDimOpen = (galDimOpen === d.dim ? '' : d.dim)">{{ d.zh }}</span>
+              </template>
+              <div class="dim-menu">
+                <div class="dim-menu-item" @click="pickDimValue(d.dim, '__reroll__')">
+                  🎲 单独随机一项
+                </div>
+                <div class="dim-menu-item" v-for="o in (galDimOptsMap[d.dim] || [])"
+                     :key="o.value" :class="{ 'is-on': o.value === d.zh }"
+                     @click="pickDimValue(d.dim, o.value)">{{ o.label }}</div>
+                <div class="dim-menu-empty" v-if="!(galDimOptsMap[d.dim] || []).length">
+                  维度池还没加载（重开弹窗即可）
+                </div>
+              </div>
+            </n-popover>
             <span v-else class="dim-chip-val dim-chip-static"
                   title="已由上方「穿搭」输入框指定，本维度按输入框内容出图">{{ d.zh }}</span>
             <span v-if="d.fixed" class="dim-chip-pin" title="已锁定">📌</span>
@@ -4242,6 +4260,24 @@
         pool.forEach(function (zh) { opts.push({ label: zh, value: zh }); });
         return opts;
       }
+      // v0.19.7：自绘维度下拉（替代不可控高度的 n-popselect）。
+      // galDimOpen = 当前展开的维度 key（同一时刻只开一个）；模板里**不调方法**，
+      // 全走这个预计算 map + 简单比较（modal slot 内方法调用的老坑，见弹窗注释）。
+      var galDimOpen = Vue.ref("");
+      var galDimOptsMap = Vue.computed(function () {
+        var pools = galPools.value || {};
+        var map = {};
+        Object.keys(pools).forEach(function (dim) {
+          var arr = [];
+          (pools[dim] || []).forEach(function (zh) { arr.push({ label: zh, value: zh }); });
+          map[dim] = arr;
+        });
+        return map;
+      });
+      function pickDimValue(dim, v) {
+        galDimOpen.value = "";
+        onDimPick(dim, v);
+      }
       function galDimStatePayload() {
         return {
           attempts: Object.assign({}, galDimAttempts.value),
@@ -4333,6 +4369,7 @@
       function openPromptModal() {
         if (!galCharId.value) return;
         galPromptOpen.value = true;
+        galDimOpen.value = "";   // v0.19.7：自绘下拉，开弹窗先收起残留的展开态
         resetGalDimCtl();
         if (!galPools.value) { loadGalPools(); }
         if (!String(galPrompt.value || "").trim()) { genPromptPreview(); }  // 首开自动出一版
@@ -5700,6 +5737,9 @@
         // v0.14.0：维度 chip 交互（重摇/锁定/移除/添加）
         galDimsVisible: galDimsVisible, galHiddenDims: galHiddenDims,
         galDimOpts: galDimOpts, onDimPick: onDimPick,
+        // v0.19.7：自绘维度下拉（模板只读这个 map / 比较 galDimOpen，不调方法）
+        galDimOpen: galDimOpen, galDimOptsMap: galDimOptsMap,
+        pickDimValue: pickDimValue,
         removeGalDim: removeGalDim, addGalDim: addGalDim,
         resetGalDimCtl: resetGalDimCtl, loadGalPools: loadGalPools,
         // v0.15.0：立绘排序 + 详情弹窗 + 生成源交互
