@@ -242,6 +242,30 @@ _comp = prompt_gen.apply_dim_state(
     prompt_gen.force_single_view(base), 42, {"enabled": ["compose"]}, None)
 check("显式启用 compose 覆盖强制单图", _comp["compose"]["zh"] != "")
 
+# ---------- v0.29.10：🎲 单独随机 = 全池重摇，不再困在主题子集 ----------
+# 实测事故：主题=art_clay（artstyle_kw「黏土」只命中池里 1 条，且该条 v0.26.4
+# 起权重归零），旧版 attempts 在主题子集内重摇 → 「画风永远黏土手办」
+_clay_theme = prompt_gen.get_theme("art_clay")
+check("art_clay 主题存在且画风子集单元素",
+      _clay_theme is not None
+      and len([it for it in prompt_gen.ARTSTYLES
+               if any(kw in str(it.get("zh") or "")
+                      for kw in (_clay_theme.get("artstyle_kw") or []))]) == 1)
+_cx = prompt_gen.pick_variations(4242, _clay_theme)
+check("art_clay 主题种子初摇画风=黏土（子集约束仍在）",
+      "黏土" in str(_cx["artstyle"]["zh"] or ""))
+_rer_clay = [prompt_gen.apply_dim_state(_cx, 4242, {"attempts": {"artstyle": n}},
+                                        _clay_theme)["artstyle"]["zh"]
+             for n in range(1, 41)]
+check("attempts 重摇脱离子集（40 次不出现黏土）",
+      all("黏土" not in z for z in _rer_clay))
+check("attempts 重摇分布非退化（40 次 >= 8 种）", len(set(_rer_clay)) >= 8)
+_rer_vis = prompt_gen.apply_dim_state(
+    _cx, 4242, {"attempts": {"framing": 1, "compose": 1, "body": 1}}, _clay_theme)
+check("重摇后已展示维度仍非空（不摇成空项消失）",
+      all(str(_rer_vis[d]["zh"] or "").strip()
+          for d in ("framing", "compose", "body")))
+
 # ---------- dim_pool_options：维度下拉选项（v0.14.0） ----------
 pools = prompt_gen.dim_pool_options()
 check("下拉池覆盖六维", set(pools.keys()) == set(prompt_gen.DIMS.keys()))
@@ -577,6 +601,11 @@ check("具体主题 id 原样透传", prompt_gen.resolve_theme("campus", 42)[1] 
 check("空串仍不套主题", prompt_gen.resolve_theme("", 42) == (None, ""))
 check("tpl_ 模板可透传（batch_fill 不受影响）",
       prompt_gen.resolve_theme("tpl_3view", 42)[1] == "tpl_3view")
+# v0.29.10：random 摇主题尊重 art_theme_weight=0 的退池决定（art_clay）——
+# v0.26.4 只清在批量轮换里，面板「随机」此前仍能摇中黏土手办主题
+check("random 实摇 300 种子不含 art_clay（退池画风不走后门）",
+      all(prompt_gen.resolve_theme("random", s)[1] != "art_clay"
+          for s in range(300)))
 _dv = prompt_gen.describe_variations(777)
 check("describe_variations 与 variation_zh_list 同源",
       _dv == prompt_gen.variation_zh_list(prompt_gen.pick_variations(777)))

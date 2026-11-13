@@ -655,12 +655,17 @@ def resolve_theme(theme_id: str, seed_int: int) -> tuple[dict | None, str]:
     v0.20.0 起「random」不再是「不套主题」：按种子从内容主题池等权摇一个
     （决定论，同种子恒定；试画台预览与实际生成各自调用本函数，结果一致，
     摇中的主题 id 可随档记录、详情弹窗能看到「随机到底摇出了什么主题」）。
+    v0.29.10：摇池排除 art_theme_weight == 0 的退池画风（art_clay）——v0.26.4
+    只把权重清在批量轮换（theme_plan）里，面板「随机」仍能摇中黏土手办主题，
+    等于把用户明确嫌丑的风格从主题后门塞回来（种子按 角色+日期+seq 恒定，
+    同角色当天次次都是黏土）。要黏土请在主题下拉显式选「画风 · 黏土手办」。
     空串/未知 id 维持不套主题（抽卡主链路现状：维度纯随机）。
     """
     tid = str(theme_id or "").strip()
     if tid != "random":
         return get_theme(tid), tid
     ids = content_theme_ids()
+    ids = [i for i in ids if art_theme_weight(i) > 0]
     if not ids:
         return None, tid
     rid = ids[_sub(seed_int, "theme_roll", 2 ** 30) % len(ids)]
@@ -870,8 +875,11 @@ def apply_dim_state(picks: dict, seed_int: int, dim_state: dict | None,
     """预览面板的维度级控制（v0.14.0）：单独重摇 / 锁定 / 删除 / 启用，纯函数。
 
     dim_state 字段（全部可选，未知维度与字段忽略）：
-    - attempts: {dim: n}  n>0 的维度用 seed_int + n*7919 重摇（主题子集内；
-                          outfit 重摇时配色同种子重抽，避免「换款式不换色」）
+    - attempts: {dim: n}  n>0 的维度用 seed_int + n*7919 重摇（v0.29.10 起从
+                          **全池**非空项摇、不再困在主题子集——art_* 主题的
+                          artstyle 子集普遍只有 1~2 项，子集内重摇等于没摇
+                          （实测画风永远黏土手办）；outfit 重摇时配色同种子
+                          重抽，避免「换款式不换色」）
     - enabled: [dim]      显式启用默认沉默的维度（compose/body）：若当前为空项，
                           从该维度非空项里重挑（主题子集内）
     - fixed: {dim: zh}    锁定为指定中文短语（en 从池内按 zh 反查，查不到用 zh
@@ -898,7 +906,14 @@ def apply_dim_state(picks: dict, seed_int: int, dim_state: dict | None,
         if n <= 0:
             continue
         sub_seed = (seed_int + n * 7919) % (2 ** 31)
-        out[dim] = _pick_dim(dim, sub_seed, theme)
+        # v0.29.10：🎲 单独随机 = 从该维度**全池**重摇（非空项；w=0 项加权抽
+        # 天然抽不中），不再困在主题子集里——art_* 主题（占内容主题约七成）的
+        # artstyle 子集普遍只有 1~2 项，art_clay 更是单元素子集（只含 v0.26.4
+        # 起权重归零的「黏土手办质感」），子集内重摇点了等于没点（用户实测
+        # 「画风永远黏土手办」）。主题子集只管种子初摇；显式点骰子 = 用户明确
+        # 要换一个，与下拉选项（dim_pool_options 全池）同一口径。non_empty_only
+        # 让已展示的维度重摇后仍非空（compose/body/framing 不会被摇成空项消失）。
+        out[dim] = _pick_dim(dim, sub_seed, None, non_empty_only=True)
         if dim == "outfit":
             color = _weighted_pick(
                 OUTFIT_COLORS, _sub(sub_seed, "outfit_color", 2 ** 30))

@@ -2210,6 +2210,10 @@
           <n-select v-model:value="galTheme" :options="themeOpts" size="small"
                     style="width: 200px;" filterable
                     @update:value="galAttempt = 0; resetGalDimCtl(); genPromptPreview()"></n-select>
+          <!-- v0.29.10：random 实摇主题不黑箱——种子按 角色+日期+seq 恒定，
+               摇中什么此前完全看不见（实测摇中黏土手办主题、画风重摇永远原地踏步） -->
+          <span class="bind-tip" style="margin-top: 0;"
+                v-if="galTheme === 'random' && galThemeResolved">本轮摇出：{{ galThemeResolved.label }}</span>
           <n-input v-model:value="galOutfit" size="small" clearable
                    placeholder="穿搭（可选，留空 = 随机）"
                    style="width: 200px;"
@@ -4759,6 +4763,10 @@
       // 主题 + 提示词（v0.6.2）：与试画台同款主题库/预览管线；
       // 确认后的提示词经 jobs/start 的 prompt 字段直通出图
       var galTheme = Vue.ref("random");
+      // v0.29.10：random 实摇出的主题（{id,label} 或 null）——面板里显示
+      // 「本轮摇出：X」，摇中什么不再黑箱（预览种子按 角色+日期+seq 恒定，
+      // 主题子集困住维度重摇时用户此前无从排查）
+      var galThemeResolved = Vue.ref(null);
       var galOutfit = Vue.ref("");
       var galAsRef = Vue.ref(false);   // v0.7.5：勾选后生成结果转参考图，不入立绘库
       var galCustom = Vue.ref("");
@@ -5278,6 +5286,7 @@
           galDims.value = dc ? (dc.dims || []) : ((res && res.dims) || []);
           galPrompt.value = (res && res.prompt) || "";
           galPromptSource.value = (res && res.source) || "";
+          galThemeResolved.value = (res && res.theme_resolved) || null;
           galPromptKey = galPromptKeyNow();   // v0.29.9：预览成功才记指纹
         } catch (e) { /* 已提示；prompt 留空禁止确认 */ } finally {
           galPromptLoading.value = false;
@@ -6815,7 +6824,8 @@
         galWfAny: galWfAny, wfAllOpts: wfAllOpts,
         genSources: genSources, selectGenSource: selectGenSource,
         doDetailGenerate: doDetailGenerate,
-        galTheme: galTheme, galOutfit: galOutfit, galCustom: galCustom, galAttempt: galAttempt,
+        galTheme: galTheme, galThemeResolved: galThemeResolved,
+        galOutfit: galOutfit, galCustom: galCustom, galAttempt: galAttempt,
         galPrompt: galPrompt, galPromptSource: galPromptSource,
         galDims: galDims, galPromptLoading: galPromptLoading,
         galPromptOpen: galPromptOpen, galPromptConfirmed: galPromptConfirmed,

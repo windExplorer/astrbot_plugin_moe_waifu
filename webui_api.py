@@ -1889,6 +1889,16 @@ async def h_prompt_preview(plugin) -> dict:
     # picks 计算链（全池→主题子集→图生图强制单图→维度级控制），两处改动要同步。
     # v0.20.0：random 在预览与生成两侧都按同一种子实摇（resolve_theme 决定论）
     theme, _theme_rec = prompt_gen.resolve_theme(theme_id, seed_int)
+    # v0.29.10：random 实摇出的主题带回前端展示（「本轮摇出：X」）——预览种子
+    # 按 角色+日期+seq 恒定，摇中什么此前完全黑箱，维度重摇被困在单元素主题
+    # 子集里时（实测画风永远黏土手办）用户无从排查
+    _theme_label = ""
+    if _theme_rec:
+        _theme_label = next(
+            (str(t.get("label") or "") for t in prompt_gen.THEMES
+             if str(t.get("id") or "") == str(_theme_rec)), "")
+    theme_resolved = ({"id": str(_theme_rec), "label": _theme_label}
+                      if _theme_rec else None)
     picks = prompt_gen.pick_variations(seed_int, theme, outfit)
     # v0.22.4：与 build_generation_prompt 同口径——非模板主题一律强制单图，
     # 不再按 strategy_type 区分（文生图此前会漏，预览显示三视图、实际出单图）。
@@ -1915,6 +1925,7 @@ async def h_prompt_preview(plugin) -> dict:
     }
     return ok({"prompt": prompt_text, "source": source, "style": style,
                "dims": dims, "body": body_zh, "seed": seed_int, "attempt": attempt,
+               "theme_resolved": theme_resolved,
                "dim_control": dim_control})
 
 
