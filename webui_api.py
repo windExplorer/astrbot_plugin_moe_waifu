@@ -1991,29 +1991,62 @@ def _ws_run_context(plugin):
     return _types.SimpleNamespace(context=agent_ctx)
 
 
+_WEB_SEARCH_TOOL_NAMES = (
+    "web_search_tavily", "web_search_bocha", "web_search_brave",
+    "web_search_baidu", "web_search_exa", "web_search_anysearch",
+    "web_search_serpapi", "web_search_deepseek",
+)
+
+
+def _tool_getter(manager):
+    """拿到 FunctionToolManager 的按名取工具方法。
+
+    ⚠️ AstrBot 4.29 起把 `get_tool` 改名成 `get_func`（内置 web_search_* 也走
+    这个入口）。v0.29.0 这里只写了 `manager.get_tool(name)`，AttributeError 被
+    下面的 except 静默吞掉 → 每次都 `tool = None` → 联网检索恒为空 → 「联网校对」
+    实际一直只用模型瞎猜（用户反馈「总是拿角色名硬编，和作品设定对不上」就是这个）。
+    两个名字都探测，往后 AstrBot 再改名不至于又静默降级。
+    """
+    for attr in ("get_func", "get_tool"):
+        fn = getattr(manager, attr, None)
+        if callable(fn):
+            return fn
+    return None
+
+
 async def _web_search_text(plugin, query: str, max_results: int = 10,
                            timeout: int = 25) -> str:
-    """内部 websearch 工具链（按常用顺序探测第一个可用且配置了 key 的）。
+    """内部 websearch 工具链（按常用顺序探测第一个真的能出结果的）。
 
     失败/未配置/超时一律返回空串（调用方降级 LLM-only，功能不因此不可用）。
-    v0.29.0：从「作品发现」里抽出来复用——印象语联网校对也走同一套探测顺序
-    与 ContextWrapper 桩，避免两处各写一份、日后 AstrBot 改接口只修一处。
+    已激活的工具先用、禁用的后补，任何一步异常只跳过该工具。
     """
-    names = ("web_search_tavily", "web_search_bocha", "web_search_brave",
-             "web_search_baidu", "web_search_exa", "web_search_anysearch",
-             "web_search_serpapi", "web_search_deepseek")
     try:
         manager = plugin.context.get_llm_tool_manager()
         if manager is None:
+            logger.warning("[" + PLUGIN_NAME + "] 拿不到 LLM 工具管理器，联网检索不可用")
             return ""
-        run_ctx = _ws_run_context(plugin)
-        for name in names:
+        getter = _tool_getter(manager)
+        if getter is None:
+            logger.warning("[" + PLUGIN_NAME + "] FunctionToolManager 既无 get_func 也无 "
+                           "get_tool，联网检索不可用（AstrBot 接口可能又改名了）")
+            return ""
+        tools = []
+        for name in _WEB_SEARCH_TOOL_NAMES:
             try:
-                tool = manager.get_tool(name)
+                tool = getter(name)
             except Exception:
                 tool = None
-            if tool is None or not bool(getattr(tool, "active", True)):
-                continue
+            if tool is not None:
+                tools.append(tool)
+        if not tools:
+            logger.info("[" + PLUGIN_NAME + "] 没有可用的 web_search_* 工具："
+                        "请在 AstrBot 里启用任一联网搜索提供商并填 API Key")
+            return ""
+        # 已激活优先，禁用/未激活的排后面兜底（它们的 call 里还会自己校验 Key）
+        tools.sort(key=lambda t: 0 if bool(getattr(t, "active", True)) else 1)
+        run_ctx = _ws_run_context(plugin)
+        for tool in tools:
             try:
                 res = await asyncio.wait_for(
                     tool.call(run_ctx, query=query, max_results=max_results),
@@ -2021,12 +2054,32 @@ async def _web_search_text(plugin, query: str, max_results: int = 10,
             except Exception:
                 continue
             text = res if isinstance(res, str) else str(res)
-            if text and not text.startswith("Error"):
+            if text and not text.startswith("Error") and len(text.strip()) > 10:
+                logger.info("[" + PLUGIN_NAME + "] 联网检索命中 "
+                            + str(getattr(tool, "name", "?"))
+                            + f"（{len(text)} 字）：{query}")
                 return text[:6000]
+        logger.info("[" + PLUGIN_NAME + "] websearch 全部失败/未配 Key，降级 LLM-only："
+                    + query)
     except Exception:
         logger.warning("[" + PLUGIN_NAME + "] websearch 不可用，降级 LLM-only",
                        exc_info=True)
     return ""
+
+
+def _character_query(name: str, series: str, extra: str = "角色设定 性格 名台词") -> str:
+    """角色检索查询串：作品名打头锚定，避免同名角色串台。
+
+    只用角色名去搜是这次「印象语和作品对不上」的另一半原因——二次元同名角色
+    （樱 / 凛 / 零 / Saber 之类）一抓一大把，搜出来常常是别的作品那位。
+    作品名放最前并加书名号，搜索引擎才会按作品收敛。
+    """
+    name = str(name or "").strip()
+    series = str(series or "").strip()
+    extra = str(extra or "").strip()
+    if series:
+        return f"《{series}》{name} {extra}".strip()
+    return f"{name} 动漫 角色 {extra}".strip()
 
 
 async def _discover_search_text(plugin, series: str) -> str:
@@ -3486,9 +3539,40 @@ async def h_debug_rerender(plugin) -> dict:
 _QUOTE_SYSTEM_PROMPT = (
     "你为二次元角色卡片撰写「印象语」——贴在该角色抽卡立绘卡片上的一句话中文"
     "台词或印象描述。要求：贴合角色性格与原作设定、口语自然、每句不超过 30 字；"
-    "可以是角色第一人称台词，也可以是简短的旁观印象。输出纪律：每行一句，"
-    "不要编号、不要引号、不要 markdown、不要解释。"
+    "可以是角色第一人称台词，也可以是简短的旁观印象。\n"
+    "定位纪律（重要）：只写「给定的这位角色 + 给定的这部作品」，二次元同名角色很多，"
+    "别的作品里同名的那位一律不算；没有可靠资料时宁可写性格气质层面的通用印象，"
+    "也不要编造具体剧情、人际关系、名台词出处。\n"
+    "输出纪律：每行一句，不要编号、不要引号、不要 markdown、不要解释。"
 )
+
+
+_NO_SEARCH_HINT = (
+    "【注意】本次没有拿到网络资料（联网检索不可用或未配置 Key）。同名角色可能串台，"
+    "只写不涉及具体剧情、人际关系与名场面的通用印象（性格、气质、说话风格），"
+    "不要编造具体台词与出处。"
+)
+
+
+def _character_brief(name: str, series: str, tags: str) -> str:
+    """给模型的角色头：作品名必须显式出现，缺失时明确告知模型「无法确认设定」。"""
+    head = f"角色：{str(name or '').strip()}"
+    series = str(series or "").strip()
+    if series:
+        head += f"（作品：{series}；一切设定以这部作品为准）"
+    else:
+        head += "（条目没有填作品名，只能确认名字，无法确认是哪部作品里的哪位）"
+    tags = str(tags or "").strip()
+    if tags:
+        head += "\n外观特征 tags：" + tags
+    return head
+
+
+def _search_block(text: str) -> str:
+    """检索摘要段：明确「以摘要为准」，并提醒剔除同名不同作品的噪声。"""
+    return ("网络检索摘要（用于核对角色与作品设定，可能被截断；与模型记忆冲突时"
+            "以本摘要为准；若其中明显是另一部作品里的同名角色，忽略那一部分）：\n"
+            + str(text or ""))
 
 
 def _strip_quote_prefix(text: str) -> str:
@@ -3538,14 +3622,13 @@ async def h_quote_gen(plugin) -> dict:
     search_text = ""
     if want_web:
         search_text = await _web_search_text(
-            plugin, f"{name} {series} 角色 性格 设定 名台词".strip(), max_results=8)
-    segs = [
-        f"角色：{name}" + (f"（出自 {series}）" if series else "") + "。\n"
-        + (f"外观特征 tags：{tags}。\n" if tags else "")
-    ]
+            plugin, _character_query(name, series, "角色设定 性格 名台词 口癖"),
+            max_results=8)
+    segs = [_character_brief(name, series, tags)]
     if search_text:
-        segs.append("网络检索摘要（以此核对角色设定，可能截断；与摘要冲突时以摘要为准）：\n"
-                    + search_text)
+        segs.append(_search_block(search_text))
+    else:
+        segs.append(_NO_SEARCH_HINT)
     segs.append(f"请写 {count} 句风格多样的印象语（招呼/傲娇/温柔/俏皮等各来一点，"
                 "不要句式雷同）。")
     try:
@@ -3561,7 +3644,7 @@ async def h_quote_gen(plugin) -> dict:
     quotes = _parse_quote_lines(getattr(resp, "completion_text", "") or "", count)
     if not quotes:
         return err("LLM 没有返回可用句子，请重试")
-    return ok({"quotes": quotes,
+    return ok({"quotes": quotes, "search_len": len(search_text),
                "source": "websearch+llm" if search_text else "llm"})
 
 
@@ -3573,14 +3656,17 @@ _QUOTE_CHECK_SYSTEM = (
     "你在校对二次元角色卡片上的「印象语」（显示在立绘卡片上的一句中文台词或"
     "旁观印象）。给你角色名、作品、外观 tags、已有的每句印象语，可能还有网络"
     "检索摘要。逐句判断：\n"
+    "0) 先锁定「给定的这部作品里的这位角色」——二次元同名角色极多，检索摘要里"
+    "若出现别的作品/别的同名角色，那段资料一律不要采用，也不要拿它当依据改写；\n"
     "1) 是否与该角色及其作品的设定相符（性格、说话腔调、身份、人际关系）——"
     "张冠李戴、像是别的角色的台词、或与作品世界观明显冲突的必须改写；\n"
     "2) 是否空泛到放哪个角色身上都行——改写时加进该角色的具体特征（口癖、"
     "身份、标志物、关系），别写成通用土味情话；\n"
     "3) 是否超过 30 字、带编号/引号/markdown/多句拼一段——修成一句话。\n"
-    "纪律：已贴合的原样保留（note 写「保留」）；改写要保住原句的语气倾向与"
-    "多样性，不要把每句都改成同一种腔调；条数、顺序与输入严格一一对应，不新增"
-    "也不删减。只输出 JSON 数组，每项 {\"text\": \"（改写后的）一句中文\", "
+    "纪律：已贴合的原样保留（note 写「保留」）；资料不足时改写成不涉具体剧情与"
+    "关系的稳妥版本，不要凭空编造名场面；改写要保住原句的语气倾向与多样性，"
+    "不要把每句都改成同一种腔调；条数、顺序与输入严格一一对应，不新增也不删减。"
+    "只输出 JSON 数组，每项 {\"text\": \"（改写后的）一句中文\", "
     "\"note\": \"不超过 20 字的说明：保留 / 改了哪里\"}；不要 markdown 围栏、"
     "不要解释、不要多余文本。"
 )
@@ -3628,15 +3714,13 @@ async def h_quote_check(plugin) -> dict:
     search_text = ""
     if want_web:
         search_text = await _web_search_text(
-            plugin, f"{name} {series} 角色 性格 设定 名台词 口癖".strip(),
+            plugin, _character_query(name, series, "角色设定 性格 名台词 口癖"),
             max_results=8)
-    segs = [
-        f"角色：{name}" + (f"（出自 {series}）" if series else "") + "。",
-        (f"外观特征 tags：{tags}。" if tags else ""),
-    ]
+    segs = [_character_brief(name, series, tags)]
     if search_text:
-        segs.append("网络检索摘要（用于核对设定，可能截断；与摘要冲突时以摘要为准）：\n"
-                    + search_text)
+        segs.append(_search_block(search_text))
+    else:
+        segs.append(_NO_SEARCH_HINT)
     segs.append("待校对印象语（共 %d 句，按顺序）：\n%s"
                 % (len(quotes), "\n".join(f"{i + 1}. {q}"
                                           for i, q in enumerate(quotes))))
@@ -3668,6 +3752,7 @@ async def h_quote_check(plugin) -> dict:
                       "note": note or ("保留" if new_text == old else "已改写")})
     changed = sum(1 for it in items if it["text"] != it["old"])
     return ok({"items": items, "changed": changed,
+               "search_len": len(search_text),
                "source": "websearch+llm" if search_text else "llm"})
 
 

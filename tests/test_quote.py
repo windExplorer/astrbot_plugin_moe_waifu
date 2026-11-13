@@ -210,7 +210,116 @@ with tempfile.TemporaryDirectory() as td:
     check("不传 series 时保留条目自带作品",
           kept[0]["series"] == "自带作品", str(kept))
 
-# ---------- 6) 纯函数 ----------
+# ---------- 6) websearch 工具解析（v0.29.1：4.29 改名 get_func 后曾静默失效） ----------
+
+
+class _FakeTool:
+    def __init__(self, name, reply, active=True, raises=False):
+        self.name = name
+        self.reply = reply
+        self.active = active
+        self.raises = raises
+        self.calls = []
+
+    async def call(self, ctx, query="", max_results=10):
+        self.calls.append({"query": query, "max_results": max_results})
+        if self.raises:
+            raise RuntimeError("boom")
+        return self.reply
+
+
+class _MgrGetFunc:
+    """AstrBot 4.29+：只有 get_func（没有 get_tool）。"""
+
+    def __init__(self, tools):
+        self._tools = {t.name: t for t in tools}
+        self.used = []
+
+    def get_func(self, name):
+        self.used.append(name)
+        return self._tools.get(name)
+
+
+class _MgrGetTool:
+    """旧版：只有 get_tool。"""
+
+    def __init__(self, tools):
+        self._tools = {t.name: t for t in tools}
+
+    def get_tool(self, name):
+        return self._tools.get(name)
+
+
+class _MgrNone:
+    pass
+
+
+class _WsPlugin:
+    def __init__(self, manager):
+        self.context = _WsCtx(manager)
+
+    def _cfg(self, key, default=None):
+        return default
+
+
+class _WsCtx:
+    def __init__(self, manager):
+        self._mgr = manager
+
+    def get_config(self, umo=None):
+        return {}
+
+    def get_llm_tool_manager(self):
+        return self._mgr
+
+
+ok_tool = _FakeTool("web_search_tavily", '{"results":[{"title":"角色设定","snippet":"她是某作的女主角，性格温柔"}]}')
+txt = asyncio.run(webui_api._web_search_text(
+    _WsPlugin(_MgrGetFunc([ok_tool])), "《某作》角色甲 角色设定"))
+check("get_func（4.29+）能取到内置 websearch 并返回摘要",
+      "女主" in txt, txt)
+check("查询串原样传给工具", ok_tool.calls and "《某作》" in ok_tool.calls[0]["query"],
+      str(ok_tool.calls))
+
+txt = asyncio.run(webui_api._web_search_text(
+    _WsPlugin(_MgrGetTool([_FakeTool("web_search_bocha",
+                                     "旧版 get_tool 也能取到的摘要内容，长度足够")])),
+    "q"))
+check("只认 get_tool 的旧版仍可用（向后兼容）", "旧版" in txt, txt)
+
+txt = asyncio.run(webui_api._web_search_text(_WsPlugin(_MgrNone()), "q"))
+check("既无 get_func 也无 get_tool → 空串降级", txt == "")
+
+boom = _FakeTool("web_search_tavily", "", raises=True)
+good = _FakeTool("web_search_bocha", "第二个工具给出的可用摘要，长度足够")
+txt = asyncio.run(webui_api._web_search_text(_WsPlugin(_MgrGetFunc([boom, good])), "q"))
+check("第一个工具抛异常时继续试下一个", "第二个工具" in txt, txt)
+
+err = _FakeTool("web_search_tavily", "Error: Tavily API key is not configured in AstrBot.")
+good2 = _FakeTool("web_search_brave", "某作角色甲的设定摘要，内容长度足够")
+txt = asyncio.run(webui_api._web_search_text(_WsPlugin(_MgrGetFunc([err, good2])), "q"))
+check("工具返回 Error 文本被视为失败", "某作角色甲" in txt, txt)
+
+inactive = _FakeTool("web_search_tavily", "", active=False)
+active = _FakeTool("web_search_bocha", "已激活工具的摘要内容长度足够")
+txt = asyncio.run(webui_api._web_search_text(
+    _WsPlugin(_MgrGetFunc([inactive, active])), "q"))
+check("已激活工具优先，禁用的不抢先", "已激活工具" in txt and not inactive.calls, txt)
+
+# ---------- 7) 查询串锚定作品（同名角色串台的防线） ----------
+q = webui_api._character_query("角色甲", "某作", "角色设定")
+check("有作品时作品名打头并带书名号", q.startswith("《某作》角色甲"), q)
+q2 = webui_api._character_query("角色甲", "", "角色设定")
+check("没作品时退化为名字 + 动漫角色", q2.startswith("角色甲 动漫 角色"), q2)
+brief = webui_api._character_brief("角色甲", "某作", "1girl")
+check("角色头写明作品并以该作品为准", "作品：某作" in brief and "以这部作品为准" in brief, brief)
+brief2 = webui_api._character_brief("角色甲", "", "")
+check("无作品时明确告知无法确认设定", "没有填作品名" in brief2, brief2)
+check("检索摘要段要求以摘要为准并剔除同名噪声",
+      "以本摘要为准" in webui_api._search_block("x")
+      and "另一部作品" in webui_api._search_block("x"))
+
+# ---------- 8) 纯函数 ----------
 check("_clean_quote_lines 去空白/去重/截断",
       webui_api._clean_quote_lines([" 一 ", "一", "", "二"]) == ["一", "二"])
 check("_clean_quote_lines 容忍非列表", webui_api._clean_quote_lines(123) == [])

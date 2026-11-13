@@ -967,6 +967,11 @@
                   每行一句——卡片按抽签种子随机显示其中一句（只写一句就固定显示）。
                   「保存印象语」只改这一处，不会动参考图 / 封面 / 画法。
                 </div>
+                <n-alert v-if="!String(detailEntry.series || '').trim()" type="warning"
+                         :show-icon="false">
+                  该角色没填「作品名」——联网检索只能按名字搜，同名角色很容易串台。
+                  建议先「编辑条目」补上作品，再来补写 / 校对。
+                </n-alert>
                 <n-input v-model:value="galQuotes" type="textarea" :rows="4"
                          placeholder="每行一句，如：初次见面，我是初音未来！从今天起，就是你的专属歌姬了哦。"
                          @update:value="markQuotesDirty"></n-input>
@@ -3587,11 +3592,13 @@
         if (!String(form.value.name || "").trim() || quoteGenLoading.value) return;
         quoteGenLoading.value = true;
         try {
+          // v0.29.1：抽屉里的补写也走联网（按「作品 + 角色」检索），
+          // 否则同一个人在详情页与抽屉里补出来的味道完全不同
           var res = await apiPost("quote_gen", {
             name: String(form.value.name || "").trim(),
             series: String(form.value.series || "").trim(),
             tags_en: String(form.value.tags_en || "").trim(),
-            count: 5
+            count: 5, web: true
           });
           var quotes = (res && res.quotes) || [];
           if (!quotes.length) {
@@ -4410,10 +4417,13 @@
           var merged = cur.concat(quotes.filter(function (q) { return cur.indexOf(q) < 0; }));
           galQuotes.value = merged.join("\n");
           galQuotesDirty.value = true;
-          galQuotesMsgType.value = "info";
-          galQuotesMsg.value = "已补写 " + quotes.length + " 句（"
-            + ((res && res.source) === "websearch+llm" ? "已联网核对设定" : "未取到网络检索")
-            + "），删改后点「保存印象语」";
+          galQuotesMsgType.value = (res && res.source) === "websearch+llm" ? "info" : "warning";
+          galQuotesMsg.value = "已补写 " + quotes.length + " 句"
+            + ((res && res.source) === "websearch+llm"
+              ? ("（已联网核对《" + String((e.series || "未填作品")) + "》设定，摘要 "
+                 + ((res && res.search_len) || 0) + " 字）")
+              : "（⚠️ 没拿到网络资料，只按角色名生成；去 AstrBot 启用任一 web_search_* 并配 Key 才能核对原作设定）")
+            + "，删改后点「保存印象语」";
         } catch (e2) { /* apiPost 已提示 */ } finally {
           galQuotesGenLoading.value = false;
         }
@@ -4441,9 +4451,12 @@
           });
           galQuotesSuggest.value = items;
           var changed = items.filter(function (it) { return it.text !== it.old; }).length;
+          var gotWeb = (res && res.source) === "websearch+llm";
           galQuotesMsgType.value = changed ? "warning" : "success";
-          galQuotesMsg.value = ((res && res.source) === "websearch+llm"
-            ? "已联网检索设定后逐句校对" : "未取到网络检索结果，仅用模型校对")
+          galQuotesMsg.value = (gotWeb
+            ? ("已联网检索《" + String((e.series || "未填作品")) + "》设定（摘要 "
+               + ((res && res.search_len) || 0) + " 字）后逐句校对")
+            : "⚠️ 没拿到网络资料（AstrBot 未启用 web_search_* 或没配 Key），本次只按角色名用模型判断，同名角色容易串台")
             + "：" + (changed ? (changed + " 句建议改写，逐句点「采用」才写回")
                              : "全部贴合角色，无需改动");
         } catch (e2) { /* apiPost 已提示 */ } finally {
