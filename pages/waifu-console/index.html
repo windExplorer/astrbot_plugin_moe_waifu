@@ -164,6 +164,13 @@
     opacity: 0; transition: opacity .15s ease, background .15s ease; }
   .work-card:hover .cover-zoom { opacity: 1; }
   .cover-zoom:hover { background: rgba(20,12,20,.78); }
+  /* v0.29.0：印象语校对结果行（原句划线 → 建议句 + 说明 + 采用按钮） */
+  .quote-row { display: flex; align-items: flex-start; gap: 10px;
+    padding: 7px 0; border-top: 1px dashed rgba(128,128,128,.22); }
+  .quote-body { flex: 1; min-width: 0; font-size: 13px; line-height: 1.5; }
+  .quote-old { font-size: 12px; opacity: .5; text-decoration: line-through;
+    word-break: break-all; }
+  .quote-new { word-break: break-all; }
   .pack-pill { display: inline-flex; align-items: center; gap: 8px;
     background: rgba(214,51,132,.06); border: 1px solid rgba(214,51,132,.22);
     border-radius: 999px; padding: 4px 12px; transition: opacity .15s ease; }
@@ -574,6 +581,8 @@
                 <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
                 <!-- v0.18.0：作品发现（作品名 → websearch+LLM 草稿 → 勾选入库 unverified） -->
                 <n-button size="small" type="primary" secondary @click="openDiscover">＋ 作品发现</n-button>
+                <!-- v0.29.0：作品页也能批量导入（与角色库同一个弹窗，可指定作品名） -->
+                <n-button size="small" @click="openImportForWork('')">批量导入角色</n-button>
                 <span class="bind-tip" style="margin-top: 0;">
                   {{ filteredWorks.length }} / {{ works.length }} 个作品
                 </span>
@@ -605,6 +614,8 @@
                 <span class="bind-tip">{{ currentWork.total }} 个角色 · {{ currentWork.verified }} 已验证 · {{ currentWork.portrait_count }} 张立绘</span>
                 <n-button size="small" type="primary" secondary
                           @click="openNewForWork(currentWork.series)">添加角色</n-button>
+                <!-- v0.29.0：作品详情批量导入——作品名已预填，导入的条目自动归本作品 -->
+                <n-button size="small" @click="openImportForWork(currentWork.series)">批量导入</n-button>
                 <n-button size="small" @click="openWorkCover">设置作品封面</n-button>
                 <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
               </n-space>
@@ -947,6 +958,49 @@
                 </div>
                 <n-alert v-if="refillError" type="error" :bordered="false">{{ refillError }}</n-alert>
               </n-space>
+            </n-card>
+
+            <!-- 印象语（v0.29.0）：卡片上显示的那句；详情页直接改，支持 AI 补写与联网校对 -->
+            <n-card v-if="detailEntry" size="small" :bordered="true" title="印象语">
+              <div class="stack">
+                <div class="bind-tip" style="margin-top: 0;">
+                  每行一句——卡片按抽签种子随机显示其中一句（只写一句就固定显示）。
+                  「保存印象语」只改这一处，不会动参考图 / 封面 / 画法。
+                </div>
+                <n-input v-model:value="galQuotes" type="textarea" :rows="4"
+                         placeholder="每行一句，如：初次见面，我是初音未来！从今天起，就是你的专属歌姬了哦。"
+                         @update:value="markQuotesDirty"></n-input>
+                <n-space align="center" :wrap="true">
+                  <n-button size="small" type="primary" :loading="galQuotesSaving"
+                            @click="saveGalQuotes">保存印象语</n-button>
+                  <n-button size="small" :loading="galQuotesGenLoading"
+                            @click="genGalQuotes">AI 补写 5 句（联网）</n-button>
+                  <n-button size="small" :loading="galQuotesCheckLoading"
+                            @click="checkGalQuotes(true)">联网校对</n-button>
+                  <n-button size="small" :loading="galQuotesCheckLoading"
+                            @click="checkGalQuotes(false)">仅模型校对</n-button>
+                </n-space>
+                <n-alert v-if="galQuotesMsg" :type="galQuotesMsgType" :show-icon="false">{{ galQuotesMsg }}</n-alert>
+                <div v-if="galQuotesSuggest.length > 0">
+                  <div class="bind-tip" style="margin-top: 0;">
+                    校对结果（原句 → 建议，逐句点「采用」才写回上面；采用后记得保存）
+                  </div>
+                  <div v-for="(it, i) in galQuotesSuggest" :key="'qsug' + i" class="quote-row">
+                    <div class="quote-body">
+                      <div class="quote-old" v-if="it.text !== it.old">{{ it.old }}</div>
+                      <div class="quote-new">{{ it.text }}</div>
+                      <div class="bind-tip" style="margin-top: 2px;">· {{ it.note }}</div>
+                    </div>
+                    <n-button size="tiny" :secondary="!it.adopted"
+                              :type="it.adopted ? 'default' : 'primary'"
+                              @click="adoptQuote(i)">{{ it.adopted ? "已采用" : "采用" }}</n-button>
+                  </div>
+                  <n-space align="center" style="margin-top: 8px;">
+                    <n-button size="small" type="primary" @click="adoptAllQuotes">全部采用</n-button>
+                    <n-button size="small" @click="clearQuoteSuggest">放弃校对结果</n-button>
+                  </n-space>
+                </div>
+              </div>
             </n-card>
 
             <!-- 立绘区 -->
@@ -2582,6 +2636,9 @@
           每条需含 <b>id / name / tags_en</b>。导入即写入 <b>pools/&lt;卷名&gt;.json</b>，
           更新插件不会被覆盖；<b>全库按 id 去重</b>，已存在的角色默认不导入。
         </n-alert>
+        <!-- v0.29.0：作品页批量导入时预填，导入的条目统一归到这个作品 -->
+        <n-input v-model:value="importSeries"
+                 placeholder="作品名（可选；填了则导入的角色统一归到该作品，留空按条目自带 series）"></n-input>
         <n-input v-model:value="importPack" placeholder="卷名（可选；整卷对象的 pack 优先，缺省 imported）"></n-input>
         <n-input v-model:value="importText" type="textarea" :rows="12"
                  placeholder='例如：[{"id":"my_char_1","name":"角色A","tags_en":"1girl, long hair","series":"某作","tier":"S"}, {"id":"my_char_2","name":"角色B","tags_en":"1girl","tier":"A"}]'></n-input>
@@ -2593,7 +2650,7 @@
         <div v-if="importResult" style="margin-top:8px;">
           <n-alert :type="importResult.pack ? 'success' : 'error'" :show-icon="false">
             <template v-if="importResult.pack">
-              卷 <b>{{ importResult.pack }}</b>：新增 {{ importResult.imported }} 条、更新 {{ importResult.updated }} 条、重复跳过 {{ importResult.duplicates }} 条（共合法 {{ importResult.total }} 条）
+              卷 <b>{{ importResult.pack }}</b><span v-if="importResult.series">（作品：{{ importResult.series }}）</span>：新增 {{ importResult.imported }} 条、更新 {{ importResult.updated }} 条、重复跳过 {{ importResult.duplicates }} 条（共合法 {{ importResult.total }} 条）
               <span v-if="importResult.skipped && importResult.skipped.length">；不合法 / 跳过明细 {{ importResult.skipped.length }} 条</span>
             </template>
             <template v-else>{{ importResult.error || importResult.message || '导入失败' }}</template>
@@ -3470,6 +3527,7 @@
       var importOpen = Vue.ref(false);
       var importText = Vue.ref("");
       var importPack = Vue.ref("");
+      var importSeries = Vue.ref("");   // v0.29.0：作品页导入时预填，统一归入该作品
       var importing = Vue.ref(false);
       var importResult = Vue.ref(null);
       var importOverwrite = Vue.ref(false);
@@ -3620,7 +3678,14 @@
       }
       function openImport() {
         importResult.value = null;
+        importSeries.value = "";
         importOpen.value = true;
+      }
+      // v0.29.0：作品页（列表 / 详情）进来的导入入口。series 非空时后端把导入的
+      // 条目统一挂到该作品下，JSON 里写错作品名也一并纠正。
+      function openImportForWork(series) {
+        openImport();
+        importSeries.value = String(series || "").trim();
       }
       function onImportFile(evt) {
         var f = evt && evt.target && evt.target.files && evt.target.files[0];
@@ -3638,11 +3703,13 @@
           var res = await apiPost("pools/import", {
             text: text,
             pack: String(importPack.value || "").trim(),
+            series: String(importSeries.value || "").trim(),
             overwrite: !!importOverwrite.value
           });
           importResult.value = res;
           if (res && res.pack) {
-            message.success("导入成功：" + res.pack + "（新增 " + res.imported + " 条 / 更新 " + (res.updated || 0) + " 条 / 重复跳过 " + (res.duplicates || 0) + " 条）");
+            message.success("导入成功：" + res.pack + (res.series ? " · 作品 " + res.series : "")
+              + "（新增 " + res.imported + " 条 / 更新 " + (res.updated || 0) + " 条 / 重复跳过 " + (res.duplicates || 0) + " 条）");
             await refreshAll();
           }
         } catch (e) { /* 已提示 */ } finally {
@@ -4270,6 +4337,138 @@
       var detailEntry = Vue.computed(function () {
         return allEntries.value.find(function (e) { return e.id === galCharId.value; }) || null;
       });
+
+      // ---- 印象语（v0.29.0）：详情页直接改 + AI 补写 + 逐句校对 ----
+      // 与编辑抽屉同一份数据（entry.quotes），但走 /pools/quote_save 只改这两个键，
+      // 避免「只想改一句话却把参考图 / 封面整条覆盖掉」的旧坑。
+      var galQuotes = Vue.ref("");
+      var galQuotesDirty = Vue.ref(false);   // 用户动过就不被 refreshAll 的快照盖掉
+      var galQuotesSaving = Vue.ref(false);
+      var galQuotesGenLoading = Vue.ref(false);
+      var galQuotesCheckLoading = Vue.ref(false);
+      var galQuotesSuggest = Vue.ref([]);
+      var galQuotesMsg = Vue.ref("");
+      var galQuotesMsgType = Vue.ref("info");
+      function entryQuotesText(e) {
+        if (!e) return "";
+        if (Array.isArray(e.quotes) && e.quotes.length) { return e.quotes.join("\n"); }
+        return String(e.quote || "");
+      }
+      function syncGalQuotes() {
+        // 只在用户没在编辑时同步（否则一次刷新就把正在改的字吞了）
+        if (galQuotesDirty.value) return;
+        galQuotes.value = entryQuotesText(detailEntry.value);
+      }
+      function markQuotesDirty() {
+        galQuotesDirty.value = true;
+      }
+      function galQuoteList() {
+        return String(galQuotes.value || "").split(/\n+/)
+          .map(function (s) { return s.trim(); }).filter(Boolean);
+      }
+      Vue.watch([galCharId, detailEntry], function () {
+        syncGalQuotes();
+      }, { immediate: true });
+      Vue.watch(galCharId, function () {
+        // 换角色：校对结果属于上一位，必须清掉
+        galQuotesSuggest.value = [];
+        galQuotesMsg.value = "";
+        galQuotesDirty.value = false;
+        syncGalQuotes();
+      });
+      async function saveGalQuotes() {
+        if (!galCharId.value || galQuotesSaving.value) return;
+        galQuotesSaving.value = true;
+        try {
+          var res = await apiPost("pools/quote_save", {
+            id: galCharId.value, quotes: galQuoteList()
+          });
+          galQuotesDirty.value = false;
+          var n = ((res && res.quotes) || []).length;
+          galQuotesMsgType.value = "success";
+          galQuotesMsg.value = n ? ("已保存 " + n + " 句印象语") : "印象语已清空";
+          message.success(n ? ("印象语已保存（" + n + " 句）") : "印象语已清空");
+          await refreshAll();
+        } catch (e) { /* apiPost 已提示 */ } finally {
+          galQuotesSaving.value = false;
+        }
+      }
+      async function genGalQuotes() {
+        var e = detailEntry.value;
+        if (!e || galQuotesGenLoading.value) { return; }
+        galQuotesGenLoading.value = true;
+        try {
+          var res = await apiPost("quote_gen", {
+            name: String(e.name || "").trim(),
+            series: String(e.series || "").trim(),
+            tags_en: String(e.tags_en || "").trim(),
+            count: 5, web: true
+          });
+          var quotes = (res && res.quotes) || [];
+          if (!quotes.length) { message.warning("LLM 没有返回可用句子，请重试"); return; }
+          var cur = galQuoteList();
+          var merged = cur.concat(quotes.filter(function (q) { return cur.indexOf(q) < 0; }));
+          galQuotes.value = merged.join("\n");
+          galQuotesDirty.value = true;
+          galQuotesMsgType.value = "info";
+          galQuotesMsg.value = "已补写 " + quotes.length + " 句（"
+            + ((res && res.source) === "websearch+llm" ? "已联网核对设定" : "未取到网络检索")
+            + "），删改后点「保存印象语」";
+        } catch (e2) { /* apiPost 已提示 */ } finally {
+          galQuotesGenLoading.value = false;
+        }
+      }
+      async function checkGalQuotes(web) {
+        var e = detailEntry.value;
+        if (!e || galQuotesCheckLoading.value) { return; }
+        var quotes = galQuoteList();
+        if (!quotes.length) {
+          message.warning("先写几句、或点「AI 补写」再来校对");
+          return;
+        }
+        galQuotesCheckLoading.value = true;
+        try {
+          var res = await apiPost("quote_check", {
+            name: String(e.name || "").trim(),
+            series: String(e.series || "").trim(),
+            tags_en: String(e.tags_en || "").trim(),
+            quotes: quotes,
+            web: !!web
+          });
+          var items = ((res && res.items) || []).map(function (it) {
+            return { old: String(it.old || ""), text: String(it.text || it.old || ""),
+                     note: String(it.note || ""), adopted: false };
+          });
+          galQuotesSuggest.value = items;
+          var changed = items.filter(function (it) { return it.text !== it.old; }).length;
+          galQuotesMsgType.value = changed ? "warning" : "success";
+          galQuotesMsg.value = ((res && res.source) === "websearch+llm"
+            ? "已联网检索设定后逐句校对" : "未取到网络检索结果，仅用模型校对")
+            + "：" + (changed ? (changed + " 句建议改写，逐句点「采用」才写回")
+                             : "全部贴合角色，无需改动");
+        } catch (e2) { /* apiPost 已提示 */ } finally {
+          galQuotesCheckLoading.value = false;
+        }
+      }
+      function adoptQuote(i) {
+        var it = galQuotesSuggest.value[i];
+        if (!it || it.adopted) { return; }
+        var list = galQuoteList();
+        var pos = list.indexOf(it.old);
+        if (pos < 0) { list.push(it.text); } else { list[pos] = it.text; }
+        galQuotes.value = list.join("\n");
+        it.adopted = true;
+        galQuotesDirty.value = true;
+      }
+      function adoptAllQuotes() {
+        var n = galQuotesSuggest.value.length;
+        for (var i = 0; i < n; i++) { adoptQuote(i); }
+        message.success("已采用 " + n + " 条建议，记得点「保存印象语」");
+      }
+      function clearQuoteSuggest() {
+        galQuotesSuggest.value = [];
+        galQuotesMsg.value = "";
+      }
       var galSwitchTip = Vue.computed(function () {
         var nm = detailEntry.value ? String(detailEntry.value.name || "") : "";
         return nm ? "正在载入「" + nm + "」的立绘与参考图…" : "正在载入…";
@@ -6390,9 +6589,11 @@
         onDrawerPanelFiles: onDrawerPanelFiles,
         designateRef: designateRef, unbindDrawerRef: unbindDrawerRef,
         importOpen: importOpen, importText: importText, importPack: importPack,
+        importSeries: importSeries,
         importing: importing, importResult: importResult,
         importOverwrite: importOverwrite,
-        openImport: openImport, onImportFile: onImportFile, doImport: doImport,
+        openImport: openImport, openImportForWork: openImportForWork,
+        onImportFile: onImportFile, doImport: doImport,
         dedupeOpen: dedupeOpen, dedupeGroups: dedupeGroups,
         dedupeSelected: dedupeSelected, dedupeBusy: dedupeBusy,
         dedupeResult: dedupeResult, dedupeSelectedCount: dedupeSelectedCount,
@@ -6485,6 +6686,14 @@
         isCover: isCover, setPortraitCover: setPortraitCover,
         galFrom: galFrom, backFromGallery: backFromGallery, detailEntry: detailEntry,
         gotoTryFromDetail: gotoTryFromDetail,
+        galQuotes: galQuotes, markQuotesDirty: markQuotesDirty,
+        galQuotesSaving: galQuotesSaving, galQuotesGenLoading: galQuotesGenLoading,
+        galQuotesCheckLoading: galQuotesCheckLoading,
+        galQuotesSuggest: galQuotesSuggest, galQuotesMsg: galQuotesMsg,
+        galQuotesMsgType: galQuotesMsgType,
+        saveGalQuotes: saveGalQuotes, genGalQuotes: genGalQuotes,
+        checkGalQuotes: checkGalQuotes, adoptQuote: adoptQuote,
+        adoptAllQuotes: adoptAllQuotes, clearQuoteSuggest: clearQuoteSuggest,
         galRefs: galRefs, galRefsLoading: galRefsLoading, galMainRef: galMainRef,
         galRefsView: galRefsView,
         galOrphans: galOrphans, bindOrphan: bindOrphan,

@@ -80,6 +80,7 @@ ROUTES = """
 /pools/import /pools/duplicates /pools/dedupe /relational/status
 /portraits/set_active /trash/list /trash/restore /trash/purge
 /batch/preview /batch/reroll
+/pools/quote_save /quote_check
 """.split()
 
 STORE_METHODS = """

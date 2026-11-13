@@ -402,10 +402,15 @@ async def h_import_pack(plugin) -> dict:
     `strategy` / `cover` / `verified` / `id` / `pack` 全部保留本地值，参考图
     绑定与封面不会丢。同名同作品但 id 不同的不自动合并，交给「重复角色」
     工具处理，避免误把两个不同角色并成一条。
+
+    v0.29.0：新增可选 `series`——「作品库 → 批量导入」从这里进来时带上当前
+    作品名，导入的条目**统一归到该作品**（JSON 里写错作品名的也一并纠正），
+    留空则完全按条目自带的 series 走（角色库的普通导入行为不变）。
     """
     body = await _body()
     text = str(body.get("text") or "").strip()
     pack_override = str(body.get("pack") or "").strip()
+    series_override = str(body.get("series") or "").strip()[:60]
     overwrite = bool(body.get("overwrite", False))
     if not text:
         return err("请粘贴或上传 JSON 文本")
@@ -431,6 +436,8 @@ async def h_import_pack(plugin) -> dict:
     for raw in entries:
         e = pool.normalize_entry(raw, pack_name)
         if e:
+            if series_override:
+                e["series"] = series_override
             good.append(e)
         else:
             skipped.append({"id": str((raw or {}).get("id")
@@ -518,7 +525,7 @@ async def h_import_pack(plugin) -> dict:
         path, data = pack_data[name]
         _json_save(path, data)
     return ok({
-        "pack": pack_name, "created": created,
+        "pack": pack_name, "created": created, "series": series_override,
         "imported": added, "updated": updated, "duplicates": dup_skipped,
         "total": len(good), "skipped": skipped, "overwrite": overwrite,
     })
@@ -1984,10 +1991,13 @@ def _ws_run_context(plugin):
     return _types.SimpleNamespace(context=agent_ctx)
 
 
-async def _discover_search_text(plugin, series: str) -> str:
+async def _web_search_text(plugin, query: str, max_results: int = 10,
+                           timeout: int = 25) -> str:
     """内部 websearch 工具链（按常用顺序探测第一个可用且配置了 key 的）。
 
-    失败/未配置/超时一律返回空串（降级 LLM-only，作品发现不因此不可用）。
+    失败/未配置/超时一律返回空串（调用方降级 LLM-only，功能不因此不可用）。
+    v0.29.0：从「作品发现」里抽出来复用——印象语联网校对也走同一套探测顺序
+    与 ContextWrapper 桩，避免两处各写一份、日后 AstrBot 改接口只修一处。
     """
     names = ("web_search_tavily", "web_search_bocha", "web_search_brave",
              "web_search_baidu", "web_search_exa", "web_search_anysearch",
@@ -2006,18 +2016,22 @@ async def _discover_search_text(plugin, series: str) -> str:
                 continue
             try:
                 res = await asyncio.wait_for(
-                    tool.call(run_ctx, query=series + " 角色 成员 列表 资料",
-                              max_results=10),
-                    timeout=25)
+                    tool.call(run_ctx, query=query, max_results=max_results),
+                    timeout=timeout)
             except Exception:
                 continue
             text = res if isinstance(res, str) else str(res)
             if text and not text.startswith("Error"):
                 return text[:6000]
     except Exception:
-        logger.warning("[" + PLUGIN_NAME + "] 作品发现 websearch 不可用，降级 LLM-only",
+        logger.warning("[" + PLUGIN_NAME + "] websearch 不可用，降级 LLM-only",
                        exc_info=True)
     return ""
+
+
+async def _discover_search_text(plugin, series: str) -> str:
+    """作品发现的检索入口（保留旧名字，内部复用 _web_search_text）。"""
+    return await _web_search_text(plugin, series + " 角色 成员 列表 资料")
 
 
 async def _discover_llm_draft(plugin, series: str, search_text: str) -> list:
@@ -3477,11 +3491,16 @@ _QUOTE_SYSTEM_PROMPT = (
 )
 
 
+def _strip_quote_prefix(text: str) -> str:
+    """剥掉模型爱加的行首编号 / 项目符号（sanitize_llm_output 不管这一层）。"""
+    return re.sub(r"^\s*(?:\d+\s*[.、)）:：]|[-*•·])\s*", "", str(text or "")).strip()
+
+
 def _parse_quote_lines(text: str, count: int) -> list:
     """LLM 返回 → 干净的印象语列表（去编号/引号/空行，去重，截到 count）。"""
     out = []
     for line in str(text or "").splitlines():
-        line = prompt_gen.sanitize_llm_output(line, limit=60)
+        line = _strip_quote_prefix(prompt_gen.sanitize_llm_output(line, limit=60))
         if not line:
             continue
         if line in out:
@@ -3493,13 +3512,19 @@ def _parse_quote_lines(text: str, count: int) -> list:
 
 
 async def h_quote_gen(plugin) -> dict:
-    """LLM 补写角色印象语：按角色名/作品/tags 生成 N 句，前端填进表单再人工确认保存。"""
+    """LLM 补写角色印象语：按角色名/作品/tags 生成 N 句，前端填进表单再人工确认保存。
+
+    v0.29.0：body 带 `web: true` 时先联网检索该角色的原作设定（性格/名台词），
+    把摘要喂给模型——生成内容比纯靠参数记忆更贴角色、少张冠李戴。检索失败自动
+    降级为 LLM-only，返回值里 source 标明实际走的链路。
+    """
     body = await _body()
     name = str(body.get("name") or "").strip()
     if not name:
         return err("缺少角色名")
     series = str(body.get("series") or "").strip()
     tags = str(body.get("tags_en") or "").strip()
+    want_web = bool(body.get("web", False))
     try:
         count = max(1, min(10, int(body.get("count") or 5)))
     except (TypeError, ValueError):
@@ -3510,17 +3535,24 @@ async def h_quote_gen(plugin) -> dict:
         return err("未找到可用的对话模型：请先在 AstrBot 配置 LLM，"
                    "或在本插件配置里指定「提示词模型 ID」")
     timeout = int(plugin._cfg("prompt_llm_timeout", 30) or 30) or 30
-    user_prompt = (
+    search_text = ""
+    if want_web:
+        search_text = await _web_search_text(
+            plugin, f"{name} {series} 角色 性格 设定 名台词".strip(), max_results=8)
+    segs = [
         f"角色：{name}" + (f"（出自 {series}）" if series else "") + "。\n"
         + (f"外观特征 tags：{tags}。\n" if tags else "")
-        + f"请写 {count} 句风格多样的印象语（招呼/傲娇/温柔/俏皮等各来一点，"
-          "不要句式雷同）。"
-    )
+    ]
+    if search_text:
+        segs.append("网络检索摘要（以此核对角色设定，可能截断；与摘要冲突时以摘要为准）：\n"
+                    + search_text)
+    segs.append(f"请写 {count} 句风格多样的印象语（招呼/傲娇/温柔/俏皮等各来一点，"
+                "不要句式雷同）。")
     try:
         resp = await asyncio.wait_for(
-            provider.text_chat(prompt=user_prompt, session_id=None,
+            provider.text_chat(prompt="\n".join(segs), session_id=None,
                                system_prompt=_QUOTE_SYSTEM_PROMPT),
-            timeout=timeout,
+            timeout=timeout + (25 if search_text else 0),
         )
     except asyncio.TimeoutError:
         return err(f"LLM 超时（>{timeout}s），稍后再试")
@@ -3529,7 +3561,149 @@ async def h_quote_gen(plugin) -> dict:
     quotes = _parse_quote_lines(getattr(resp, "completion_text", "") or "", count)
     if not quotes:
         return err("LLM 没有返回可用句子，请重试")
-    return ok({"quotes": quotes})
+    return ok({"quotes": quotes,
+               "source": "websearch+llm" if search_text else "llm"})
+
+
+# ---------- 印象语校对（v0.29.0）：逐句判断是否贴合角色，可叠加联网检索 ----------
+
+# 用户反馈「有的印象语和角色不匹配」——不是重写，而是逐句体检：贴合的保留、
+# 张冠李戴/空泛到放谁身上都行的改写，输出与输入严格一一对应（前端按序替换）。
+_QUOTE_CHECK_SYSTEM = (
+    "你在校对二次元角色卡片上的「印象语」（显示在立绘卡片上的一句中文台词或"
+    "旁观印象）。给你角色名、作品、外观 tags、已有的每句印象语，可能还有网络"
+    "检索摘要。逐句判断：\n"
+    "1) 是否与该角色及其作品的设定相符（性格、说话腔调、身份、人际关系）——"
+    "张冠李戴、像是别的角色的台词、或与作品世界观明显冲突的必须改写；\n"
+    "2) 是否空泛到放哪个角色身上都行——改写时加进该角色的具体特征（口癖、"
+    "身份、标志物、关系），别写成通用土味情话；\n"
+    "3) 是否超过 30 字、带编号/引号/markdown/多句拼一段——修成一句话。\n"
+    "纪律：已贴合的原样保留（note 写「保留」）；改写要保住原句的语气倾向与"
+    "多样性，不要把每句都改成同一种腔调；条数、顺序与输入严格一一对应，不新增"
+    "也不删减。只输出 JSON 数组，每项 {\"text\": \"（改写后的）一句中文\", "
+    "\"note\": \"不超过 20 字的说明：保留 / 改了哪里\"}；不要 markdown 围栏、"
+    "不要解释、不要多余文本。"
+)
+
+
+def _clean_quote_lines(raw, limit: int = 20) -> list:
+    """前端传来的 quotes（数组或按行文本）→ 干净去重列表。"""
+    if isinstance(raw, str):
+        raw = raw.splitlines()
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw:
+        seg = _strip_quote_prefix(
+            prompt_gen.sanitize_llm_output(str(item or ""), limit=120))
+        if seg and seg not in out:
+            out.append(seg)
+        if len(out) >= limit:
+            break
+    return out
+
+
+async def h_quote_check(plugin) -> dict:
+    """印象语联网/离线校对：返回逐句建议（原句 → 改后 + 说明），不写库。
+
+    前端（角色详情页）拿到 items 后由用户逐句「采用」，再调 /pools/quote_save
+    落库——校对结果绝不自动覆盖用户手写的句子。
+    """
+    body = await _body()
+    name = str(body.get("name") or "").strip()
+    if not name:
+        return err("缺少角色名")
+    series = str(body.get("series") or "").strip()
+    tags = str(body.get("tags_en") or "").strip()
+    quotes = _clean_quote_lines(body.get("quotes"))
+    if not quotes:
+        return err("这个角色还没有印象语：先「AI 补写」或手写几句再来校对")
+    want_web = bool(body.get("web", True))
+    provider = await prompt_gen._resolve_provider(
+        plugin.context, str(plugin._cfg("prompt_llm_provider", "") or ""))
+    if provider is None:
+        return err("未找到可用的对话模型：请先在 AstrBot 配置 LLM，"
+                   "或在本插件配置里指定「提示词模型 ID」")
+    timeout = int(plugin._cfg("prompt_llm_timeout", 30) or 30) or 30
+    search_text = ""
+    if want_web:
+        search_text = await _web_search_text(
+            plugin, f"{name} {series} 角色 性格 设定 名台词 口癖".strip(),
+            max_results=8)
+    segs = [
+        f"角色：{name}" + (f"（出自 {series}）" if series else "") + "。",
+        (f"外观特征 tags：{tags}。" if tags else ""),
+    ]
+    if search_text:
+        segs.append("网络检索摘要（用于核对设定，可能截断；与摘要冲突时以摘要为准）：\n"
+                    + search_text)
+    segs.append("待校对印象语（共 %d 句，按顺序）：\n%s"
+                % (len(quotes), "\n".join(f"{i + 1}. {q}"
+                                          for i, q in enumerate(quotes))))
+    try:
+        resp = await asyncio.wait_for(
+            provider.text_chat(prompt="\n".join(segs), session_id=None,
+                               system_prompt=_QUOTE_CHECK_SYSTEM),
+            timeout=timeout + (25 if search_text else 0),
+        )
+    except asyncio.TimeoutError:
+        return err(f"LLM 超时（>{timeout}s），稍后再试")
+    except Exception as exc:
+        return err(f"LLM 调用失败：{exc}")
+    arr = _extract_json_array(getattr(resp, "completion_text", "") or "")
+    items = []
+    for i, old in enumerate(quotes):
+        obj = arr[i] if i < len(arr) and isinstance(arr[i], dict) else None
+        new_text = ""
+        note = ""
+        if obj is not None:
+            new_text = _strip_quote_prefix(prompt_gen.sanitize_llm_output(
+                str(obj.get("text") or ""), limit=120))
+            note = prompt_gen.sanitize_llm_output(
+                str(obj.get("note") or ""), limit=40)
+        if not new_text:
+            # 模型漏项 / 结构不合规：原句原样回传，绝不让句子凭空消失
+            new_text = old
+        items.append({"old": old, "text": new_text,
+                      "note": note or ("保留" if new_text == old else "已改写")})
+    changed = sum(1 for it in items if it["text"] != it["old"])
+    return ok({"items": items, "changed": changed,
+               "source": "websearch+llm" if search_text else "llm"})
+
+
+async def h_quote_save(plugin) -> dict:
+    """角色详情页直接保存印象语：只动 quote / quotes，其它字段一概不碰。
+
+    为什么不用 /pools/save_entry：那个是整条替换（前端必须带全量字段），在详情页
+    只改一句话却要走整条表单，一次字段漏传（如 strategy.refs / cover）就会把
+    参考图或封面清掉（v0.10.x 踩过）。这里用 _set_entry_field 原地只改这两个键。
+    """
+    body = await _body()
+    cid = str(body.get("id") or "").strip()
+    if not cid:
+        return err("缺少角色 id")
+    raw_quotes = body.get("quotes")
+    if raw_quotes is None:
+        return err("缺少 quotes（要清空请传空数组）")
+    if not isinstance(raw_quotes, (list, str)):
+        return err("印象语格式不对：请传数组或按行文本")
+    quotes = _clean_quote_lines(raw_quotes)
+
+    def mutate(_e, raw):
+        if not isinstance(raw, dict):
+            return
+        if quotes:
+            raw["quotes"] = quotes
+            raw["quote"] = quotes[0]
+        else:
+            raw["quotes"] = []
+            raw.pop("quote", None)
+
+    pack = _set_entry_field(plugin, cid, mutate)
+    if pack is None:
+        return err("角色条目不存在（可能已被删除，或 id 改了名）")
+    return ok({"id": cid, "pack": pack, "quotes": quotes,
+               "quote": quotes[0] if quotes else ""})
 
 
 # ---------- 注册 ----------
@@ -3561,6 +3735,9 @@ def register(plugin) -> None:
         ("/batch/stop", h_batch_stop, ["POST"]),
         ("/pools/save_entry", h_save_entry, ["POST"]),
         ("/pools/import", h_import_pack, ["POST"]),
+        # v0.29.0：角色详情页印象语——只改 quote/quotes 的轻量保存 + 逐句校对
+        ("/pools/quote_save", h_quote_save, ["POST"]),
+        ("/quote_check", h_quote_check, ["POST"]),
         ("/pools/duplicates", h_duplicates, ["GET", "POST"]),
         ("/pools/dedupe", h_dedupe, ["POST"]),
         ("/relational/status", h_relational_status, ["GET", "POST"]),
