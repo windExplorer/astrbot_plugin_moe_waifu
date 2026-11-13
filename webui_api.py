@@ -1639,8 +1639,9 @@ async def h_prompt_preview(plugin) -> dict:
     # v0.20.0：random 在预览与生成两侧都按同一种子实摇（resolve_theme 决定论）
     theme, _theme_rec = prompt_gen.resolve_theme(theme_id, seed_int)
     picks = prompt_gen.pick_variations(seed_int, theme, outfit)
-    if str(entry.get("strategy_type") or "base") == "img2img" \
-            and not (theme and theme.get("compose_kw")):
+    # v0.22.4：与 build_generation_prompt 同口径——非模板主题一律强制单图，
+    # 不再按 strategy_type 区分（文生图此前会漏，预览显示三视图、实际出单图）。
+    if not (theme and theme.get("compose_kw")):
         picks = prompt_gen.force_single_view(picks)
     picks = prompt_gen.apply_dim_state(picks, seed_int, dim_state, theme)
     dims = [{"label": label, "zh": zh}
@@ -1934,6 +1935,23 @@ def _batch_candidates(plugin, body) -> tuple:
         if have < quota and require_ref and not draw.has_gen_refs(e, plugin._data_dir):
             skipped.append({"char_id": e.get("id"), "name": e.get("name"),
                             "reason": "无可用参考图"})
+    # v0.22.4：该角色已用过的主题一并交给 theme_plan，续补不再重放老主题。
+    # 预览与实际启动共用这份 cands，主题序列才不会「预览一套、实出一套」。
+    for c in cands:
+        try:
+            rows = (plugin._store.list_portraits(str(c["entry"].get("id") or ""))
+                    if plugin._store else [])
+        except Exception:
+            rows = []
+        used = []
+        for r in rows or []:
+            try:
+                t = str(r["theme"] or "").strip()
+            except (KeyError, IndexError, TypeError):
+                t = ""
+            if t:
+                used.append(t)
+        c["used_themes"] = used
     return cands, skipped, quota, require_ref
 
 
@@ -1942,11 +1960,14 @@ async def h_batch_preview(plugin) -> dict:
     body = await _body()
     cands, skipped, quota, require_ref = _batch_candidates(plugin, body)
     salt = str(plugin._cfg("salt", "moe-waifu"))
+    date = plugin._today()
     labels = {t["id"]: t["label"] for t in prompt_gen.THEMES}
     items = []
     for c in cands:
         e = c["entry"]
-        themes = batch_fill.theme_plan(str(e.get("id") or ""), salt, c["need"])
+        themes = batch_fill.theme_plan(
+            str(e.get("id") or ""), salt, c["need"],
+            have=c["have"], date=date, used=c.get("used_themes") or [])
         labels_list = [labels.get(t, t) for t in themes]
         items.append({
             "char_id": e.get("id"), "name": e.get("name"),
@@ -1976,7 +1997,7 @@ async def h_batch_start(plugin) -> dict:
     if not cands:
         return err("没有满足前提的角色：检查配额是否已满、或角色是否有可用参考图")
     salt = str(plugin._cfg("salt", "moe-waifu"))
-    tasks = batch_fill.build_tasks(cands, salt)
+    tasks = batch_fill.build_tasks(cands, salt, date=plugin._today())
     runner = _batch_runner(plugin)
     n = runner.start(plugin, tasks)
     if n < 0:

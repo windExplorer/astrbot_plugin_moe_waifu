@@ -228,16 +228,21 @@ POSES = [
 ]
 
 # 构图/视图维度（v0.7.0）：默认不提及（普通单张立绘），低权重随机命中
-# 全身站姿/三视图/四视图；「立绘模板」主题（THEMES 带 tpl_ 前缀）强制约束到此维度。
+# 全身站姿；「立绘模板」主题（THEMES 带 tpl_ 前缀）按 compose_kw 精确约束。
+# v0.22.4：三/四视图项权重归零——它们**只能**由 tpl_* 模板主题的子集精确
+# 命中，绝不参与随机。此前 3/30 的随机命中率让 base/lora 文生图链路（没套
+# v0.13.3 的 force_single_view）把「character sheet, multiple views」写进
+# 提示词，批量补图真的吐出三视图拼接设定稿。w=0 项仍在池里供模板命中与
+# 面板显式锁定，_weighted_pick 对全 0 子集会返回该子集项。
 COMPOSE = [
     {"w": 24, "zh": "", "en": ""},
     # v0.13.0：三/四视图模板文案按用户口径写死（正面 / 侧面 / 背面 + 灰色背景），
     # 单图项只描述构图，背景交给 background 维度（免得「纯色」与模板灰底打架）。
     {"w": 3, "zh": "正常站姿的单张全身立绘（正面朝向镜头）",
      "en": "simple background, standing, full body, front-facing"},
-    {"w": 2, "zh": "三视图（正面、侧面、背面同框，灰色纯色背景）",
+    {"w": 0, "zh": "三视图（正面、侧面、背面同框，灰色纯色背景）",
      "en": "character sheet, three views, front view, side view, back view, grey background"},
-    {"w": 1, "zh": "四视图（正面、侧面、背面、四分之三侧面同框，灰色纯色背景）",
+    {"w": 0, "zh": "四视图（正面、侧面、背面、四分之三侧面同框，灰色纯色背景）",
      "en": "character sheet, four views, front view, side view, back view, "
            "three-quarter view, grey background"},
 ]
@@ -583,7 +588,10 @@ def _pick_dim(dim: str, seed_int: int, theme: dict | None = None,
             return _weighted_pick(
                 subset, _sub(seed_int, f"{dim}@{theme.get('id')}", 2 ** 30))
     if non_empty_only:
-        ne = [it for it in items if str(it.get("zh") or "").strip()]
+        # w=0 是模板专用项（三/四视图、标准站姿）：面板「启用该维度」也不该
+        # 随机抽中；模板主题走上面的 kws 子集分支，不受这层过滤影响。
+        ne = [it for it in items
+              if str(it.get("zh") or "").strip() and int(it.get("w", 1)) > 0]
         if ne:
             items = ne
     return _weighted_pick(items, _sub(seed_int, dim, 2 ** 30))
@@ -777,12 +785,14 @@ def describe_variations(seed_int: int, theme_id: str = "", outfit: str = "",
                         force_single: bool = False) -> list:
     """复算本轮变化维度（与 build_generation_prompt 同种子同口径），随档记录用。
 
-    返回 [(维度中文标签, 中文短语)]，只含非空项。图生图链路传 force_single=True
-    （compose 强制单图后不参与变化短语，与提示词文本一致）。纯函数。
+    返回 [(维度中文标签, 中文短语)]，只含非空项。v0.22.4 起「非模板主题一律
+    强制单图」不再由调用方按 strategy_type 传 force_single——base/lora 文生图
+    链路此前漏传，随档维度与提示词会错位（记录里三视图、实际按单图出）。
+    force_single 参数保留兼容旧调用，内部统一按主题判断。纯函数。
     """
     theme, _ = resolve_theme(theme_id, seed_int)
     picks = pick_variations(seed_int, theme, outfit)
-    if force_single and not (theme and theme.get("compose_kw")):
+    if not (theme and theme.get("compose_kw")):
         picks = force_single_view(picks)
     if dim_state:
         picks = apply_dim_state(picks, seed_int, dim_state, theme)
@@ -1138,6 +1148,11 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
             if not bool(cfg.get("variations_enabled", True)):
                 return build_prompt_tags(entry), "static"
             picks = pick_variations(seed_int, theme, outfit)
+            # v0.22.4：文生图同样不许随机混入三/四视图（此前只有 img2img
+            # 分支做了，base/lora 吐出设定稿就是这么来的）。tpl_ 模板主题
+            # 带 compose_kw，仍可显式出多视角设定稿。
+            if not (theme and theme.get("compose_kw")):
+                picks = force_single_view(picks)
             picks = apply_dim_state(picks, seed_int, dim_state, theme)
             style = detect_t2i_style(context, cfg.get("draw_workflow", ""))
             if not bool(cfg.get("prompt_llm_enabled", True)) or style == "danbooru":

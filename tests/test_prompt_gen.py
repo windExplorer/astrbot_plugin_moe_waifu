@@ -413,6 +413,39 @@ async def _run_i2i_tpl(seed):
 txt_tpl, _src_tpl = asyncio.run(_run_i2i_tpl(7))
 check("tpl_3view 主题仍输出三视图指令", "三视图" in txt_tpl)
 
+# ---------- v0.22.4：文生图链路也不许随机多视图 ----------
+# 现象：批量补图里 base 直出的角色吐出三/四视图拼接设定稿。根因是 COMPOSE
+# 池 3/30 权重随机命中多视图，而 force_single_view 只加在 img2img 分支，
+# 文生图（base/lora）连提示词带 LLM 元提示都写着「角色设定稿」。
+check("三/四视图项权重归零（退出随机池）",
+      all(it["w"] == 0 for it in prompt_gen.COMPOSE
+          if "三视图" in it["zh"] or "四视图" in it["zh"]))
+check("模板主题仍能精确命中三视图",
+      "三视图" in prompt_gen.pick_variations(42, tpl3)["compose"]["zh"])
+
+async def _run_t2i_multi(seed):
+    e = dict(ENTRY, strategy_type="base")
+    return await prompt_gen.build_generation_prompt(
+        _BrokenContext(),
+        {"prompt_llm_enabled": True, "prompt_llm_provider": "",
+         "variations_enabled": True}, e, seed)
+
+bad_t2i = []
+for s in range(60):
+    txt, _s = asyncio.run(_run_t2i_multi(s))
+    low = txt.lower()
+    if ("三视图" in txt or "四视图" in txt or "multiple views" in low
+            or "character sheet" in low):
+        bad_t2i.append(s)
+check("base 文生图 60 种子无随机多视图（命中 " + str(bad_t2i) + "）",
+      not bad_t2i)
+check("随档维度不依赖调用方 force_single",
+      prompt_gen.describe_variations(42)
+      == prompt_gen.describe_variations(42, force_single=True))
+check("tpl_3view 随档仍记录多视图构图",
+      any("三视图" in zh for _l, zh in
+          prompt_gen.describe_variations(42, "tpl_3view")))
+
 # ---------- v0.19.0：画风维度（用户反馈「主题里应该加上画风，现在画风太单一」） ----------
 check("画风池 >= 30 款风格",
       len([s for s in prompt_gen.ARTSTYLES if s["zh"]]) >= 30)

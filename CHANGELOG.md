@@ -2,6 +2,19 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.22.4 (2026-11-13)
+
+- **批量补图三连：主题同质化 / 吐出多视图设定稿 / 部分角色 base 直出**（三个现象同源，一并修）。
+  - 现象：① 一个角色是「画风·X / 画风·Y / 画风·Z / 画风·W / 一个场景」，另一个角色也是这些，几乎没有随机感；② 批量出的立绘里混进三视图/四视图拼接设定稿；③ 明明都挂了参考图，有的角色还是按 `base` 文生图直出。
+  - 根因一（主题）：轮换池 32 个里 22 个是 `art_*` 纯画风主题，等权抽 → 每角色 5 张平均 3~4 张只换画风；`theme_plan` 只保证「相邻不重复」（145 角色里 24 个一轮内隔位撞主题），且种子只有 `salt|batch|char_id`，二次补图 100% 重放开头两个主题。真实分布实测：内容主题只占 31%、pose/expression 在各主题间分布逐项相同（纯画风主题不约束这两维），所以「换主题」体感上只换了层皮。
+  - 根因二（多视图）：`COMPOSE` 池三/四视图共 3/30 权重参与随机，而 v0.13.3 的 `force_single_view` 只加在 img2img 分支；文生图（base/lora）连提示词带 LLM 元提示都写着「角色设定稿、多视角」，于是真的吐出拼接图。
+  - 根因三（base 直出）：入列前提 `has_gen_refs()` 只看有没有 `ref`/`gen_refs` 文件，不看 `strategy_type`；工坊把画法切回 base 时旧 `ref` 会刻意保留（`merge_saved_entry` 不 pop 旧值），这些角色过了筛选却被 `generate_portrait` 按 base 出图——参考图白挂，并顺带踩中根因二。
+  - 修复（批量链路）：新增 `batch_fill.effective_batch_entry()`，有可用图生图源就把条目纠正为 `img2img`（`effective_entry` 只改 type，`ref`/`gen_refs`/`denoise` 全部沿用），提示词与出图共用同一份条目；`batch_require_ref=false` 且确无参考图的角色仍按原画法。
+  - 修复（单视图双保险）：`COMPOSE` 三/四视图权重归零，只由 `tpl_*` 模板主题的 `compose_kw` 精确命中或面板显式锁定；文生图分支补上 `force_single_view`；`_pick_dim` 显式启用维度时排除 `w=0` 的模板专用项；`describe_variations` / 预览维度链统一为「非模板主题一律单图」，不再靠调用方按 `strategy_type` 传 `force_single`（此前文生图漏传，随档维度与提示词错位）。
+  - 修复（主题计划）：`theme_plan` 改为内容:画风 = 3:2 分层交错、两池各自按种子洗牌，一轮内不重复、优先排除该角色已用过的主题，种子加入 `have`/`date`；预览与实出同参（`used_themes` 由 `list_portraits` 取，预览/启动都传当天日期）。实测 145 个角色：内容主题占比 31%→60%、一轮内重复 24→0、续补与已用主题重合 0/145（旧版 100% 重放）、5 张主题集合仍 145/145 各不相同。
+  - 顺带修 `tests/test_webui_contract.py` 的契约清单：v0.22.2 群绑定改名成 `bindSeriesOpts` / `setRowSeries` 后清单里还是旧名 `bindPackOpts` / `setRowPacks`，该守卫自上一版起一直报 2 条 FAIL。
+  - 验证：14 个自检脚本全绿（新增分层配比 / 避历史 / 续补不重放 / 有参考图强制 img2img / 文生图 60 种子无随机多视图 / 模板仍可出设定稿 等守卫）。
+
 ## v0.22.3 (2026-11-13)
 
 - **修复分群绑定页 `ReferenceError: bindPackOpts is not defined`**：上轮把群绑定维度从「卷」改成「作品」时，`bindPackOpts`→`bindSeriesOpts`、`setRowPacks`→`setRowSeries` 的改名漏改了 `setup` 的 `return {…}` 暴露对象，导致页面一进 `setup` 就抛错、绑定页整页挂掉。已把暴露对象里的 `bindPackOpts: bindPackOpts` / `setRowPacks: setRowPacks` 一并改为 `bindSeriesOpts` / `setRowSeries`，全局搜索确认无旧名残留。

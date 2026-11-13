@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """batch_fill.py 纯函数自检（可直接运行，退出码即结论；不联网、不依赖 astrbot）。
 
-守卫点：主题轮换（相邻不重复、分布不退化）、前提筛选（配额不足 + 参考图开关）、
-任务展开（逐张带主题）、BatchRunner 状态机（快照计数、停止语义）。
+守卫点：主题轮换（相邻不重复、分布不退化、分层配比 / 避历史 / 续补不重放）、
+前提筛选（配额不足 + 参考图开关）、任务展开（逐张带主题）、
+批量条目画法纠正（有参考图强制 img2img）、BatchRunner 状态机。
 """
 import asyncio
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -37,6 +39,22 @@ def main():
     check("不同角色序列不同", bf.theme_plan("c2", "salt", 10) != plan[:10])
     check("n=0 安全", bf.theme_plan("x", "salt", 0) == []
           and bf.theme_plan("x", "salt", -3) == [])
+
+    # v0.22.4：主题计划重做——内容主题为主、一轮不重复、避开历史、续补不重放
+    p5 = bf.theme_plan("c1", "salt", 5, date="2026-11-13")
+    content_n = sum(1 for t in p5 if not str(t).startswith("art_"))
+    check("5 张里内容主题 >= 3（画风主题不再占多数）", content_n >= 3, str(p5))
+    check("一轮内主题不重复", len(set(p5)) == 5, str(p5))
+    check("跨角色 5 张序列不同",
+          bf.theme_plan("c2", "salt", 5, date="2026-11-13") != p5)
+    p_avoid = bf.theme_plan("c1", "salt", 3, have=3, date="2026-11-13",
+                            used=p5[:3])
+    check("续补避开已用主题", not (set(p_avoid) & set(p5[:3])), str(p_avoid))
+    check("have/date 参与洗牌（续补不重放开头）",
+          bf.theme_plan("c1", "salt", 5, have=3, date="2026-11-13") != p5
+          and bf.theme_plan("c1", "salt", 5, date="2026-11-14") != p5)
+    check("新计划仍是决定论",
+          bf.theme_plan("c1", "salt", 5, date="2026-11-13") == p5)
 
     # v0.19.0：纯画风主题（art_*）也要参与批量补图轮换——否则「一批图换个画风」
     # 只能一张张手点，用户反馈画风太单一的诉求在批量场景下没被解决
@@ -91,12 +109,33 @@ def main():
         def _draw_cfg(self):
             return {}
 
+    # v0.22.4：挂了参考图的 base 角色必须纠正成 img2img（趁 draw 还是真模块测）
+    with tempfile.TemporaryDirectory() as td:
+        ref = Path(td) / "ref.png"
+        ref.write_bytes(b"x")
+        base_e = {"id": "x", "strategy_type": "base",
+                  "strategy": {"type": "base", "ref": str(ref), "denoise": 0.4}}
+        eff = bf.effective_batch_entry(base_e, td)
+        check("有参考图的 base 角色纠正为 img2img",
+              eff["strategy_type"] == "img2img"
+              and eff["strategy"]["ref"] == str(ref)
+              and eff["strategy"]["denoise"] == 0.4)
+        check("纠正不改原条目", base_e["strategy_type"] == "base")
+        no_ref = {"id": "y", "strategy_type": "base", "strategy": {"type": "base"}}
+        check("无参考图角色保持原画法",
+              bf.effective_batch_entry(no_ref, td)["strategy_type"] == "base")
+        i2i = dict(base_e, strategy_type="img2img")
+        check("已是 img2img 原样返回",
+              bf.effective_batch_entry(i2i, td) is i2i)
+
     import types
     real_draw, real_pg, real_pool = bf.draw, bf.prompt_gen, bf.pool
     fake_draw = types.SimpleNamespace(
         generate_portrait=async_init(lambda *a, **k: ("/tmp/x.png", "ok", "", 1)),
         archive_portrait=lambda *a: "portraits/x/1.png",
-        image_size=lambda *a: (0, 0))  # v0.20.0：随档尺寸（桩不给真值）
+        image_size=lambda *a: (0, 0),  # v0.20.0：随档尺寸（桩不给真值）
+        has_gen_refs=lambda e, d=None: False,   # v0.22.4：队列桩无参考图
+        effective_entry=lambda e, o: e)
     fake_prompt_gen = types.SimpleNamespace(
         THEMES=real_pg.THEMES,
         build_generation_prompt=async_init(lambda *a, **k: ("p", "local")),

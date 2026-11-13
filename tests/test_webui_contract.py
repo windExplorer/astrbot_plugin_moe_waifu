@@ -52,8 +52,8 @@ workKeyword workFilterCat workFilterVerified workSort workCatOpts workVerifiedOp
 workSortOpts filteredWorks toggleWorkChar openNewForWork
 fmtTime cfgBoundGroups pickSimGroup simScopeText
 avatarOf hashColor thumbOf colorOf rerollLabel tv brandColor zhLocale
-bindRows bindPackOpts bindRawOpen bindLoading loadBindPools onBindRawInput
-addBindRow setRowGid setRowPacks removeBindRow
+bindRows bindSeriesOpts bindRawOpen bindLoading loadBindPools onBindRawInput
+addBindRow setRowGid setRowSeries removeBindRow
 galWidth galHeight
 """.split()
 

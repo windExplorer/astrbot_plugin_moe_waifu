@@ -3,10 +3,12 @@
 
 用户口径：自动伪随机批量生成立绘——全局或按作品/角色选择；前提两条：
 ① 角色存在可用参考图（strategy.refs / 主参考文件真实存在，base 条目同样要求，
-   配置 batch_require_ref 可关——用户明确「不存在则跳过」）；
+   配置 batch_require_ref 可关——用户明确「不存在则跳过」）；v0.22.4 起挂了
+   图生图源的角色一律按 img2img 出图，不再被条目画法里的 base 带偏；
 ② 立绘数量不足配置配额（portraits_per_char），缺几张补几张。
-每张立绘伪随机套一个内容主题（相邻不重复、多主题轮换避免重复），主题与提示词
-随档记录（v0.15.0 的 prompt/theme 列）。队列串行（萌绘侧本就有 _gen_lock），
+每张立绘套一个主题（v0.22.4 起内容:画风 3:2 分层、一轮内不重复、避开该角色
+已用主题、续补不重放），主题与提示词随档记录（v0.15.0 的 prompt/theme 列）。
+队列串行（萌绘侧本就有 _gen_lock），
 单张超时由 draw.generate_portrait 的 draw_timeout 兜底——超时/失败记录后继续
 下一张，绝不卡整体进度；运行中可停止。
 
@@ -46,29 +48,73 @@ def content_theme_ids() -> list:
             if t["id"] != "random" and not str(t["id"]).startswith("tpl_")]
 
 
-def theme_plan(char_id: str, salt: str, n: int) -> list:
-    """该角色本轮补图的主题序列：伪随机 + 相邻不重复（确定性，可复算）。
+def theme_plan(char_id: str, salt: str, n: int, have: int = 0,
+               date: str = "", used: list | None = None) -> list:
+    """该角色本轮补图的主题序列（v0.22.4 重做）。
 
-    种子源 sha256(salt|batch|char_id)；每张在「排除上一张主题」的列表里按
-    派生值挑选——相邻两次必不同，整体分布均匀（避免主题撞车）。返回主题 id
-    列表（长度 n；n<=0 → 空表）。
+    旧版三个毛病对应「一个角色这些主题、另一个角色也是这些」：
+    ① 轮换池 32 个里 22 个是 art_* 纯画风主题，等权抽 → 每角色 5 张里
+      平均 3~4 张都是「画风·X」，只换画风不换场景，观感高度同质；
+    ② 只保证「相邻不重复」，一轮 5 张里仍有约 17% 出现隔位重复主题；
+    ③ 种子只有 salt|batch|char_id → 二次补图永远重放开头两个主题。
+    现口径：内容:画风 = 3:2 交错，两池各自按种子洗牌（决定论）；优先排除
+    该角色已用过的主题，一轮内不重复；种子含 have/date，续补不重放。
     """
     n = max(0, int(n or 0))
     ids = content_theme_ids()
     if not ids or n <= 0:
         return []
-    raw = f"{salt}|batch|{char_id}".encode("utf-8")
-    h = int.from_bytes(hashlib.sha256(raw).digest()[:8], "big")
-    out = []
+    content = [t for t in ids if not str(t).startswith("art_")]
+    art = [t for t in ids if str(t).startswith("art_")]
+    base = f"{salt}|batch|{char_id}|{date}|{int(have or 0)}"
+
+    def shuffled(lst: list, tag: str) -> list:
+        out = list(lst)
+        for i in range(len(out) - 1, 0, -1):
+            raw = f"{base}|{tag}|{i}".encode("utf-8")
+            j = int.from_bytes(hashlib.sha256(raw).digest()[:8], "big") % (i + 1)
+            out[i], out[j] = out[j], out[i]
+        return out
+
+    used_set = {str(x) for x in (used or []) if str(x).strip()}
+    out: list = []
     prev = ""
-    for i in range(n):
-        pool_ids = [t for t in ids if t != prev] or ids
-        h = int.from_bytes(
-            hashlib.sha256(f"{raw}|{i}".encode("utf-8")).digest()[:8], "big")
-        cur = pool_ids[h % len(pool_ids)]
-        out.append(cur)
-        prev = cur
-    return out
+    round_no = 0
+    while len(out) < n and round_no < 64:
+        # 第一轮只用没用过的主题；用尽后放宽，保证 n 张凑得齐
+        cpool = shuffled(content, f"c{round_no}")
+        apool = shuffled(art, f"a{round_no}")
+        if round_no == 0:
+            cpool = [t for t in cpool if t not in used_set]
+            apool = [t for t in apool if t not in used_set]
+        merged: list = []
+        ci = ai = 0
+        while ci < len(cpool) or ai < len(apool):
+            for _ in range(3):
+                if ci < len(cpool):
+                    merged.append(cpool[ci]); ci += 1
+            for _ in range(2):
+                if ai < len(apool):
+                    merged.append(apool[ai]); ai += 1
+        for t in merged:
+            if t == prev or t in out:   # 一轮内不重复（顺带保证相邻不重复）
+                continue
+            out.append(t)
+            prev = t
+            if len(out) >= n:
+                break
+        round_no += 1
+    # 池子总量小于 n（配额 > 32）时按序复用补齐，仍避开相邻重复
+    if len(out) < n:
+        fallback = content + art
+        k = 0
+        while len(out) < n and k < n * 4:
+            t = fallback[k % len(fallback)]
+            if t != prev:
+                out.append(t)
+                prev = t
+            k += 1
+    return out[:n]
 
 
 def pick_candidates(entries: list, have_count_fn, quota: int,
@@ -89,17 +135,42 @@ def pick_candidates(entries: list, have_count_fn, quota: int,
     return out
 
 
-def build_tasks(cands: list, salt: str) -> list:
-    """候选 → 具体任务：每角色展开成逐张任务并附主题 id（theme_plan 决定）。"""
+def build_tasks(cands: list, salt: str, date: str = "") -> list:
+    """候选 → 具体任务：每角色展开成逐张任务并附主题 id（theme_plan 决定）。
+
+    v0.22.4：have / date / used_themes 一并交给 theme_plan；预览与实际启动
+    必须传同样的 date，否则「预览写着校园、实出泳装」。
+    """
     tasks = []
     for c in cands or []:
         entry = c.get("entry") or {}
-        themes = theme_plan(str(entry.get("id") or ""), salt, int(c.get("need") or 0))
+        themes = theme_plan(
+            str(entry.get("id") or ""), salt, int(c.get("need") or 0),
+            have=int(c.get("have") or 0), date=date,
+            used=c.get("used_themes") or [])
         for i, theme_id in enumerate(themes):
             tasks.append({"char_id": entry.get("id") or "", "index": i,
                           "theme_id": theme_id,
                           "entry": entry, "have": int(c.get("have") or 0)})
     return tasks
+
+
+def effective_batch_entry(entry: dict, data_dir=None) -> dict:
+    """批量补图用条目：挂了可用图生图源就强制按 img2img 出图（v0.22.4）。
+
+    根因：入列前提 has_gen_refs() 只看「有没有 ref/gen_refs 文件」，不看
+    strategy_type；工坊把画法切回 base 时旧 ref 会刻意保留（merge_saved_entry），
+    于是这些角色进了批量队列，generate_portrait 却按 base 走文生图——
+    参考图白挂、输出还是 base 直出（还顺带踩中随机多视图）。
+    批量补图的语义就是「按参考图补立绘」，这里统一纠正画法；effective_entry
+    只改 type，原 ref / gen_refs / denoise 全部沿用。没有图生图源的角色保持
+    原画法（batch_require_ref=false 时的 base/lora 直出）。纯函数，可独立测试。
+    """
+    if str(entry.get("strategy_type") or "base") == "img2img":
+        return entry
+    if not draw.has_gen_refs(entry, data_dir):
+        return entry
+    return draw.effective_entry(entry, {"strategy_type": "img2img"})
 
 
 def _synthetic_event():
@@ -172,9 +243,12 @@ class BatchRunner:
                 if self.stop_flag:
                     break
                 item = self.items[i] if i < len(self.items) else {}
-                entry = task.get("entry") or {}
                 cid = str(task.get("char_id") or "")
                 theme_id = str(task.get("theme_id") or "")
+                # v0.22.4：挂了参考图就按图生图出图（有效条目同时喂给提示词
+                # 与出图，避免「提示词按文生图 tag 拼、出图按 img2img 编辑」）。
+                entry = effective_batch_entry(
+                    task.get("entry") or {}, plugin._data_dir)
                 item["name"] = str(entry.get("name") or cid)
                 item["theme_label"] = labels.get(theme_id, theme_id)
                 # 每张现取 seq（中途可能有人抽卡/手补，动态取保证不撞号）
