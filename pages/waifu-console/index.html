@@ -106,6 +106,22 @@
   .dbg-tab:hover { border-color: rgba(64,158,255,.55); }
   .dbg-tab.on { background: rgba(64,158,255,.16);
     border-color: rgba(64,158,255,.65); color: #2080f0; font-weight: 600; }
+  /* v0.31.0：角色详情页签条（dbg-tabs 的品牌粉变体）+ 头像 + 资料表单网格 */
+  .gal-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .gal-tab { padding: 5px 14px; border-radius: 999px; font-size: 13px;
+    cursor: pointer; user-select: none;
+    border: 1px solid rgba(128,128,128,.28); background: rgba(128,128,128,.08); }
+  .gal-tab:hover { border-color: rgba(214,51,132,.55); }
+  .gal-tab.on { background: rgba(214,51,132,.14);
+    border-color: rgba(214,51,132,.65); color: #d63384; font-weight: 600; }
+  .gal-avatar { width: 42px; height: 42px; border-radius: 50%;
+    object-fit: cover; border: 2px solid rgba(214,51,132,.45); }
+  .prof-avatar-img { width: 96px; height: 96px; border-radius: 50%;
+    object-fit: cover; border: 3px solid rgba(214,51,132,.4); flex: none; }
+  .prof-avatar-row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .prof-grid { display: grid; grid-template-columns: 110px 1fr; gap: 8px 10px;
+    align-items: start; }
+  .prof-label { font-size: 13px; opacity: .75; padding-top: 6px; }
   /* v0.27.0：回收站清单 */
   .trash-group { border: 1px solid rgba(128,128,128,.22); border-radius: 8px;
     padding: 8px 10px; margin-bottom: 8px; }
@@ -491,6 +507,9 @@
               <!-- v0.25.6：后台补图进度跟到按钮上（关掉弹窗也能看见在跑） -->
               <n-button size="small" :type="batchRunning ? 'primary' : 'default'"
                         :secondary="batchRunning" @click="openBatchModal">{{ batchBtnText }}</n-button>
+              <!-- v0.31.0：批量生成缺失头像（后台队列，进度弹窗） -->
+              <n-button size="small" :loading="!!(galAvBatch && galAvBatch.running)"
+                        @click="startAvatarBatch">{{ (galAvBatch && galAvBatch.running) ? "头像生成中…" : "批量头像" }}</n-button>
               <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
               <!-- v0.6.1：每行卡片数快捷调整（写回 ui_grid_cols，免去去配置页） -->
               <span style="font-size: 12px; opacity: .6;">每行</span>
@@ -875,7 +894,41 @@
               <span class="bind-tip" style="margin-top: 0;">立绘 {{ galItems.length }}/{{ meta.quota }} · 参考图 {{ galRefs.length }}</span>
               <w-icon-btn icon="refresh" tip="刷新全部" :loading="refreshing"
                           @click="refreshAll"></w-icon-btn>
+              <!-- v0.31.0：角色头像（有才显示，点击进资料页换） -->
+              <img v-if="galAvatarThumb" :src="galAvatarThumb" class="gal-avatar"
+                   title="角色头像（到「资料」页签可更换）" alt="头像"
+                   @click="switchGalTab('profile')">
             </div>
+
+            <!-- v0.31.0：详情页页签化——概览（速览+生成） / 资料（头像+评级+百科+印象语） /
+                 立绘 / 参考图。此前立绘墙 + 参考图墙 + 生成面板 + 印法语一股脑堆一页，
+                 越长越难找；未绑定图片在「参考图」页签里独立成节。 -->
+            <div class="gal-tabs">
+              <div v-for="t in galTabs" :key="t.key" class="gal-tab"
+                   :class="{ on: galTab === t.key }"
+                   @click="switchGalTab(t.key)">{{ t.label }}</div>
+            </div>
+
+            <div v-if="galTab === 'overview'" class="stack">
+              <!-- v0.31.0：速览——入库日期 / 首次被抽 / 累计次数 / 平均生成耗时 -->
+              <n-card size="small" :bordered="true" title="速览">
+                <template #header-extra>
+                  <span class="bind-tip" style="margin: 0;"
+                        v-if="galSummaryLoading">载入中…</span>
+                </template>
+                <div class="prof-grid">
+                  <div class="prof-label">入库日期</div>
+                  <div>{{ tv(galSummary ? galSummary.added_at : null) }}</div>
+                  <div class="prof-label">首次被抽</div>
+                  <div>{{ tv(galSummary ? galSummary.first_draw : null) }}</div>
+                  <div class="prof-label">最近被抽</div>
+                  <div>{{ tv(galSummary ? galSummary.last_draw : null) }}</div>
+                  <div class="prof-label">累计被抽</div>
+                  <div>{{ galSummary && galSummary.draw_count > 0 ? galSummary.draw_count + " 次" : tv(null) }}</div>
+                  <div class="prof-label">立绘</div>
+                  <div>{{ galItems.length }} 张<span v-if="galSummary && galSummary.portrait_avg_ms > 0"> · 平均生成耗时 {{ fmtDur(galSummary.portrait_avg_ms) }}</span></div>
+                </div>
+              </n-card>
 
             <!-- 生成立绘面板：补一张 / 选图图生图 -->
             <n-card size="small" :bordered="true" title="生成立绘">
@@ -959,9 +1012,65 @@
                 <n-alert v-if="refillError" type="error" :bordered="false">{{ refillError }}</n-alert>
               </n-space>
             </n-card>
+            </div><!-- /概览页签 -->
 
-            <!-- 印象语（v0.29.0）：卡片上显示的那句；详情页直接改，支持 AI 补写与联网校对 -->
+            <div v-else-if="galTab === 'profile'" class="stack">
+              <!-- v0.31.0：头像——上传 / 从已有图裁取 / AI 生成 / 移除 -->
+              <n-card size="small" :bordered="true" title="头像">
+                <div class="prof-avatar-row">
+                  <img v-if="galAvatarThumb" :src="galAvatarThumb" class="prof-avatar-img" alt="头像">
+                  <div v-else class="prof-avatar-img"
+                       style="display:flex; align-items:center; justify-content:center;
+                              font-size:12px; opacity:.55; box-sizing:border-box;">无头像</div>
+                  <div class="stack" style="flex:1; min-width: 260px;">
+                    <n-space align="center" :wrap="true" size="small">
+                      <n-button size="small" type="primary" secondary
+                                @click="galAvatarUploadOpen = true">上传头像</n-button>
+                      <n-button size="small" secondary @click="openAvatarPick">从立绘 / 参考图裁取</n-button>
+                      <n-button size="small" type="primary" secondary :loading="galAvatarBusy"
+                                @click="doAvatarGenerate">AI 生成头像</n-button>
+                      <n-button size="small" quaternary type="error"
+                                :armed="delArm === 'avatar:' + galCharId"
+                                :tip="delArm === 'avatar:' + galCharId ? '再点一次确认移除' : '移除头像'"
+                                @click="avatarClear">移除头像</n-button>
+                    </n-space>
+                    <div class="bind-tip">AI 生成优先走图生图（用出卡源/生成源，身份最稳），没有生成源的角色按条目画法文生图；产物统一裁成 512×512 方形。</div>
+                  </div>
+                </div>
+              </n-card>
+
+              <!-- v0.31.0：评级 + 百科资料（手动 / AI 联网获取；保存才写库） -->
+              <n-card size="small" :bordered="true" title="角色资料">
+                <div class="stack">
+                  <div class="prof-grid">
+                    <div class="prof-label">评级</div>
+                    <div><n-select v-model:value="galTier" :options="tierOpts" size="small"
+                                   style="width: 140px;" clearable
+                                   placeholder="未评级"></n-select></div>
+                    <template v-for="f in profileFields" :key="f.key">
+                      <div class="prof-label">{{ f.label }}</div>
+                      <n-input v-if="f.type === 'textarea'" v-model:value="galProfile[f.key]"
+                               type="textarea" :rows="3" size="small" :placeholder="f.ph"></n-input>
+                      <n-input v-else v-model:value="galProfile[f.key]" size="small"
+                               :placeholder="f.ph"></n-input>
+                    </template>
+                  </div>
+                  <div class="bind-tip">评级与资料一起随「保存资料」写库；「AI 获取」只把建议填进表单，检查后再保存，绝不自动覆盖。</div>
+                  <n-space align="center" :wrap="true" size="small">
+                    <n-button size="small" type="primary" :loading="galProfileSaving"
+                              @click="saveGalProfile">保存资料</n-button>
+                    <n-button size="small" :loading="galProfileBusy"
+                              @click="genGalProfile(true)">AI 获取资料（联网）</n-button>
+                    <n-button size="small" :loading="galProfileBusy"
+                              @click="genGalProfile(false)">仅模型补全</n-button>
+                  </n-space>
+                  <n-alert v-if="galProfileMsg" :type="galProfileMsgType" :show-icon="false">{{ galProfileMsg }}</n-alert>
+                </div>
+              </n-card>
+
+            <!-- 印法语（v0.29.0）：卡片上显示的那句；详情页直接改，支持 AI 补写与联网校对 -->
             <n-card v-if="detailEntry" size="small" :bordered="true" title="印象语">
+
               <div class="stack">
                 <div class="bind-tip" style="margin-top: 0;">
                   每行一句——卡片按抽签种子随机显示其中一句（只写一句就固定显示）。
@@ -1010,9 +1119,10 @@
                 </div>
               </div>
             </n-card>
+            </div><!-- /资料页签 -->
 
             <!-- 立绘区 -->
-            <div>
+            <div v-else-if="galTab === 'portraits'">
               <div class="sec-title">立绘
                 <span class="cnt">{{ galItems.length }}/{{ meta.quota }} · 不足配额会按种子自动补生{{ galDrawRef ? " · 出卡源已指定" : "" }}<template v-if="galDisabledCount > 0"> · 已停用 {{ galDisabledCount }}（不占配额）</template></span>
                 <!-- v0.21.0：停用的立绘默认隐藏，点这里切换显示 -->
@@ -1114,11 +1224,11 @@
                 </n-gi>
               </n-grid>
               <n-empty v-else-if="!loadingGal"
-                       description="还没有立绘：上方「开始补图」，或去试画台试一张"></n-empty>
+                       description="还没有立绘：去「概览」页签点「开始补图」，或去试画台试一张"></n-empty>
             </div>
 
             <!-- 参考图区 -->
-            <div>
+            <div v-else-if="galTab === 'refs'">
               <div class="sec-title">参考图
                 <span class="cnt">{{ galRefs.length }} 张{{ galMainRef ? " · 主参考已指定" : "" }}{{ galDrawRef ? " · 出卡源已指定" : " · 未指定出卡源（抽卡不会走图生图）" }} · 与立绘库互斥，可双向转移</span>
                 <!-- v0.6.2：上传改弹窗（可拖拽可多选），不再是一颗孤零零的小按钮 -->
@@ -2543,6 +2653,60 @@
                         @files="onGalPanelFiles"></w-upload-panel>
         <div class="bind-tip" v-if="galUpNote" style="color: #d63384; opacity: 1;">{{ galUpNote }}</div>
         <div class="bind-tip">提示：Ctrl+V 可直接粘贴截图/图片；关闭弹窗后也可以把图直接拖进页面任何位置，当前在角色详情时会自动绑定。</div>
+      </n-space>
+    </n-modal>
+
+    <!-- ============ 角色详情 · 头像上传弹窗（v0.31.0；preset 须 dialog） ============ -->
+    <n-modal v-model:show="galAvatarUploadOpen" preset="dialog" title="上传头像"
+             style="width: 480px;">
+      <n-space vertical size="medium">
+        <w-upload-panel :multiple="false"
+                        hint="任意尺寸都可以，自动裁成 512×512 方形（竖图偏上取，保脸）；支持 png / jpg / jpeg / webp"
+                        @files="onAvatarPanelFiles"></w-upload-panel>
+        <div class="bind-tip" v-if="galAvatarNote">{{ galAvatarNote }}</div>
+      </n-space>
+    </n-modal>
+
+    <!-- ============ 角色详情 · 从立绘/参考图裁取头像（v0.31.0；点图即设） ============ -->
+    <n-modal v-model:show="galAvatarPickOpen" preset="dialog" title="从立绘 / 参考图裁取头像"
+             style="width: 600px;">
+      <div class="stack">
+        <div class="gen-strip" v-if="genSources.length > 0">
+          <div v-for="g in genSources" :key="'avpic:' + g.kind + ':' + g.path"
+               class="gal-item" :title="g.kind === 'ref' ? '参考图' : '立绘 #' + g.display_no">
+            <img v-if="g.thumb" :src="g.thumb" class="clickable-img" alt="候选头像"
+                 title="点图设为头像（自动裁成方形）"
+                 @click.stop="doAvatarSet(g)">
+            <div v-else class="gal-meta">文件丢失</div>
+            <div class="gal-meta gen-sel" @click.stop="doAvatarSet(g)">
+              {{ g.kind === "ref" ? "参考图" : "立绘 #" + g.display_no }} · 点此设为头像</div>
+          </div>
+        </div>
+        <div v-else class="bind-tip">该角色还没有立绘 / 参考图：先去「概览」生成或「参考图」上传。</div>
+      </div>
+    </n-modal>
+
+    <!-- ============ 批量头像进度弹窗（v0.31.0；角色库工具栏发起） ============ -->
+    <n-modal v-model:show="galAvBatchOpen" preset="dialog" title="批量生成缺失头像"
+             style="width: 460px;">
+      <n-space vertical size="medium">
+        <div class="bind-tip">串行逐角色走萌绘工作流生成（单张 20~120s），只处理还没有头像的角色；进度实时刷新。</div>
+        <div style="font-size: 22px; font-weight: 600;">
+          {{ galAvBatch ? (galAvBatch.done + " / " + galAvBatch.total) : "…" }}
+          <span v-if="galAvBatch && galAvBatch.failed > 0"
+                style="font-size: 13px; color: #d63384; font-weight: normal; margin-left: 10px;">失败 {{ galAvBatch.failed }}</span>
+          <span v-if="galAvBatch && !galAvBatch.running"
+                style="font-size: 13px; opacity: .7; font-weight: normal; margin-left: 10px;">{{ galAvBatch.stopped ? "已停止" : "已完成" }}</span>
+        </div>
+        <n-progress v-if="galAvBatch && galAvBatch.total > 0" type="line"
+                    :percentage="Math.round(galAvBatch.done / galAvBatch.total * 100)"
+                    :show-indicator="false"></n-progress>
+        <n-space align="center">
+          <n-button size="small" type="warning" :disabled="!(galAvBatch && galAvBatch.running)"
+                    @click="stopAvatarBatch">停止</n-button>
+          <n-button size="small" :disabled="!!(galAvBatch && galAvBatch.running)"
+                    @click="galAvBatchOpen = false">关闭</n-button>
+        </n-space>
       </n-space>
     </n-modal>
 
@@ -5403,6 +5567,7 @@
             } else {
               message.success("已生成并存入立绘库");
               await refreshAll();
+              await loadGalSummary();   // v0.30.0：速览的立绘数 / 平均耗时随生成刷新
             }
           }, function (why) {
             refillRunning.value = false;
@@ -5422,8 +5587,13 @@
         galRefsSel.value = [];
         galPrompt.value = ""; galPromptSource.value = ""; galDims.value = [];
         galAttempt.value = 0; galPromptConfirmed.value = false;
+        // v0.31.0：页签回概览，速览 / 头像 / 资料表单跟着换人
+        galTab.value = "overview";
+        galSummary.value = null; galAvatarThumb.value = "";
+        galProfileMsg.value = ""; galProfile.value = {}; galTier.value = "";
         if (!cid) { galSwitching.value = false; return; }
         galSwitching.value = true;
+        loadGalSummary();
         Promise.all([loadGalItems(cid, seq), loadGalRefs(cid, seq)]).then(function () {
           if (seq === galLoadSeq) galSwitching.value = false;
         });
@@ -5614,6 +5784,205 @@
         var m = Math.floor(v / 60000), s = Math.round((v % 60000) / 1000);
         return m + "m" + (s < 10 ? "0" : "") + s + "s";
       }
+
+      // ---- v0.31.0 角色详情页签：概览 / 资料 / 立绘 / 参考图 ----
+      var galTab = Vue.ref("overview");
+      var galTabs = Vue.computed(function () {
+        return [
+          { key: "overview", label: "概览" },
+          { key: "profile", label: "资料" },
+          { key: "portraits", label: "立绘 " + galItems.value.length },
+          { key: "refs", label: "参考图 " + galRefs.value.length }
+        ];
+      });
+      function switchGalTab(k) {
+        if (!k) return;
+        galTab.value = k;
+        if (k === "profile") { fillGalProfileFromEntry(); }
+        if (k === "overview" && !galSummary.value) { loadGalSummary(); }
+      }
+      // 速览：入库日期 / 首次被抽 / 累计被抽 / 立绘数 / 平均生成耗时（/char/summary）
+      var galSummary = Vue.ref(null);
+      var galSummaryLoading = Vue.ref(false);
+      async function loadGalSummary() {
+        if (!galCharId.value) { galSummary.value = null; return; }
+        galSummaryLoading.value = true;
+        try {
+          var res = await apiGet("char/summary", { id: galCharId.value });
+          galSummary.value = res || null;
+        } catch (e) { galSummary.value = null; }
+        finally { galSummaryLoading.value = false; }
+      }
+      // 资料表单：本地可编辑，保存才写库；AI 建议填进表单、绝不直接落库
+      var profileFields = [
+        { key: "bio", label: "简介", type: "textarea", ph: "一句话简介" },
+        { key: "birthday", label: "生日", ph: "如 8月31日" },
+        { key: "height", label: "身高", ph: "如 157cm" },
+        { key: "cv", label: "声优 / 配音", ph: "声优名" },
+        { key: "title", label: "身份 / 称号", ph: "作品内身份" },
+        { key: "personality", label: "性格", ph: "性格关键词" },
+        { key: "traits", label: "萌点 / 特征", ph: "顿号分隔" },
+        { key: "memo", label: "备注", type: "textarea", ph: "其他想展示的资料" }
+      ];
+      var tierOpts = [{ label: "S", value: "S" }, { label: "A", value: "A" },
+                      { label: "B", value: "B" }, { label: "C", value: "C" },
+                      { label: "D", value: "D" }];
+      var galTier = Vue.ref("");
+      var galProfile = Vue.ref({});
+      var galProfileSaving = Vue.ref(false);
+      var galProfileBusy = Vue.ref(false);
+      var galProfileMsg = Vue.ref("");
+      var galProfileMsgType = Vue.ref("info");
+      function fillGalProfileFromEntry() {
+        var e = detailEntry.value || {};
+        var p = (e.profile && typeof e.profile === "object") ? e.profile : {};
+        var out = {};
+        profileFields.forEach(function (f) { out[f.key] = String(p[f.key] || ""); });
+        galProfile.value = out;
+        galTier.value = String(e.tier || "");
+        galProfileMsg.value = "";
+      }
+      async function saveGalProfile() {
+        if (!galCharId.value) return;
+        galProfileSaving.value = true;
+        try {
+          await apiPost("pools/profile_save", { id: galCharId.value,
+            profile: Object.assign({}, galProfile.value), tier: galTier.value || "" });
+          message.success("资料已保存");
+          await fetchPools();       // detailEntry 重建（profile/avatar/tier 同源）
+        } catch (e) { /* 已提示 */ }
+        finally { galProfileSaving.value = false; }
+      }
+      async function genGalProfile(web) {
+        if (!galCharId.value || galProfileBusy.value) return;
+        galProfileBusy.value = true;
+        galProfileMsg.value = "";
+        try {
+          var res = await apiPost("pools/profile_gen", { id: galCharId.value, web: !!web });
+          var p = (res && res.profile) || {};
+          var filled = 0;
+          profileFields.forEach(function (f) {
+            if (String(p[f.key] || "").trim()) {
+              galProfile.value[f.key] = String(p[f.key]);
+              filled += 1;
+            }
+          });
+          if (res && res.web_reason) {
+            galProfileMsgType.value = "warning";
+            galProfileMsg.value = "联网没拿到资料（" + res.web_reason
+              + "），已按模型知识填入 " + filled + " 个字段——请检查后点「保存资料」。";
+          } else {
+            galProfileMsgType.value = "success";
+            galProfileMsg.value = (res && res.search_len
+              ? "已联网检索（摘要 " + res.search_len + " 字）" : "已按模型知识")
+              + "填入 " + filled + " 个字段——请检查后点「保存资料」（不会自动写库）。";
+          }
+        } catch (e) { /* 已提示 */ }
+        finally { galProfileBusy.value = false; }
+      }
+      // 头像（v0.31.0）：上传 / 从已有图裁取 / AI 生成 / 批量（批量入口在角色库工具栏）
+      var galAvatarThumb = Vue.ref("");
+      var galAvatarBusy = Vue.ref(false);
+      var galAvatarUploadOpen = Vue.ref(false);
+      var galAvatarNote = Vue.ref("");
+      var galAvatarPickOpen = Vue.ref(false);
+      var galAvBatchOpen = Vue.ref(false);
+      var galAvBatch = Vue.ref(null);
+      var galAvBatchTimer = null;
+      Vue.watch(galSummary, function (s) {
+        // 保守同步：summary 带缩略才更新；「明确无头像」才清空——job 侧刚拿到
+        // 的缩略不该被一次迟到的空 summary 冲掉（生成后 summary 竞态）
+        if (!s) { return; }
+        if (s.thumb) { galAvatarThumb.value = s.thumb; }
+        else if (!String(s.avatar || "").trim()) { galAvatarThumb.value = ""; }
+      });
+      async function onAvatarPanelFiles(files) {
+        var list = Array.prototype.slice.call(files || []).filter(Boolean);
+        if (!list.length || !galCharId.value) return;
+        galAvatarNote.value = "上传中…";
+        try {
+          var res = await apiUpload(list[0]);
+          await apiPost("pools/avatar_set", { id: galCharId.value,
+                                             file: (res && res.path) || "" });
+          galAvatarNote.value = "";
+          galAvatarUploadOpen.value = false;
+          message.success("头像已更新");
+          await loadGalSummary();
+        } catch (e) { galAvatarNote.value = ""; }
+      }
+      function openAvatarPick() {
+        if (!genSources.value.length) {
+          message.warning("该角色还没有立绘 / 参考图：先去「概览」生成或「参考图」上传");
+          return;
+        }
+        galAvatarPickOpen.value = true;
+      }
+      async function doAvatarSet(g) {
+        if (!g || !g.path) { message.error("该图缺可用路径"); return; }
+        try {
+          await apiPost("pools/avatar_set", { id: galCharId.value, file: g.path });
+          galAvatarPickOpen.value = false;
+          message.success("头像已更新");
+          await loadGalSummary();
+        } catch (e) { /* 已提示 */ }
+      }
+      async function avatarClear() {
+        if (!armDelete("avatar:" + galCharId.value)) return;
+        try {
+          await apiPost("pools/avatar_clear", { id: galCharId.value });
+          message.success("已移除头像");
+          delArm.value = "";
+          await loadGalSummary();
+        } catch (e) { /* 已提示 */ }
+      }
+      async function doAvatarGenerate() {
+        if (!galCharId.value || galAvatarBusy.value) return;
+        galAvatarBusy.value = true;
+        try {
+          var res = await apiPost("avatar/generate", { id: galCharId.value });
+          var jobId = (res && res.job_id) || "";
+          if (!jobId) { return; }
+          pollJob(jobId, async function (st) {
+            if (st && st.thumb) { galAvatarThumb.value = st.thumb; }
+            message.success("头像已生成");
+            await loadGalSummary();
+          }, function (why) {
+            message.error("头像生成失败：" + why);
+          });
+        } catch (e) { /* 已提示 */ }
+        finally { galAvatarBusy.value = false; }
+      }
+      async function startAvatarBatch() {
+        try {
+          var res = await apiPost("avatars/batch", {});
+          var total = (res && res.total) || 0;
+          if (!total) { message.info((res && res.note) || "所有角色都已有头像"); return; }
+          galAvBatch.value = null;
+          galAvBatchOpen.value = true;
+          pollAvBatch();
+        } catch (e) { /* 已提示 */ }
+      }
+      function pollAvBatch() {
+        if (galAvBatchTimer) { clearTimeout(galAvBatchTimer); }
+        galAvBatchTimer = setTimeout(async function () {
+          try {
+            var res = await apiPost("avatars/batch_status", {});
+            galAvBatch.value = res || null;
+            if (res && res.running) { pollAvBatch(); }
+          } catch (e) {
+            if (galAvBatchOpen.value) { pollAvBatch(); }
+          }
+        }, 1500);
+      }
+      async function stopAvatarBatch() {
+        try { await apiPost("avatars/batch_stop", {}); } catch (e) { /* 已提示 */ }
+      }
+      Vue.watch(galAvBatchOpen, function (open) {
+        if (!open && galAvBatchTimer) {
+          clearTimeout(galAvBatchTimer);
+          galAvBatchTimer = null;
+        }
+      });
 
       // ---- 抽签记录 ----
       // v0.13.2：四个筛选 select 的空值改 null（见 tryCharId 注释——placeholder 才会显示）
@@ -6885,6 +7254,21 @@
         genSources: genSources, selectGenSource: selectGenSource,
         doDetailGenerate: doDetailGenerate,
         galTheme: galTheme, galThemeResolved: galThemeResolved,
+        galTab: galTab, galTabs: galTabs, switchGalTab: switchGalTab,
+        galSummary: galSummary, galSummaryLoading: galSummaryLoading,
+        loadGalSummary: loadGalSummary,
+        profileFields: profileFields, tierOpts: tierOpts, galTier: galTier,
+        galProfile: galProfile, saveGalProfile: saveGalProfile,
+        galProfileSaving: galProfileSaving, galProfileBusy: galProfileBusy,
+        galProfileMsg: galProfileMsg, galProfileMsgType: galProfileMsgType,
+        genGalProfile: genGalProfile,
+        galAvatarThumb: galAvatarThumb, galAvatarBusy: galAvatarBusy,
+        galAvatarUploadOpen: galAvatarUploadOpen, galAvatarNote: galAvatarNote,
+        galAvatarPickOpen: galAvatarPickOpen, openAvatarPick: openAvatarPick,
+        doAvatarSet: doAvatarSet, avatarClear: avatarClear,
+        doAvatarGenerate: doAvatarGenerate, onAvatarPanelFiles: onAvatarPanelFiles,
+        galAvBatchOpen: galAvBatchOpen, galAvBatch: galAvBatch,
+        startAvatarBatch: startAvatarBatch, stopAvatarBatch: stopAvatarBatch,
         galOutfit: galOutfit, galCustom: galCustom, galAttempt: galAttempt,
         galPrompt: galPrompt, galPromptSource: galPromptSource,
         galDims: galDims, galPromptLoading: galPromptLoading,

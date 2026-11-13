@@ -276,6 +276,13 @@ def normalize_entry(entry: dict, pack_name: str) -> dict | None:
         "quotes": quotes,
         "color": str(entry.get("color") or "#E8B4C8").strip(),
         "cover": str(entry.get("cover") or "").strip(),   # 角色封面（v0.5.0）
+        # v0.31.0：角色资料（百科字段 dict）/ 头像（相对 data 路径）/
+        # 入库日期（新条目创建时写入；种子卷旧条目为空，界面显示「—」）。
+        # 三者都**不在编辑表单里托管**——merge_saved_entry 会原样保留旧值
+        # （profile_save / avatar_set 走专用端点原地改，见 webui_api）。
+        "profile": dict(entry["profile"]) if isinstance(entry.get("profile"), dict) else {},
+        "avatar": str(entry.get("avatar") or "").strip(),
+        "added_at": str(entry.get("added_at") or "").strip(),
         "verified": bool(entry.get("verified", False)),
     }
     if out["category"] not in CATEGORY_LABELS:
@@ -295,7 +302,12 @@ def merge_saved_entry(raw: dict, normalized: dict) -> dict:
     strategy 只 `update` 本次提交的键、绝不主动 pop：base/lora 模式下表单
     不带 ref / loras / denoise，旧值一律留着（对当前画法无副作用，切回
     img2img 还能继续用），比"顺手清掉"安全得多。
+
+    v0.31.0：profile / avatar / added_at 同 cover 一样**不在编辑表单里**
+    （各自走专用端点：profile_save / avatar_set），merge 时原样保留旧值，
+    防止 normalize 产出的空默认值把真实资料/头像引用冲掉。
     """
+    keep_local = ("cover", "profile", "avatar", "added_at")
     merged = dict(raw) if isinstance(raw, dict) else {}
     for key, value in (normalized or {}).items():
         if key == "strategy":
@@ -303,8 +315,8 @@ def merge_saved_entry(raw: dict, normalized: dict) -> dict:
             st = dict(old_st) if isinstance(old_st, dict) else {}
             st.update(value or {})
             merged["strategy"] = st
-        elif key != "cover":
-            # cover 不在编辑表单里，旧值必须保住
+        elif key not in keep_local:
+            # 不在编辑表单里托管的字段，旧值必须保住
             merged[key] = value
     return merged
 

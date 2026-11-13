@@ -52,6 +52,12 @@ workKeyword workFilterCat workFilterVerified workSort workCatOpts workVerifiedOp
 workSortOpts filteredWorks toggleWorkChar openNewForWork
 fmtTime cfgBoundGroups pickSimGroup simScopeText
 trendDurChart fmtDur
+galTabs galTab switchGalTab galSummary galSummaryLoading
+profileFields tierOpts galTier galProfile saveGalProfile galProfileSaving
+galProfileBusy galProfileMsg galProfileMsgType genGalProfile
+galAvatarThumb galAvatarBusy galAvatarUploadOpen galAvatarNote
+galAvatarPickOpen openAvatarPick doAvatarSet avatarClear doAvatarGenerate
+onAvatarPanelFiles galAvBatchOpen galAvBatch startAvatarBatch stopAvatarBatch
 avatarOf hashColor thumbOf colorOf rerollLabel tv brandColor zhLocale
 bindRows bindSeriesOpts bindRawOpen bindLoading loadBindPools onBindRawInput
 addBindRow setRowGid setRowSeries removeBindRow
@@ -83,6 +89,9 @@ ROUTES = """
 /batch/preview /batch/reroll
 /pools/quote_save /quote_check
 /websearch/status
+/pools/profile_save /pools/profile_gen /char/summary
+/pools/avatar_set /pools/avatar_clear /avatar/generate
+/avatars/batch /avatars/batch_status /avatars/batch_stop
 """.split()
 
 STORE_METHODS = """

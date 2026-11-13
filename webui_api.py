@@ -37,12 +37,13 @@ except Exception:  # pragma: no cover
     request = None  # type: ignore
 
 try:  # 双形态导入（包内正常加载 / 平铺调试）
-    from . import pool, draw, prompt_gen, batch_fill
+    from . import pool, draw, prompt_gen, batch_fill, avatars
 except ImportError:  # pragma: no cover
     import pool  # type: ignore
     import draw  # type: ignore
     import prompt_gen  # type: ignore
     import batch_fill  # type: ignore
+    import avatars  # type: ignore
 
 ROUTE_PREFIX = "/astrbot_plugin_moe_waifu"
 PLUGIN_NAME = "astrbot_plugin_moe_waifu"
@@ -382,6 +383,11 @@ async def h_save_entry(plugin) -> dict:
             replaced = True
             break
     if not replaced:
+        # v0.31.0：新建条目记录入库日期（旧条目没有该字段，界面显示「—」）
+        try:
+            normalized["added_at"] = plugin._today()
+        except Exception:
+            normalized["added_at"] = time.strftime("%Y-%m-%d")
         entries.append(normalized)
     data["entries"] = entries
     _json_save(path, data)
@@ -514,6 +520,11 @@ async def h_import_pack(plugin) -> dict:
             skipped.append({"id": cid,
                             "reason": "同名同作品已存在（请用重复角色工具处理）"})
             continue
+        # v0.31.0：入库日期随新建条目记录（导入的覆盖更新不动旧值）
+        try:
+            e["added_at"] = plugin._today()
+        except Exception:
+            e["added_at"] = time.strftime("%Y-%m-%d")
         target_data["entries"].append(e)
         idx = len(target_data["entries"]) - 1
         by_id[cid] = (pack_name, idx)
@@ -2275,6 +2286,11 @@ def _discover_add_core(plugin, pack_name: str, rows: list) -> dict:
         if normalized["id"] in existing_ids:
             dup += 1
             continue
+        # v0.31.0：入库日期随条目记录（作品发现新建的角色）
+        try:
+            normalized["added_at"] = plugin._today()
+        except Exception:
+            normalized["added_at"] = time.strftime("%Y-%m-%d")
         entries.append(normalized)
         existing_ids.add(normalized["id"])
         added += 1
@@ -3910,6 +3926,372 @@ async def h_quote_save(plugin) -> dict:
 
 # ---------- 注册 ----------
 
+# ---------- 角色资料 / 评级 / 首次日期（v0.31.0） ----------
+
+# 资料字段白名单（值统一字符串、逐字段限长；LLM/前端都按这份清单走）
+_PROFILE_KEYS = ("bio", "birthday", "height", "cv", "title", "personality",
+                 "traits", "memo")
+
+
+def _sanitize_profile(raw) -> dict:
+    """资料 dict 清洗：未知键丢弃、值转字符串限长、空值剔除。"""
+    out = {}
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            key = str(k or "").strip()
+            if not key or key not in _PROFILE_KEYS or len(out) >= len(_PROFILE_KEYS):
+                continue
+            val = str(v or "").strip()[:500]
+            if val:
+                out[key] = val
+    return out
+
+
+def _extract_json_object(text: str) -> dict:
+    """从 LLM 输出里抠第一个平衡的 JSON 对象（容错围栏/前后废话/转义引号）。"""
+    s = str(text or "")
+    start = s.find("{")
+    if start < 0:
+        return {}
+    depth = 0
+    in_str = False
+    esc = False
+    end = -1
+    for i in range(start, len(s)):
+        ch = s[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    if end < 0:
+        return {}
+    try:
+        loaded = json.loads(s[start:end])
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+
+async def h_profile_save(plugin) -> dict:
+    """只改 profile / tier 的轻量保存（思路同 quote_save：绝不走整条替换）。
+
+    profile 传 dict（按 _PROFILE_KEYS 清洗，空 dict = 清空资料）；tier 传
+    评级（S/A/B/C/D，空串 = 清除）。两者至少传一个。
+    """
+    body = await _body()
+    cid = str(body.get("id") or "").strip()
+    if not cid:
+        return err("缺少角色 id")
+    profile = body.get("profile")
+    tier = body.get("tier")
+    if profile is None and tier is None:
+        return err("profile / tier 至少传一个")
+
+    def mutate(_e, raw):
+        if profile is not None:
+            sp = _sanitize_profile(profile)
+            if sp:
+                raw["profile"] = sp
+            else:
+                raw.pop("profile", None)
+        if tier is not None:
+            t = str(tier or "").strip().upper()[:2]
+            if t:
+                raw["tier"] = t
+            else:
+                raw.pop("tier", None)
+
+    pack = _set_entry_field(plugin, cid, mutate)
+    if pack is None:
+        return err("角色条目不存在（可能已被删除，或 id 改了名）")
+    return ok({"pack": pack})
+
+
+_PROFILE_SYSTEM = (
+    "你为「萌萌今日老婆」插件补全二次元女性角色的百科资料。只输出一个 JSON 对象"
+    "——不要 markdown 围栏、不要解释文字。字段（拿不准就留空字符串，宁缺勿编）："
+    "bio（一句话简介，不超过 80 字）、birthday（生日，如「8月31日」，不知道留空）、"
+    "height（身高，含单位）、cv（声优/配音演员中文名）、"
+    "title（作品内身份/称号，不超过 30 字）、personality（性格关键词，不超过 60 字）、"
+    "traits（萌点/标志性特征，顿号分隔，不超过 40 字）、"
+    "memo（其他值得展示的备注，不超过 100 字）。"
+    "一切设定以给定作品里的这位角色为准，检索摘要与模型记忆冲突时以摘要为准；"
+    "同名不同作品的资料一律不用。"
+)
+
+
+async def h_profile_gen(plugin) -> dict:
+    """AI 补全角色资料：web=true 先联网检索（v0.29.1 同款工具链），失败自动降级。
+
+    只返回建议，**不写库**——前端填进表单，人工确认后走 profile_save。
+    """
+    body = await _body()
+    cid = str(body.get("id") or "").strip()
+    if not cid:
+        return err("缺少角色 id")
+    entry = pool.find_entry(pool.load_packs(_pools_dir(plugin), logger), cid)
+    if entry is None:
+        return err(f"角色库里找不到「{cid}」")
+    want_web = bool(body.get("web", False))
+    name = str(entry.get("name") or "").strip()
+    series = str(entry.get("series") or "").strip()
+    tags = str(entry.get("tags_en") or "").strip()
+    provider = await prompt_gen._resolve_provider(
+        plugin.context, str(plugin._cfg("prompt_llm_provider", "") or ""))
+    if provider is None:
+        return err("未找到可用的对话模型：请先在 AstrBot 配置 LLM，"
+                   "或在本插件配置里指定「提示词模型 ID」")
+    timeout = int(plugin._cfg("prompt_llm_timeout", 30) or 30) or 30
+    search_text = ""
+    web_reason = ""
+    if want_web:
+        search_text, web_code = await _web_search_text_ex(
+            plugin, _character_query(name, series, "角色资料 生日 身高 声优 性格 称号"),
+            max_results=8)
+        if not search_text:
+            web_reason = _WS_FAIL_TEXT.get(web_code, web_code)
+    segs = [_character_brief(name, series, tags)]
+    if search_text:
+        segs.append(_search_block(search_text))
+    else:
+        segs.append(_NO_SEARCH_HINT)
+    if isinstance(entry.get("profile"), dict) and entry.get("profile"):
+        segs.append("现有资料（供参考与纠错，缺的字段补全，错的内容纠正）："
+                    + json.dumps(entry["profile"], ensure_ascii=False))
+    segs.append("请输出该角色的资料 JSON 对象（只输出 JSON 本体）。")
+    try:
+        resp = await asyncio.wait_for(
+            provider.text_chat(prompt="\n".join(segs), session_id=None,
+                               system_prompt=_PROFILE_SYSTEM),
+            timeout=timeout + (25 if search_text else 0),
+        )
+    except asyncio.TimeoutError:
+        return err(f"LLM 超时（>{timeout}s），稍后再试")
+    except Exception as exc:
+        return err(f"LLM 调用失败：{exc}")
+    profile = _sanitize_profile(_extract_json_object(
+        getattr(resp, "completion_text", "") or ""))
+    if not profile:
+        return err("LLM 没有返回可用资料，请重试")
+    return ok({"profile": profile, "search_len": len(search_text),
+               "web_reason": web_reason})
+
+
+async def h_char_summary(plugin) -> dict:
+    """角色速览：入库日期 / 首次与最近被抽 / 被抽次数 / 立绘数 / 平均生成耗时。
+
+    入库日期读条目 added_at（v0.31.0 起新建条目才写，种子卷旧条目为空）；
+    其余来自 draws / portraits 表。
+    """
+    body = await _body()
+    cid = str(body.get("id") or _q("id", "") or "").strip()
+    if not cid:
+        return err("缺少角色 id")
+    entry = pool.find_entry(pool.load_packs(_pools_dir(plugin), logger), cid)
+    if entry is None:
+        return err(f"角色库里找不到「{cid}」")
+    summary = plugin._store.char_summary(cid) if plugin._store else {}
+    out = {
+        "added_at": str(entry.get("added_at") or ""),
+        "tier": str(entry.get("tier") or ""),
+        "avatar": str(entry.get("avatar") or ""),
+        "portrait_count": int(summary.get("portrait_count") or 0),
+        "portrait_avg_ms": int(summary.get("portrait_avg_ms") or 0),
+        "first_draw": str(summary.get("first_draw") or ""),
+        "last_draw": str(summary.get("last_draw") or ""),
+        "draw_count": int(summary.get("draw_count") or 0),
+    }
+    if out["avatar"]:
+        fp = _safe_data_file(plugin, out["avatar"])
+        out["thumb"] = _thumb_data_url(fp, 240) if fp else None
+    return ok(out)
+
+
+# ---------- 角色头像（v0.31.0）：上传 / 从已有图裁取 / 工作流生成 / 批量 ----------
+
+def _avatar_abs(plugin, cid: str) -> Path:
+    return Path(plugin._data_dir) / avatars.AVATAR_DIR / (
+        avatars.safe_avatar_name(cid) + ".png")
+
+
+async def h_avatar_set(plugin) -> dict:
+    """设置头像：file 必须是插件数据目录内的图片（上传产物 / 立绘 / 参考图），
+    裁成方形 512 存 avatars/<id>.png 并写条目 avatar 字段。"""
+    body = await _body()
+    cid = str(body.get("id") or "").strip()
+    file = str(body.get("file") or "").strip()
+    if not cid or not file:
+        return err("缺少 id 或 file")
+    src = _safe_data_file(plugin, file)
+    if src is None:
+        return err("图片不可用：必须是插件数据目录内的有效文件")
+    dst = _avatar_abs(plugin, cid)
+    try:
+        avatars.crop_square(src, dst)
+    except Exception as exc:
+        return err(f"头像裁剪失败：{exc.__class__.__name__}: {exc}")
+    rel = avatars.avatar_rel(cid)
+
+    def mutate(_e, raw):
+        raw["avatar"] = rel
+
+    pack = _set_entry_field(plugin, cid, mutate)
+    if pack is None:
+        return err("角色条目不存在")
+    return ok({"avatar": rel, "thumb": _thumb_data_url(dst, 240),
+               "width": avatars.AVATAR_SIDE, "height": avatars.AVATAR_SIDE})
+
+
+async def h_avatar_clear(plugin) -> dict:
+    """移除头像引用（文件保留在 avatars/，再次生成会覆盖）。"""
+    body = await _body()
+    cid = str(body.get("id") or "").strip()
+    if not cid:
+        return err("缺少角色 id")
+
+    def mutate(_e, raw):
+        raw.pop("avatar", None)
+
+    pack = _set_entry_field(plugin, cid, mutate)
+    if pack is None:
+        return err("角色条目不存在")
+    return ok({"pack": pack})
+
+
+async def generate_avatar_for(plugin, entry: dict, workflow: str = "") -> tuple:
+    """生成单个角色头像并落盘（单发 job 与批量队列共用），返回 (rel, w, h)。
+
+    画法选择：条目是 img2img 且有显式生成源（ref / gen_refs / draw_ref）→
+    走 comfyui_img2img + 固定「头像特写」编辑指令（身份锚定最强）；
+    否则按条目画法走 comfyui_draw 文生图，提示词按底模风格拼
+    （detect_t2i_style 与立绘链同源）。产物统一裁方形。
+    """
+    cid = str(entry.get("id") or "").strip()
+    if not cid:
+        raise RuntimeError("条目缺 id")
+    cfg = plugin._draw_cfg()
+    data_dir = str(plugin._data_dir or "")
+    prompt = ""
+    use_entry = entry
+    if str(entry.get("strategy_type") or "base") == "img2img":
+        st = entry.get("strategy") or {}
+        gen = draw.gen_refs(st, data_dir)
+        ref = draw.explicit_ref(st, data_dir) or draw.draw_source(entry, data_dir)
+        if ref and ref not in gen:
+            gen.insert(0, ref)
+        if gen:
+            use_entry = draw.effective_entry(
+                entry, {"strategy_type": "img2img", "ref": gen[0], "refs": gen})
+            prompt = avatars.I2I_INSTRUCTION
+    if not prompt:
+        style = prompt_gen.detect_t2i_style(
+            plugin.context, prompt_gen.effective_workflow(use_entry, cfg))
+        prompt = avatars.build_avatar_prompt(use_entry, style)
+    ov = {}
+    wf = str(workflow or "").strip()
+    if wf:
+        ov = {"workflow": wf, "img2img_workflow": wf}
+        use_entry = draw.effective_entry(use_entry, ov)
+    seed = int(time.time() * 1000) % (2 ** 31)
+    src, status, err, _dur = await draw.generate_portrait(
+        plugin.context, cfg, use_entry, seed, _synthetic_event(), prompt=prompt)
+    if src is None:
+        raise RuntimeError(str(err or status or "萌绘生成失败"))
+    dst = _avatar_abs(plugin, cid)
+    w, h = avatars.crop_square(src, dst)
+    rel = avatars.avatar_rel(cid)
+
+    def mutate(_e, raw):
+        raw["avatar"] = rel
+
+    _set_entry_field(plugin, cid, mutate)
+    return rel, w, h
+
+
+async def h_avatar_generate(plugin) -> dict:
+    """单发头像生成：后台 job + 前端轮询 /jobs/status（kind=avatar）。"""
+    body = await _body()
+    cid = str(body.get("id") or "").strip()
+    if not cid:
+        return err("缺少角色 id")
+    entry = pool.find_entry(pool.load_packs(_pools_dir(plugin), logger), cid)
+    if entry is None:
+        return err(f"角色库里找不到「{cid}」")
+    workflow = str(body.get("workflow") or "").strip()
+    job_id = f"avatar:{cid}:{int(time.time() * 1000)}"
+    plugin._jobs[job_id] = {"status": "running", "kind": "avatar", "char_id": cid,
+                            "entry_label": pool.entry_label(entry), "src_path": ""}
+    _prune_jobs(plugin)
+    loop = asyncio.get_running_loop()
+    loop.create_task(_run_avatar_job(plugin, job_id, entry, workflow))
+    return ok({"job_id": job_id, "label": pool.entry_label(entry)})
+
+
+async def _run_avatar_job(plugin, job_id: str, entry: dict, workflow: str) -> None:
+    job = plugin._jobs.get(job_id, {})
+    t0 = time.monotonic()
+    try:
+        rel, w, h = await generate_avatar_for(plugin, entry, workflow=workflow)
+        job.update({"status": "ok", "avatar": rel, "width": w, "height": h,
+                    "thumb": _thumb_data_url(_avatar_abs(plugin, entry["id"]), 240),
+                    "duration_ms": int((time.monotonic() - t0) * 1000)})
+    except Exception as exc:
+        job.update({"status": "error", "error": str(exc)[:200],
+                    "duration_ms": int((time.monotonic() - t0) * 1000)})
+    plugin._jobs[job_id] = job
+
+
+def _avatar_runner(plugin):
+    r = getattr(plugin, "_avatar_runner", None)
+    if r is None:
+        r = avatars.AvatarRunner()
+        plugin._avatar_runner = r
+    return r
+
+
+async def h_avatars_batch(plugin) -> dict:
+    """批量生成缺失头像：串行后台队列，只处理还没有头像的角色。"""
+    body = await _body()
+    workflow = str(body.get("workflow") or "").strip()
+    entries = []
+    for pack in pool.load_packs(_pools_dir(plugin), logger):
+        if not bool(pack.get("enabled", True)):
+            continue
+        for raw in pack["entries"]:
+            e = pool.normalize_entry(raw, pack["pack"])
+            if e and not str(e.get("avatar") or "").strip():
+                entries.append(e)
+    if not entries:
+        return ok({"total": 0, "note": "所有角色都已有头像"})
+    n = _avatar_runner(plugin).start(plugin, entries, workflow=workflow)
+    if n < 0:
+        return err("批量头像已在运行中")
+    return ok({"total": n})
+
+
+async def h_avatars_batch_status(plugin) -> dict:
+    runner = _avatar_runner(plugin)
+    return ok(runner.snapshot())
+
+
+async def h_avatars_batch_stop(plugin) -> dict:
+    running = _avatar_runner(plugin).stop()
+    return ok({"stopped": True, "was_running": bool(running)})
+
+
 def register(plugin) -> None:
     # v0.25.0：读路径已切新表，写 JSON 后必须同步，否则会出现「改完看不到」
     try:
@@ -3942,6 +4324,16 @@ def register(plugin) -> None:
         ("/quote_check", h_quote_check, ["POST"]),
         # v0.29.2：联网检索可用性自检（详情页印象语卡常驻显示，失败早知道）
         ("/websearch/status", h_websearch_status, ["GET"]),
+        # v0.31.0：角色资料 / 评级 / 首次日期 / 头像（详情页「资料」页签）
+        ("/pools/profile_save", h_profile_save, ["POST"]),
+        ("/pools/profile_gen", h_profile_gen, ["POST"]),
+        ("/char/summary", h_char_summary, ["GET", "POST"]),
+        ("/pools/avatar_set", h_avatar_set, ["POST"]),
+        ("/pools/avatar_clear", h_avatar_clear, ["POST"]),
+        ("/avatar/generate", h_avatar_generate, ["POST"]),
+        ("/avatars/batch", h_avatars_batch, ["POST"]),
+        ("/avatars/batch_status", h_avatars_batch_status, ["GET", "POST"]),
+        ("/avatars/batch_stop", h_avatars_batch_stop, ["POST"]),
         ("/pools/duplicates", h_duplicates, ["GET", "POST"]),
         ("/pools/dedupe", h_dedupe, ["POST"]),
         ("/relational/status", h_relational_status, ["GET", "POST"]),

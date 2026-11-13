@@ -1000,6 +1000,29 @@ class Store:
                 "SELECT COALESCE(AVG(duration_ms),0) FROM draw_jobs WHERE status='ok'")),
         }
 
+    def char_summary(self, char_id: str) -> dict:
+        """角色速览（v0.31.0）：首次/最近被抽日期、被抽次数、立绘数、平均生成耗时。
+
+        draws 表是抽签流水（含重抽覆盖前的历史），COUNT = 累计被抽次数；
+        portraits 只统计现存行；耗时只算成功生成路径（duration_ms>0）。
+        """
+        def one(sql, args=()):
+            row = self._conn.execute(sql, args).fetchone()
+            return row[0] if row is not None else None
+        return {
+            "first_draw": str(one(
+                "SELECT MIN(date) FROM draws WHERE char_id=?", (char_id,)) or ""),
+            "last_draw": str(one(
+                "SELECT MAX(date) FROM draws WHERE char_id=?", (char_id,)) or ""),
+            "draw_count": int(one(
+                "SELECT COUNT(*) FROM draws WHERE char_id=?", (char_id,)) or 0),
+            "portrait_count": int(one(
+                "SELECT COUNT(*) FROM portraits WHERE char_id=?", (char_id,)) or 0),
+            "portrait_avg_ms": int(one(
+                "SELECT COALESCE(AVG(duration_ms),0) FROM portraits"
+                " WHERE char_id=? AND duration_ms>0", (char_id,)) or 0),
+        }
+
     # ---------- 调试 / 重置（v0.8.0） ----------
     # 文件删除一律由调用方（webui 层）做：这里只动库并返回受影响路径清单。
 

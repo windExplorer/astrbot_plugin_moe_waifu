@@ -95,7 +95,7 @@ class MoeWaifuPlugin(Star):
         reload 后自动生效，无需重新绑定函数对象。"""
         pkg = __package__
         for name in ("store", "card", "pool", "draw", "prompt_gen",
-                     "batch_fill", "webui_api"):
+                     "avatars", "batch_fill", "webui_api"):
             mod = sys.modules.get(f"{pkg}.{name}")
             if mod is not None:
                 try:
