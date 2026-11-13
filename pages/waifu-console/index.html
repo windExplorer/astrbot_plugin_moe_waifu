@@ -155,6 +155,15 @@
     line-height: 15px; overflow: hidden; white-space: nowrap;
     text-overflow: ellipsis; }
   .cover-switch { position: absolute; top: 6px; right: 6px; }
+  /* v0.28.4：封面「看大图」角标（悬停才出现）。封面本体已改为「点击进入详情」，
+     想只看大图就点左上角这个角标（它在 .work-hint 之上、且不像 switch 那样常驻挡视线） */
+  .cover-zoom { position: absolute; top: 6px; left: 6px; z-index: 3;
+    font-size: 11px; line-height: 1; color: #fff; cursor: zoom-in;
+    padding: 4px 7px; border-radius: 999px; background: rgba(20,12,20,.55);
+    border: 1px solid rgba(255,255,255,.28); backdrop-filter: blur(2px);
+    opacity: 0; transition: opacity .15s ease, background .15s ease; }
+  .work-card:hover .cover-zoom { opacity: 1; }
+  .cover-zoom:hover { background: rgba(20,12,20,.78); }
   .pack-pill { display: inline-flex; align-items: center; gap: 8px;
     background: rgba(214,51,132,.06); border: 1px solid rgba(214,51,132,.22);
     border-radius: 999px; padding: 4px 12px; transition: opacity .15s ease; }
@@ -508,10 +517,12 @@
                 <n-gi v-for="e in pagedEntries" :key="e.id">
                   <n-card size="small" :bordered="true" class="work-card" @click="gotoGallery(e.id)">
                     <div class="work-cover" :style="{ background: 'linear-gradient(135deg,' + e.color + 'cc,' + e.color + '55)' }">
-                      <img v-if="e.thumb" :src="e.thumb" class="work-cover-img clickable-img"
-                           title="点击查看大图" alt="封面"
-                           @click.stop="openViewer(e.cover_path, e.name)">
+                      <!-- v0.28.4：封面不再拦截点击（旧版点封面弹大图，整块封面看着像「点了进不去」），
+                           点击封面与点卡片同效 = 进入角色详情；看大图改由悬停出现的角标提供 -->
+                      <img v-if="e.thumb" :src="e.thumb" class="work-cover-img" alt="封面">
                       <span v-else class="work-initial">{{ e.name.slice(0, 1) }}</span>
+                      <span v-if="e.thumb" class="cover-zoom" title="只看封面大图（不进详情）"
+                            @click.stop="openViewer(e.cover_path, e.name)">看大图</span>
                       <n-switch class="cover-switch" size="small" :value="e.verified"
                                 @click.stop
                                 @update:value="doToggleVerified(e)"></n-switch>
@@ -601,10 +612,11 @@
                 <n-gi v-for="c in currentWork.characters" :key="c.id">
                   <n-card size="small" :bordered="true" class="work-card" @click="gotoGallery(c.id)">
                     <div class="work-cover" :style="{ background: 'linear-gradient(135deg,' + c.color + 'cc,' + c.color + '55)' }">
-                      <img v-if="c.thumb" :src="c.thumb" class="work-cover-img clickable-img"
-                           title="点击查看大图" alt="封面"
-                           @click.stop="openViewer(c.cover_path, c.name)">
+                      <!-- v0.28.4：同角色库——封面点击进详情，看大图走悬停角标 -->
+                      <img v-if="c.thumb" :src="c.thumb" class="work-cover-img" alt="封面">
                       <span v-else class="work-initial">{{ c.name.slice(0, 1) }}</span>
+                      <span v-if="c.thumb" class="cover-zoom" title="只看封面大图（不进详情）"
+                            @click.stop="openViewer(c.cover_path, c.name)">看大图</span>
                       <div class="work-hint">点击查看角色详情 →</div>
                     </div>
                     <div class="card-title-row">
