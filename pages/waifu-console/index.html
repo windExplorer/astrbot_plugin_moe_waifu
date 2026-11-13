@@ -439,7 +439,9 @@
               <n-button type="primary" size="small" @click="openNew">新增角色</n-button>
               <n-button size="small" @click="openImport">导入角色</n-button>
               <n-button size="small" @click="openDedupe">重复角色</n-button>
-              <n-button size="small" @click="openBatchModal">批量补图</n-button>
+              <!-- v0.25.6：后台补图进度跟到按钮上（关掉弹窗也能看见在跑） -->
+              <n-button size="small" :type="batchRunning ? 'primary' : 'default'"
+                        :secondary="batchRunning" @click="openBatchModal">{{ batchBtnText }}</n-button>
               <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
               <!-- v0.6.1：每行卡片数快捷调整（写回 ui_grid_cols，免去去配置页） -->
               <span style="font-size: 12px; opacity: .6;">每行</span>
@@ -4523,7 +4525,17 @@
         try { await apiPost("batch/stop", {}); } catch (e) { /* 已提示 */ }
         pollBatch();
       }
+      // v0.25.6：批量补图是后端常驻队列，关掉弹窗 / 切页签照样在跑。
+      // 旧实现只在弹窗打开时轮询，关掉后就完全看不到进度、也不知道跑完没有。
+      // 现在：只要队列在跑就继续轮询，状态同步到工具栏按钮；跑完给一次性提示。
+      var batchWasRunning = false;
+      var batchBtnText = Vue.computed(function () {
+        var p = batchProg.value;
+        if (!p || !p.running) return "批量补图";
+        return "补图中 " + (p.done || 0) + "/" + (p.total || 0);
+      });
       async function pollBatch() {
+        if (batchTimer) { clearTimeout(batchTimer); batchTimer = null; }  // 单链防重
         try {
           var res = await apiPost("batch/status", {});
           if (res) {
@@ -4531,10 +4543,28 @@
             batchQuota.value = res.quota || batchQuota.value;
           }
         } catch (e) { /* 已提示 */ }
-        if (batchOpen.value) { batchTimer = setTimeout(pollBatch, 2000); }
+        var p = batchProg.value || {};
+        var running = !!p.running;
+        if (running) {
+          batchWasRunning = true;
+        } else if (batchWasRunning) {
+          batchWasRunning = false;
+          if (p.failed) {
+            message.warning("批量补图结束：" + (p.ok || 0) + " 张成功 / "
+              + p.failed + " 张失败（详情见弹窗）");
+          } else if (p.stopped) {
+            message.info("批量补图已停止：" + (p.ok || 0) + " / " + (p.total || 0) + " 张");
+          } else {
+            message.success("批量补图完成：" + (p.ok || 0) + " / " + (p.total || 0) + " 张");
+          }
+        }
+        if (batchOpen.value || running) { batchTimer = setTimeout(pollBatch, 2000); }
       }
       Vue.watch(batchOpen, function (open) {
-        if (!open && batchTimer) { clearTimeout(batchTimer); batchTimer = null; }
+        // 关闭弹窗：队列还在跑就继续跟（状态显示在工具栏按钮上），停了才收定时器
+        if (open || !batchTimer) return;
+        var running = !!(batchProg.value && batchProg.value.running);
+        if (!running) { clearTimeout(batchTimer); batchTimer = null; }
       });
       // ---- 作品发现（v0.18.0）：作品名 → LLM(+websearch) 草稿 → 勾选入库 unverified ----
       var discOpen = Vue.ref(false);
@@ -5978,7 +6008,9 @@
           // 到位自动重算），一层 Promise.all 就够
           await Promise.all([
             fetchPools(), loadWorks(), loadGallery(), loadGalRefs(),
-            loadTryRefs(), loadDrawerRefs(), loadOverview()
+            loadTryRefs(), loadDrawerRefs(), loadOverview(),
+            // v0.25.6：刷新/切页签时也拉一次补图进度，后台队列不会「看不见」
+            pollBatch()
           ]);
           resyncCurrentWork();
           // 配置页点「刷新」才重置表单；其它场景绝不动用户正在编辑的输入
@@ -6158,7 +6190,7 @@
         // v0.16.0：批量补图队列
         batchOpen: batchOpen, batchMode: batchMode, batchPacks: batchPacks,
         batchSeries: batchSeries, batchSeriesOpts: batchSeriesOpts,
-        batchChars: batchChars,
+        batchChars: batchChars, batchBtnText: batchBtnText,
         batchPreview: batchPreview, batchPreviewLoading: batchPreviewLoading,
         batchStarting: batchStarting, batchProg: batchProg,
         batchQuota: batchQuota, batchRunning: batchRunning, batchPct: batchPct,

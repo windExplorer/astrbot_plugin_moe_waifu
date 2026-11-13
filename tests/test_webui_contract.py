@@ -58,7 +58,7 @@ galWidth galHeight
 importOverwrite dedupeOpen dedupeGroups dedupeSelected dedupeBusy dedupeResult
 dedupeSelectedCount dedupeDupCount openDedupe loadDuplicates doDedupe
 relStatus relBusy loadRelStatus
-batchSeriesOpts
+batchSeriesOpts batchBtnText
 """.split()
 
 ROUTES = """
@@ -188,6 +188,12 @@ def main():
           "batchSeriesOpts" in page
           and "return !!o.value" in page
           and ':options="batchSeriesOpts"' in page)
+    # v0.25.6：批量补图是后端常驻队列，关掉弹窗也要能看见进度
+    check("补图进度跟到工具栏按钮（不依赖弹窗打开）",
+          "batchBtnText" in page
+          and "补图中 " in page
+          and "if (batchOpen.value || running)" in page
+          and "pollBatch()" in page)
 
     # 11) 渲染健壮性（v0.13.5）：库里 seed 是 INTEGER，模板对数字直接 .slice
     #     会抛 TypeError → 整个立绘墙渲染中断（真机「只有标题没图片」事故）
