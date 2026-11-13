@@ -414,8 +414,14 @@ txt_tpl, _src_tpl = asyncio.run(_run_i2i_tpl(7))
 check("tpl_3view 主题仍输出三视图指令", "三视图" in txt_tpl)
 
 # ---------- v0.19.0：画风维度（用户反馈「主题里应该加上画风，现在画风太单一」） ----------
-check("画风池 >= 14 款风格",
-      len([s for s in prompt_gen.ARTSTYLES if s["zh"]]) >= 14)
+check("画风池 >= 30 款风格",
+      len([s for s in prompt_gen.ARTSTYLES if s["zh"]]) >= 30)
+# v0.19.1：介质系风格（不是「换上色方式」而是「换制作工艺」）必须在池
+for _kw in ("蚀刻", "彩绘玻璃", "Riso", "Y2K", "岩彩", "钢笔淡彩", "电影感",
+            "复古印刷", "故障", "美式漫画", "韩漫", "低多边形", "剪纸", "细密画",
+            "丝网印刷"):
+    check(f"介质画风在池（{_kw}）",
+          any(_kw in str(s.get("zh") or "") for s in prompt_gen.ARTSTYLES))
 _az_zh = {prompt_gen.pick_variations(s)["artstyle"]["zh"] for s in range(400)}
 check("画风维度分布非退化（400 种子 >= 8 种）", len(_az_zh) >= 8)
 _az_keep = sum(1 for s in range(2000)

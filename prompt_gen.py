@@ -274,6 +274,14 @@ BODY = [
 # 多张图看起来就像同一个画师同一套流程，换主题也只换了衣服和背景。
 # 权重语义：空项 = 不写画风（交给底模自己的默认风格），保留一小部分避免
 # 「每张都硬换风格」到失真；非空项按权重摇。
+#
+# 两批风格（v0.19.1 补第二批，用户又说前一批「太大众化」）：
+#   ① 上色流派（前 16 款）：赛璐璐/厚涂/水彩/油画/水墨这类，换的是「上色方式」；
+#   ② 介质与工艺（后 15 款）：印厂（丝网/Riso/复古广告印刷）、画材（蚀刻/淡彩/
+#      岩彩/细密画/彩铅）、工艺（彩绘玻璃/剪纸/低多边形/黏土）、年代电子
+#      （Y2K/故障 VHS）、镜头语言（电影感厚涂）、区域流派（美式漫画/韩漫）。
+#      这一批换的是「这张图是怎么被做出来的」，构图层级/笔触/色域跟着一起变。
+# 想固定成某一款：提示词面板的「画风」chip 里锁定，或选对应的「画风 · xxx」主题。
 ARTSTYLES = [
     {"w": 8, "zh": "", "en": ""},
     {"w": 9, "zh": "日系动画赛璐璐上色",
@@ -308,6 +316,56 @@ ARTSTYLES = [
      "en": "colored pencil, sketch, hand-drawn, hatching"},
     {"w": 4, "zh": "扁平矢量插画",
      "en": "flat color, vector art, thick outline, minimalist"},
+    # —— v0.19.1：非主流 / 有介质感的画风。用户反馈「上面那些太大众化」——
+    #    前 16 款本质都是「某种上色方式」，换个说法还是同一种插画流水线。这一批
+    #    改从**创作介质与印刷工艺**切：印厂（丝网/孔版/复古广告印刷）、画材
+    #    （蚀刻/淡彩/岩彩/细密画）、工艺（彩绘玻璃/剪纸/低多边形）、年代电子
+    #    （Y2K/故障 VHS）、镜头语言（电影感厚涂）。介质一变，构图层级、笔触、
+    #    色域都会跟着变，出来的图才是「另一路东西」而不是同一套 AI 味。
+    {"w": 6, "zh": "钢笔淡彩速写",
+     "en": "ink and watercolor, urban sketching, pen lineart, loose wash, "
+           "white paper showing through"},
+    {"w": 6, "zh": "电影感厚涂（逆光烟雾）",
+     "en": "cinematic painting, volumetric light, rim light, atmospheric haze, "
+           "shallow depth of field, film still composition"},
+    {"w": 5, "zh": "复古印刷海报风",
+     "en": "retro print, 1970s advertisement illustration, halftone print, "
+           "limited palette, offset misregistration, paper grain"},
+    {"w": 5, "zh": "岩彩重彩（矿物颜料）",
+     "en": "mineral pigment, gold accent, mural painting, textured pigment, "
+           "dunhuang mural colors"},
+    {"w": 4, "zh": "铜版画蚀刻",
+     "en": "etching, engraving, cross-hatching, fine lines, monochrome print, "
+           "intaglio texture"},
+    {"w": 4, "zh": "彩绘玻璃镶嵌",
+     "en": "stained glass, leaded lines, luminous backlit colors, glass mosaic, "
+           "gothic window panes"},
+    {"w": 4, "zh": "Riso 孔版印刷",
+     "en": "risograph, limited color palette, ink grain, misregistration, "
+           "two-tone print"},
+    {"w": 4, "zh": "故障艺术 VHS",
+     "en": "glitch art, vhs, scanlines, chromatic aberration, datamosh, "
+           "analog video noise"},
+    {"w": 4, "zh": "Y2K 千禧金属",
+     "en": "y2k aesthetic, chrome, liquid metal, holographic iridescence, "
+           "metallic gradient, translucent plastic"},
+    {"w": 4, "zh": "美式漫画",
+     "en": "american comic, bold ink outlines, halftone shading, dynamic angle, "
+           "dramatic contrast"},
+    {"w": 4, "zh": "韩漫半写实",
+     "en": "manhwa style, semi-realistic, clean lineart, soft cel shading, "
+           "glossy highlights"},
+    {"w": 4, "zh": "丝网印刷波普",
+     "en": "pop art, screen print, bold flat colors, ben-day dots, "
+           "high saturation"},
+    {"w": 3, "zh": "细密画金箔",
+     "en": "persian miniature, gold leaf, intricate ornament, "
+           "decorative border, jewel tones"},
+    {"w": 3, "zh": "剪纸纸雕",
+     "en": "paper cutout, layered paper, craft texture, soft drop shadow, "
+           "cut-paper silhouette"},
+    {"w": 3, "zh": "低多边形体素",
+     "en": "low poly, voxel art, isometric view, flat shading, geometric facets"},
 ]
 
 DIMS = {
@@ -357,38 +415,38 @@ THEMES = (
     #    关键词全部改成池条目命名自带的专属词（命中校验在 tests/test_prompt_gen.py）。
     {"id": "swimsuit", "label": "泳装 · 夏日",
      "outfit_kw": ["泳装", "泳衣", "比基尼", "纱笼"], "bg_kw": ["海边", "泳池", "水上", "度假"],
-     "artstyle_kw": ["水彩", "赛璐璐", "扁平"]},
+     "artstyle_kw": ["水彩", "赛璐璐", "扁平", "淡彩", "Riso"]},
     {"id": "campus", "label": "校园 · JK",
      "outfit_kw": ["水手服", "西装夹克", "针织开衫", "背带", "马甲衬衫JK", "百褶裙",
                    "运动外套", "校服", "体操服", "拉拉队"],
      "bg_kw": ["教室", "樱花", "天台", "走廊", "图书馆", "体育馆"],
-     "artstyle_kw": ["赛璐璐", "少女漫画", "水彩"]},
+     "artstyle_kw": ["赛璐璐", "少女漫画", "水彩", "淡彩"]},
     {"id": "wedding", "label": "婚纱 · 典礼",
      "outfit_kw": ["婚纱", "礼服", "秀禾", "白无垢"], "bg_kw": ["纯白", "浅粉", "教堂", "拱门", "宴会"],
-     "artstyle_kw": ["油画", "水彩", "赛璐璐"]},
+     "artstyle_kw": ["油画", "水彩", "赛璐璐", "彩绘玻璃", "细密画", "岩彩"]},
     {"id": "office", "label": "职场 · 通勤",
      "outfit_kw": ["职业西装", "西装裤装", "通勤", "铅笔裙", "西裤", "毛衣", "航空制服"],
      "bg_kw": ["咖啡馆", "霓虹", "办公室", "写字楼", "天桥"],
-     "artstyle_kw": ["厚涂", "扁平", "赛璐璐"]},
+     "artstyle_kw": ["厚涂", "扁平", "赛璐璐", "复古印刷", "韩漫"]},
     {"id": "kimono", "label": "和风 · 浴衣",
      "outfit_kw": ["浴衣", "和服", "振袖", "访问着", "巫女"], "bg_kw": ["和室", "樱花", "祭典", "温泉", "枯山水"],
-     "artstyle_kw": ["浮世绘", "水墨", "水彩"]},
+     "artstyle_kw": ["浮世绘", "水墨", "水彩", "岩彩", "淡彩"]},
     {"id": "maid", "label": "女仆 · 咖啡厅",
      "outfit_kw": ["女仆"], "bg_kw": ["咖啡馆", "咖啡店", "客厅", "沙发"],
-     "artstyle_kw": ["赛璐璐", "水彩", "扁平"]},
+     "artstyle_kw": ["赛璐璐", "水彩", "扁平", "Riso"]},
     {"id": "gothic", "label": "暗黑 · 哥特",
      "outfit_kw": ["哥特", "女巫", "吸血鬼", "魔法学院"], "bg_kw": ["霓虹", "雨", "古堡", "烛光", "墓园"],
-     "artstyle_kw": ["哥特", "油画"]},
+     "artstyle_kw": ["哥特", "油画", "铜版画", "彩绘玻璃", "故障"]},
     {"id": "home", "label": "居家 · 慵懒",
      "outfit_kw": ["睡衣", "睡袍", "睡裙", "T恤", "卫衣", "家居服", "毛衣"],
      "bg_kw": ["雨", "和室", "咖啡馆", "客厅", "卧室"],
-     "artstyle_kw": ["水彩", "少女漫画", "赛璐璐"]},
+     "artstyle_kw": ["水彩", "少女漫画", "赛璐璐", "淡彩", "剪纸"]},
     {"id": "idol", "label": "偶像 · 舞台",
      "outfit_kw": ["打歌服", "舞台", "演出服"], "bg_kw": ["圣诞", "霓虹", "星空", "演唱会", "直播间"],
-     "artstyle_kw": ["赛博", "3D 渲染", "赛璐璐"]},
+     "artstyle_kw": ["赛博", "3D 渲染", "赛璐璐", "Y2K", "故障"]},
     {"id": "party", "label": "旗袍 · 东方",
      "outfit_kw": ["旗袍"], "bg_kw": ["和室", "樱花", "绿意花园", "中式庭院", "红灯笼"],
-     "artstyle_kw": ["水墨", "油画", "浮世绘"]},
+     "artstyle_kw": ["水墨", "油画", "浮世绘", "岩彩", "细密画"]},
     # —— v0.19.0：纯画风主题。只约束 artstyle 维度（服装/背景/姿势仍按种子随机），
     #    适合「让这角色的这一批图统一成某种画风」；批量补图的内容主题轮换会自动
     #    带上它们（batch_fill.content_theme_ids 排除的只有 random 与 tpl_）。
@@ -404,6 +462,18 @@ THEMES = (
     {"id": "art_clay", "label": "画风 · 黏土手办", "artstyle_kw": ["黏土"]},
     {"id": "art_pixel", "label": "画风 · 像素艺术", "artstyle_kw": ["像素"]},
     {"id": "art_flat", "label": "画风 · 扁平插画", "artstyle_kw": ["扁平"]},
+    # —— v0.19.1：介质系纯画风主题（对应上面新加的 15 款非主流画风，只挑最有
+    #    辨识度的 10 个单独开主题；其余仍可在提示词面板的「画风」chip 里锁定）
+    {"id": "art_penwash", "label": "画风 · 钢笔淡彩", "artstyle_kw": ["淡彩"]},
+    {"id": "art_cinematic", "label": "画风 · 电影感厚涂", "artstyle_kw": ["电影感"]},
+    {"id": "art_retroprint", "label": "画风 · 复古印刷海报", "artstyle_kw": ["复古印刷"]},
+    {"id": "art_pigment", "label": "画风 · 岩彩重彩", "artstyle_kw": ["岩彩"]},
+    {"id": "art_etching", "label": "画风 · 铜版画蚀刻", "artstyle_kw": ["蚀刻"]},
+    {"id": "art_stainglass", "label": "画风 · 彩绘玻璃", "artstyle_kw": ["彩绘玻璃"]},
+    {"id": "art_riso", "label": "画风 · Riso 孔版", "artstyle_kw": ["Riso"]},
+    {"id": "art_glitch", "label": "画风 · 故障 VHS", "artstyle_kw": ["故障"]},
+    {"id": "art_y2k", "label": "画风 · Y2K 千禧", "artstyle_kw": ["Y2K"]},
+    {"id": "art_manhwa", "label": "画风 · 韩漫半写实", "artstyle_kw": ["韩漫"]},
 )
 
 
