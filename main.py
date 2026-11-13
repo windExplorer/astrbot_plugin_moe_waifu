@@ -118,6 +118,12 @@ class MoeWaifuPlugin(Star):
             except Exception:
                 logger.error(f"[{PLUGIN_NAME}] 关系模型迁移失败\n"
                              f"{traceback.format_exc()}")
+            # v0.25.0：读路径切到新表（空表 / 异常时 pool 内部自动回退 JSON）
+            try:
+                pool.set_packs_provider(self._store.load_packs)
+            except Exception:
+                logger.error(f"[{PLUGIN_NAME}] 读路径切换新表失败\n"
+                             f"{traceback.format_exc()}")
             try:  # 角色库工坊（Dashboard 登录墙内，仅管理员使用）
                 from . import webui_api
                 webui_api.register(self)

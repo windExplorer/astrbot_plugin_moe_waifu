@@ -104,6 +104,12 @@ CREATE TABLE IF NOT EXISTS characters (
   verified      INTEGER NOT NULL DEFAULT 0,
   strategy_json TEXT NOT NULL DEFAULT '{}',
   cover_path    TEXT NOT NULL DEFAULT '',
+  -- v0.25.0 切读路径：条目全量字段，读出来的结构与 pools/*.json 同构
+  category      TEXT NOT NULL DEFAULT 'other',
+  tier          TEXT NOT NULL DEFAULT '',
+  quote         TEXT NOT NULL DEFAULT '',
+  quotes_json   TEXT NOT NULL DEFAULT '[]',
+  color         TEXT NOT NULL DEFAULT '',
   created_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_characters_work ON characters(work_id);
@@ -197,6 +203,15 @@ _MIGRATIONS = {
         "active": "INTEGER NOT NULL DEFAULT 1",
         # v0.24.0：关系模型阶段 1，指向 assets.id（全部图片统一编号）
         "asset_id": "INTEGER",
+    },
+    # v0.25.0：v0.24.0 建的 characters 表只有基础列，切读路径需要完整条目字段
+    # （工坊角色卡会显示分类 / 稀有度 / 印象语 / 颜色，缺了就全空）。
+    "characters": {
+        "category": "TEXT NOT NULL DEFAULT 'other'",
+        "tier": "TEXT NOT NULL DEFAULT ''",
+        "quote": "TEXT NOT NULL DEFAULT ''",
+        "quotes_json": "TEXT NOT NULL DEFAULT '[]'",
+        "color": "TEXT NOT NULL DEFAULT ''",
     },
     "draws": {
         "seed_hex": "TEXT NOT NULL DEFAULT ''",
@@ -509,61 +524,15 @@ class Store:
         JSON 里不删，等稳定后再纳入。重复启动不产生重复行，新表可随时重建。
         阶段 1 不改任何现有读写路径 —— JSON 仍是真源，抽卡 / 工坊行为不变。
         """
-        scope = {str(s).strip() for s in
-                 (series_scope or ("原神", "鸣潮", "异环")) if str(s).strip()}
+        scope = self.series_scope(series_scope)
         pools_dir, data_dir = Path(pools_dir), Path(data_dir)
         stats = {"scope": sorted(scope), "skipped": 0}
-        # 1) 卷 / 作品 / 角色
+        # 1) 卷 / 作品 / 角色：统一走 sync_pack_file（同一套 upsert + 清理逻辑，
+        #    确保「启动迁移」与「工坊写完同步」不会出现两套口径）
         for path in (sorted(pools_dir.glob("*.json"))
                      if pools_dir.is_dir() else []):
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-            if not isinstance(data, dict) or not isinstance(data.get("entries"), list):
-                continue
-            pack_name = str(data.get("pack") or path.stem).strip()
-            if not pack_name:
-                continue
-            self._conn.execute(
-                "INSERT OR IGNORE INTO packs(name, title, enabled) VALUES(?,?,?)",
-                (pack_name, str(data.get("title") or pack_name),
-                 1 if data.get("enabled", True) else 0))
-            prow = self._conn.execute(
-                "SELECT id FROM packs WHERE name=?", (pack_name,)).fetchone()
-            pack_id = int(prow["id"]) if prow else 0
-            for raw in data["entries"]:
-                if not isinstance(raw, dict):
-                    stats["skipped"] += 1
-                    continue
-                cid = str(raw.get("id") or "").strip()
-                name = str(raw.get("name") or "").strip()
-                series = str(raw.get("series") or "").strip()
-                if not cid or not name or series not in scope:
-                    stats["skipped"] += 1
-                    continue
-                self._conn.execute(
-                    "INSERT OR IGNORE INTO works(name, category, color, created_at) "
-                    "VALUES(?,?,?,?)",
-                    (series, str(raw.get("category") or "other"),
-                     str(raw.get("color") or ""), _now()))
-                wrow = self._conn.execute(
-                    "SELECT id FROM works WHERE name=?", (series,)).fetchone()
-                work_id = int(wrow["id"]) if wrow else 0
-                st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
-                self._conn.execute(
-                    "INSERT INTO characters(char_id, pack_id, work_id, name, tags_en,"
-                    " verified, strategy_json, cover_path, created_at) "
-                    "VALUES(?,?,?,?,?,?,?,?,?) "
-                    "ON CONFLICT(char_id) DO UPDATE SET pack_id=excluded.pack_id,"
-                    " work_id=excluded.work_id, name=excluded.name,"
-                    " tags_en=excluded.tags_en, verified=excluded.verified,"
-                    " strategy_json=excluded.strategy_json,"
-                    " cover_path=excluded.cover_path",
-                    (cid, pack_id, work_id, name, str(raw.get("tags_en") or ""),
-                     1 if raw.get("verified") else 0,
-                     json.dumps(st, ensure_ascii=False),
-                     str(raw.get("cover") or ""), _now()))
+            res = self.sync_pack_file(path, series_scope=scope)
+            stats["skipped"] += int(res.get("skipped") or 0)
         self._conn.commit()
         # 2) 立绘行：登记并回填 asset_id
         for row in self._conn.execute(
@@ -599,6 +568,153 @@ class Store:
         if logger is not None:
             logger.info(f"[moe_waifu] 关系模型迁移（阶段 1）：{stats}")
         return stats
+
+    _SERIES_SCOPE = ("原神", "鸣潮", "异环")
+
+    @classmethod
+    def series_scope(cls, scope=None) -> set:
+        """首版纳入新模型的作品集合（用户口径：先只做这三个，稳定后再加）。"""
+        return {str(s).strip() for s in
+                (scope or cls._SERIES_SCOPE) if str(s).strip()}
+
+    def _upsert_character(self, raw, pack_id: int, scope: set) -> str:
+        """upsert 单条角色（含作品），返回 char_id；不合法 / 不在 scope → ""。"""
+        if not isinstance(raw, dict):
+            return ""
+        cid = str(raw.get("id") or "").strip()
+        name = str(raw.get("name") or "").strip()
+        series = str(raw.get("series") or "").strip()
+        if not cid or not name or series not in scope:
+            return ""
+        self._conn.execute(
+            "INSERT OR IGNORE INTO works(name, category, color, created_at) "
+            "VALUES(?,?,?,?)",
+            (series, str(raw.get("category") or "other"),
+             str(raw.get("color") or ""), _now()))
+        wrow = self._conn.execute(
+            "SELECT id FROM works WHERE name=?", (series,)).fetchone()
+        work_id = int(wrow["id"]) if wrow else 0
+        st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
+        quotes = raw.get("quotes") if isinstance(raw.get("quotes"), list) else []
+        quotes = [str(q).strip() for q in quotes if str(q).strip()]
+        single = str(raw.get("quote") or "").strip()
+        if single and single not in quotes:
+            quotes.insert(0, single)
+        self._conn.execute(
+            "INSERT INTO characters(char_id, pack_id, work_id, name, tags_en,"
+            " verified, strategy_json, cover_path, category, tier, quote,"
+            " quotes_json, color, created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(char_id) DO UPDATE SET pack_id=excluded.pack_id,"
+            " work_id=excluded.work_id, name=excluded.name,"
+            " tags_en=excluded.tags_en, verified=excluded.verified,"
+            " strategy_json=excluded.strategy_json,"
+            " cover_path=excluded.cover_path, category=excluded.category,"
+            " tier=excluded.tier, quote=excluded.quote,"
+            " quotes_json=excluded.quotes_json, color=excluded.color",
+            (cid, pack_id, work_id, name, str(raw.get("tags_en") or ""),
+             1 if raw.get("verified") else 0,
+             json.dumps(st, ensure_ascii=False),
+             str(raw.get("cover") or ""),
+             str(raw.get("category") or "other"),
+             str(raw.get("tier") or ""),
+             single or (quotes[0] if quotes else ""),
+             json.dumps(quotes, ensure_ascii=False),
+             str(raw.get("color") or ""), _now()))
+        return cid
+
+    def sync_pack_file(self, path, series_scope=None) -> dict:
+        """单个卷 JSON → 新表（upsert + 删除该卷里已消失的角色），幂等。
+
+        v0.25.0 切读路径后，工坊所有写操作仍落 JSON（真源不动），写完经
+        `webui_api._json_save` 钩子调这里，读路径立刻能看到改动。
+        非 scope 角色不纳入（首版只有三游戏），也**不会删除其它卷的数据**。
+        """
+        scope = self.series_scope(series_scope)
+        path = Path(path)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {"error": "json"}
+        if not isinstance(data, dict) or not isinstance(data.get("entries"), list):
+            return {"error": "shape"}
+        pack_name = str(data.get("pack") or path.stem).strip()
+        if not pack_name:
+            return {"error": "pack"}
+        title = str(data.get("title") or pack_name)
+        enabled = 1 if data.get("enabled", True) else 0
+        self._conn.execute(
+            "INSERT OR IGNORE INTO packs(name, title, enabled) VALUES(?,?,?)",
+            (pack_name, title, enabled))
+        self._conn.execute(
+            "UPDATE packs SET title=?, enabled=? WHERE name=?",
+            (title, enabled, pack_name))
+        prow = self._conn.execute(
+            "SELECT id FROM packs WHERE name=?", (pack_name,)).fetchone()
+        pack_id = int(prow["id"]) if prow else 0
+        kept, skipped = set(), 0
+        for raw in data["entries"]:
+            cid = self._upsert_character(raw, pack_id, scope)
+            if cid:
+                kept.add(cid)
+            else:
+                skipped += 1
+        existing = {r["char_id"] for r in self._conn.execute(
+            "SELECT char_id FROM characters WHERE pack_id=?", (pack_id,))}
+        gone = existing - kept
+        for cid in gone:
+            self._conn.execute("DELETE FROM characters WHERE char_id=?", (cid,))
+        self._conn.commit()
+        return {"pack": pack_name, "kept": len(kept), "skipped": skipped,
+                "removed": len(gone)}
+
+    def load_packs(self) -> list:
+        """按 `pool.load_packs` 同构返回：卷 → 条目（原始形状，供 normalize_entry）。
+
+        只含已纳入新表的角色（首版 = 原神 / 鸣潮 / 异环）；空库返回 []，调用方
+        据此回退 JSON。字段与卷 JSON 一一对应，工坊 / 抽卡代码零改动。
+        """
+        out = []
+        prows = self._conn.execute(
+            "SELECT id, name, title, enabled FROM packs ORDER BY name").fetchall()
+        for p in prows:
+            rows = self._conn.execute(
+                "SELECT c.*, w.name AS work_name FROM characters c "
+                "LEFT JOIN works w ON w.id = c.work_id "
+                "WHERE c.pack_id=? ORDER BY c.char_id", (p["id"],)).fetchall()
+            entries = []
+            for r in rows:
+                try:
+                    st = json.loads(r["strategy_json"] or "{}")
+                except Exception:
+                    st = {}
+                if not isinstance(st, dict):
+                    st = {}
+                try:
+                    quotes = json.loads(r["quotes_json"] or "[]")
+                except Exception:
+                    quotes = []
+                if not isinstance(quotes, list):
+                    quotes = []
+                e = {"id": r["char_id"], "name": r["name"],
+                     "series": str(r["work_name"] or ""),
+                     "pack": p["name"],
+                     "category": r["category"] or "other",
+                     "tier": r["tier"] or "",
+                     "tags_en": r["tags_en"] or "",
+                     "verified": bool(r["verified"]),
+                     "strategy": st,
+                     "color": r["color"] or "#E8B4C8"}
+                if r["quote"]:
+                    e["quote"] = r["quote"]
+                if quotes:
+                    e["quotes"] = quotes
+                if r["cover_path"]:
+                    e["cover"] = r["cover_path"]
+                entries.append(e)
+            out.append({"pack": p["name"], "title": p["title"] or p["name"],
+                        "enabled": bool(p["enabled"]), "entries": entries})
+        return out
 
     def portrait_by_file(self, file: str) -> dict | None:
         """按相对路径取立绘行（转参考图时把 prompt/theme/seed 带走）。"""

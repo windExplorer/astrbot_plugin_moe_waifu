@@ -118,7 +118,32 @@ def series_for_group(bound: dict, group_id: str) -> set | None:
 
 # ---------- 库装载 ----------
 
+# v0.25.0：数据源钩子。插件初始化时把 store.load_packs 挂上来，所有读路径
+# 自动走 SQLite 新表；新表为空 / 抛异常时回退卷 JSON——地基出问题绝不能让
+# 抽卡没候选。写路径不动（JSON 仍是真源，写完由 webui_api 同步新表）。
+_PACKS_PROVIDER = None
+
+
+def set_packs_provider(fn) -> None:
+    """设置卷数据源（None = 只用 JSON）。main.py 初始化时挂 store 读方法。"""
+    global _PACKS_PROVIDER
+    _PACKS_PROVIDER = fn
+
+
 def load_packs(pools_dir: Path, logger=None) -> list:
+    """读取角色卷：优先新表（v0.25.0），空表 / 异常回退 pools/*.json。"""
+    if _PACKS_PROVIDER is not None:
+        try:
+            packs = _PACKS_PROVIDER()
+            if packs:
+                return packs
+        except Exception as exc:  # 地基坏了也不能阻塞抽卡
+            if logger is not None:
+                logger.warning(f"[moe_waifu] 新表读取失败，回退卷 JSON: {exc}")
+    return _load_packs_json(pools_dir, logger)
+
+
+def _load_packs_json(pools_dir: Path, logger=None) -> list:
     """读取 pools/ 下全部卷 JSON。坏文件跳过并记日志（不阻塞其它卷）。"""
     packs: list = []
     seen: set = set()

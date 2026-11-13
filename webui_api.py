@@ -100,10 +100,29 @@ def _json_load(path: Path) -> dict:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+# v0.25.0：卷文件落盘后的同步回调（写 JSON → 同步新表，读路径立刻可见）。
+# 读路径已切到 SQLite，缺了这层就会出现「工坊改完还是旧数据」。
+_PACK_SYNC = None
+
+
+def set_pack_sync(fn) -> None:
+    """设置卷同步回调（None = 不同步）。register() 时挂 store.sync_pack_file。"""
+    global _PACK_SYNC
+    _PACK_SYNC = fn
+
+
 def _json_save(path: Path, data) -> None:
     import json
 
-    Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    path = Path(path)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 只同步 pools/ 下的角色卷；works_meta.json 等不进新表
+    if _PACK_SYNC is not None and path.parent.name == "pools":
+        try:
+            _PACK_SYNC(path)
+        except Exception:
+            logger.warning(f"[{PLUGIN_NAME}] 卷同步新表失败 {path.name}\n"
+                           f"{traceback.format_exc()}")
 
 
 def _version_of() -> str:
@@ -3227,6 +3246,14 @@ async def h_quote_gen(plugin) -> dict:
 # ---------- 注册 ----------
 
 def register(plugin) -> None:
+    # v0.25.0：读路径已切新表，写 JSON 后必须同步，否则会出现「改完看不到」
+    try:
+        store_obj = getattr(plugin, "_store", None)
+        set_pack_sync(getattr(store_obj, "sync_pack_file", None)
+                      if store_obj is not None else None)
+    except Exception:
+        logger.warning(f"[{PLUGIN_NAME}] 卷同步钩子设置失败\n"
+                       f"{traceback.format_exc()}")
     routes = [
         ("/pools", h_pools, ["GET"]),
         ("/works", h_works, ["GET"]),

@@ -14,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+import pool  # noqa: E402
 import store  # noqa: E402
 import webui_api  # noqa: E402
 
@@ -152,6 +153,64 @@ with tempfile.TemporaryDirectory() as td:
     check("老库新建四张表",
           {"assets", "packs", "works", "characters"} <= old_tables)
     st2.close()
+
+    # 8) 读路径：load_packs 与卷 JSON 同构
+    packs_db = st.load_packs()
+    check("新表读出的卷数与库一致", len(packs_db) == r1["packs"],
+          f"{len(packs_db)} vs {r1['packs']}")
+    flat = [e for p in packs_db for e in p["entries"]]
+    check("读出的角色数 = characters 表", len(flat) == r1["characters"],
+          f"{len(flat)} vs {r1['characters']}")
+    ganyu = next(e for e in flat if e["id"] == "ganyu")
+    check("条目字段完整（作品/卷/分类/颜色/strategy）",
+          ganyu["series"] == "原神" and ganyu["pack"] == "game"
+          and ganyu["category"] == "game" and ganyu["color"]
+          and isinstance(ganyu["strategy"], dict), str(ganyu))
+    check("normalize_entry 吃得下新表条目",
+          pool.normalize_entry(ganyu, "game")["id"] == "ganyu")
+
+    # 9) 数据源钩子：优先新表，空表回退 JSON
+    pool.set_packs_provider(st.load_packs)
+    try:
+        via_db = pool.load_packs(pools)
+        check("读路径走新表", len(via_db) == len(packs_db), str(len(via_db)))
+        pool.set_packs_provider(lambda: [])
+        fallback = pool.load_packs(pools)
+        check("空表回退 JSON（不会让抽卡没候选）", len(fallback) == 2,
+              str(len(fallback)))
+    finally:
+        pool.set_packs_provider(None)
+
+    # 10) 抽卡候选：切读后只含三游戏
+    cands = pool.candidates_for(st.load_packs(), "", "", True)
+    check("候选只剩三游戏 4 位",
+          len(cands) == 4
+          and all(c["series"] in {"原神", "鸣潮", "异环"} for c in cands),
+          str([c["id"] for c in cands]))
+
+    # 11) 单卷同步：改字段 + 删除卷里已消失的角色
+    dump(pools / "game.json", "game", [
+        {"id": "ganyu", "name": "甘雨改", "series": "原神",
+         "tags_en": "1girl", "verified": True, "category": "game", "tier": "S",
+         "strategy": {"type": "base"}},
+        E("verina", "维里奈", "鸣潮"),
+        E("nanally_nte", "娜娜莉", "异环"),
+    ])
+    rs = st.sync_pack_file(pools / "game.json")
+    row = st._conn.execute(
+        "SELECT name, tier FROM characters WHERE char_id='ganyu'").fetchone()
+    check("同步更新了字段", row["name"] == "甘雨改" and row["tier"] == "S",
+          str(dict(row)))
+    check("同步删除了卷里已消失的角色",
+          st._conn.execute(
+              "SELECT 1 FROM characters WHERE char_id='keqing'").fetchone() is None)
+    check("同步返回 kept / removed", rs["kept"] == 3 and rs["removed"] == 1,
+          str(rs))
+    check("非 scope 角色始终不入库",
+          st._conn.execute(
+              "SELECT 1 FROM characters WHERE char_id='march_7th'").fetchone() is None)
+    check("读路径立刻看到改动",
+          len([e for p in st.load_packs() for e in p["entries"]]) == 3)
     st.close()
 
 print("test_relational: ALL OK")

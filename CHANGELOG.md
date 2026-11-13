@@ -2,6 +2,17 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.25.0 (2026-11-13)
+
+- **关系模型改造 阶段 2：读路径切到 SQLite 新表，抽卡 / 工坊正式收敛到三游戏**。
+  - 背景：v0.24.0 只建了地基（`assets` / `packs` / `works` / `characters`），读写仍走卷 JSON。本版把**读**切到新表：`pool.load_packs()` 增加数据源钩子，初始化时挂 `store.load_packs`，所有既有调用点（抽卡候选 `candidates_for`、工坊角色库 / 作品库 / 试画 / 批量补图 / 重复角色）零改动生效。
+  - 预期后果：抽卡候选从「全部启用卷」收敛到 **原神 / 鸣潮 / 异环 128 位**；`data/pools/` 里残留的旧三游戏卷（真实日志显示 `packs: 6` 个卷文件）不再造成一人两份——新表 `char_id` 唯一，天然去重。
+  - 写路径保持 JSON 真源：所有工坊写操作仍落 `pools/*.json`，写完经 `webui_api._json_save` 钩子调 `store.sync_pack_file()` 同步新表（upsert + 删除该卷里已消失的角色），所以改完立刻可见；不同步就会出现「工坊改完还是旧数据」。
+  - `characters` 表补齐条目字段（`category` / `tier` / `quote` / `quotes_json` / `color`，老库 PRAGMA + ALTER 就地加列）；`store.load_packs()` 还原出与卷 JSON 同构的条目，`normalize_entry` 与全部调用方无需改动。
+  - 安全兜底：新表为空或读取异常时 `pool.load_packs()` 自动回退卷 JSON（抽卡不会没候选）；`sync_pack_file` 只纳入 `series_scope`，非三游戏角色不入库、也**不删除**其它卷数据。
+  - 阶段 3（未做）：工坊 CRUD 全部改写新表、JSON 降级为导入导出格式，完成才到 v1.0.0。
+  - 验证：18 个自检脚本全绿；`test_relational.py` 新增读路径同构、钩子优先 / 空表回退、候选只含三游戏、单卷同步增删改（改字段 / 删角色 / kept-removed 计数 / 读路径立刻可见）等守卫。
+
 ## v0.24.1 (2026-11-13)
 
 - **补上关系模型状态的可视入口**：v0.24.0 只给了 `/relational/status` 后端接口，工坊里没有任何地方能看到，用户装完新版本无法核对地基是否就绪。
