@@ -80,6 +80,10 @@
   /* v0.16.0：批量补图弹窗纵向堆叠（替代 n-space——modal slot 内 n-space
      在 sandbox iframe 下整块 content 静默不渲染，见弹窗内注释） */
   .stack-v { display: flex; flex-direction: column; gap: 8px; }
+  /* v0.25.5：范围下拉固定槽位——三个 select 是 v-if 切换的，槽位不占位时
+     「预览」按钮会随范围左右平移，切范围时不好定位 */
+  .batch-scope-slot { width: 248px; flex: 0 0 auto; display: flex;
+    align-items: center; }
   /* v0.16.0：批量补图弹窗行 */
   .batch-row { display: flex; align-items: center; gap: 8px; font-size: 12px;
     padding: 2px 0; }
@@ -2208,19 +2212,25 @@
             <n-radio-button value="series">按作品</n-radio-button>
             <n-radio-button value="chars">按角色</n-radio-button>
           </n-radio-group>
-          <n-select v-if="batchMode === 'packs'" v-model:value="batchPacks" multiple
-                    :options="packOpts" size="small" style="width: 240px;" clearable
-                    placeholder="留空 = 全部卷"></n-select>
-          <!-- v0.25.3：作品多选不能复用带「全部作品」哨兵的 seriesOpts—— -->
-          <!-- 哨兵 value="" 会被当成真实 series 发给后端，过滤后 0 命中。 -->
-          <!-- v0.25.4：三种范围都是「留空 = 全部」，后端空选择不再过滤。 -->
-          <n-select v-if="batchMode === 'series'" v-model:value="batchSeries" multiple
-                    :options="batchSeriesOpts" size="small" style="width: 240px;"
-                    clearable filterable placeholder="留空 = 全部作品"></n-select>
-          <n-select v-if="batchMode === 'chars'" v-model:value="batchChars" multiple
-                    :options="batchCharOpts" size="small" style="width: 240px;" clearable
-                    filterable placeholder="留空 = 全部角色"></n-select>
-          <n-button size="small" :loading="batchPreviewLoading"
+          <!-- v0.25.5：下拉槽位固定 248px 占位——三个 select 是 v-if 切换的，
+               旧写法下「全部角色」没有下拉，预览按钮会平移到 radio 右边，
+               切范围时按钮左右跳、不易分辨。空槽位给一行灰字说明。 -->
+          <div class="batch-scope-slot">
+            <n-select v-if="batchMode === 'packs'" v-model:value="batchPacks" multiple
+                      :options="packOpts" size="small" style="width: 240px;" clearable
+                      placeholder="留空 = 全部卷"></n-select>
+            <!-- v0.25.3：作品多选不能复用带「全部作品」哨兵的 seriesOpts—— -->
+            <!-- 哨兵 value="" 会被当成真实 series 发给后端，过滤后 0 命中。 -->
+            <!-- v0.25.4：三种范围都是「留空 = 全部」，后端空选择不再过滤。 -->
+            <n-select v-else-if="batchMode === 'series'" v-model:value="batchSeries" multiple
+                      :options="batchSeriesOpts" size="small" style="width: 240px;"
+                      clearable filterable placeholder="留空 = 全部作品"></n-select>
+            <n-select v-else-if="batchMode === 'chars'" v-model:value="batchChars" multiple
+                      :options="batchCharOpts" size="small" style="width: 240px;" clearable
+                      filterable placeholder="留空 = 全部角色"></n-select>
+            <span v-else class="bind-tip" style="margin-top: 0;">全部角色 · 无需再筛选</span>
+          </div>
+          <n-button size="small" type="primary" secondary :loading="batchPreviewLoading"
                     :disabled="batchRunning" @click="doBatchPreview">预览</n-button>
         </div>
         <div v-if="batchPreview" class="bind-tip" style="margin-top: 0;">
