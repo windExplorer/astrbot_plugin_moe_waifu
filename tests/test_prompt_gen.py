@@ -35,7 +35,7 @@ ENTRY = {"id": "miku", "name": "初音未来", "series": "Vocaloid",
 p1 = prompt_gen.pick_variations(12345)
 p2 = prompt_gen.pick_variations(12345)
 check("同种子同选择", p1 == p2)
-check("六个维度齐全", set(p1.keys()) == {"compose", "outfit", "background",
+check("七个维度齐全", set(p1.keys()) == {"compose", "artstyle", "outfit", "background",
                                      "pose", "expression", "body"})
 check("维度取自池内", p1["background"] in prompt_gen.BACKGROUNDS
       and p1["body"] in prompt_gen.BODY
@@ -116,7 +116,8 @@ check("主题表齐全", sw is not None and len(prompt_gen.THEMES) >= 9)
 for t in prompt_gen.THEMES:
     for kw_key, dim in (("outfit_kw", "outfit"), ("bg_kw", "background"),
                         ("pose_kw", "pose"), ("compose_kw", "compose"),
-                        ("expression_kw", "expression")):
+                        ("expression_kw", "expression"),
+                        ("artstyle_kw", "artstyle")):
         for kw in t.get(kw_key) or []:
             if not any(kw in str(it.get("zh") or "") for it in prompt_gen.DIMS[dim]):
                 check(f"主题 {t['id']} 关键词命中池", False, f"{kw_key}:{kw}")
@@ -411,5 +412,60 @@ async def _run_i2i_tpl(seed):
 
 txt_tpl, _src_tpl = asyncio.run(_run_i2i_tpl(7))
 check("tpl_3view 主题仍输出三视图指令", "三视图" in txt_tpl)
+
+# ---------- v0.19.0：画风维度（用户反馈「主题里应该加上画风，现在画风太单一」） ----------
+check("画风池 >= 14 款风格",
+      len([s for s in prompt_gen.ARTSTYLES if s["zh"]]) >= 14)
+_az_zh = {prompt_gen.pick_variations(s)["artstyle"]["zh"] for s in range(400)}
+check("画风维度分布非退化（400 种子 >= 8 种）", len(_az_zh) >= 8)
+_az_keep = sum(1 for s in range(2000)
+               if prompt_gen.pick_variations(s)["artstyle"].get("zh") == "")
+check("画风保留少量空项（0 < 不写画风种数 < 25%）", 0 < _az_keep < 500)
+# 画风必须四路都进：danbooru tag / natural caption / qwen 中文 / img2img 编辑指令
+_p_az = prompt_gen.apply_dim_state(
+    base, 42, {"fixed": {"artstyle": "清透水彩绘本"}}, None)
+check("画风可锁定（en 从池内反查）",
+      _p_az["artstyle"]["zh"] == "清透水彩绘本"
+      and "watercolor" in _p_az["artstyle"]["en"])
+check("画风 tag 进 danbooru 串",
+      "watercolor" in prompt_gen.build_t2i_prompt(ENTRY, _p_az))
+check("画风 tag 进 natural 兜底",
+      "watercolor" in prompt_gen.build_t2i_natural_local(ENTRY, _p_az))
+check("画风进 qwen 中文兜底",
+      "整体画风为清透水彩绘本" in prompt_gen.build_t2i_qwen_local(ENTRY, _p_az))
+_az_inst = prompt_gen.build_local_instruction(ENTRY, _p_az)
+check("画风进图生图编辑指令并再锚一次辨识度",
+      "把整体画风改为清透水彩绘本" in _az_inst and _az_inst.count("可辨认") >= 1)
+check("画风进变化短语列表", ("画风", "清透水彩绘本") in prompt_gen.variation_zh_list(_p_az))
+check("画风进元提示词", "画风：清透水彩绘本" in prompt_gen.build_meta_prompt(ENTRY, _p_az))
+# 纯画风主题：只约束画风，服装/背景/姿势与随机完全一致
+_art_ink = prompt_gen.get_theme("art_ink")
+check("纯画风主题存在", _art_ink is not None and _art_ink.get("artstyle_kw") == ["水墨"])
+_art_only = all(
+    "水墨" in prompt_gen.pick_variations(s, _art_ink)["artstyle"]["zh"]
+    and prompt_gen.pick_variations(s, _art_ink)["outfit"]
+    == prompt_gen.pick_variations(s)["outfit"]
+    and prompt_gen.pick_variations(s, _art_ink)["background"]
+    == prompt_gen.pick_variations(s)["background"]
+    for s in range(60))
+check("纯画风主题只收束画风（服装/背景仍随种子）", _art_only)
+# 内容主题都带画风约束（用户要求「主题里要加上画风」）
+_no_style = [t["id"] for t in prompt_gen.THEMES
+             if t["id"] != "random" and not (t.get("artstyle_kw") or [])]
+check("除 random 外所有主题都约束画风", not _no_style)
+# 主题画风子集必须真的能摇出东西（写错关键词 = 画风悄悄失效）
+_bad_style_subset = []
+for t in prompt_gen.THEMES:
+    kws = t.get("artstyle_kw") or []
+    if not kws:
+        continue
+    if not [it for it in prompt_gen.ARTSTYLES
+            if any(kw in str(it.get("zh") or "") for kw in kws)]:
+        _bad_style_subset.append(t["id"])
+check("主题画风关键词全部筛出非空子集", not _bad_style_subset)
+# 同一主题下画风也会变（不是锁定单一画风）
+_campus_az = {prompt_gen.pick_variations(s, prompt_gen.get_theme("campus"))["artstyle"]["zh"]
+              for s in range(120)}
+check("校园主题画风 >= 2 种（主题内也有画风变化）", len(_campus_az) >= 2)
 
 print("test_prompt_gen: ALL OK")

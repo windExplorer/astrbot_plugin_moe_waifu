@@ -676,8 +676,11 @@
                   <n-space align="center" :wrap="true" size="small">
                     <n-button size="small" @click="tryStep = 1">← 上一步</n-button>
                     <span style="font-size: 13px;">主题：</span>
+                    <!-- v0.19.0：主题表涨到 27 项（含 12 个「画风 · xxx」），加 filterable
+                         才能输入关键词筛选 -->
                     <n-select v-model:value="tryTheme" :options="themeOpts" size="small"
-                              style="width: 190px;" @update:value="onThemeChange"></n-select>
+                              style="width: 200px;" filterable
+                              @update:value="onThemeChange"></n-select>
                     <n-input v-model:value="tryOutfit" size="small" clearable
                              placeholder="穿搭（可选，留空 = 随机，如：白色婚纱、女仆装）"
                              style="width: 260px;"
@@ -806,7 +809,8 @@
                   <!-- v0.7.0：主题快选 + 主按钮（v0.6.2 的「查看/编辑提示词」并入主按钮——
                        点主按钮打开提示词面板，在面板里点「开始生成」才出图） -->
                   <n-select v-model:value="galTheme" :options="themeOpts" size="small"
-                            style="width: 140px;" @update:value="galPromptConfirmed = false"></n-select>
+                            style="width: 190px;" filterable
+                            @update:value="galPromptConfirmed = false"></n-select>
                   <n-button type="primary" size="small" :loading="refillRunning"
                             :disabled="!galCharId" @click="openPromptModal">
                     {{ galMode === "img2img" ? "按所选图生成…" : "开始补图…" }}
@@ -1868,7 +1872,7 @@
         <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
           <span class="bind-tip" style="margin-top: 0;">主题</span>
           <n-select v-model:value="galTheme" :options="themeOpts" size="small"
-                    style="width: 160px;"
+                    style="width: 200px;" filterable
                     @update:value="galAttempt = 0; resetGalDimCtl(); genPromptPreview()"></n-select>
           <n-input v-model:value="galOutfit" size="small" clearable
                    placeholder="穿搭（可选，留空 = 随机）"

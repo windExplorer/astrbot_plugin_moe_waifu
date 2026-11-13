@@ -38,6 +38,14 @@ def main():
     check("n=0 安全", bf.theme_plan("x", "salt", 0) == []
           and bf.theme_plan("x", "salt", -3) == [])
 
+    # v0.19.0：纯画风主题（art_*）也要参与批量补图轮换——否则「一批图换个画风」
+    # 只能一张张手点，用户反馈画风太单一的诉求在批量场景下没被解决
+    art_ids = [t for t in ids if str(t).startswith("art_")]
+    check("批量轮换池含纯画风主题（>= 8）", len(art_ids) >= 8, str(art_ids))
+    wide = bf.theme_plan("c1", "salt", 120)
+    check("120 张里出现过纯画风主题",
+          any(str(t).startswith("art_") for t in wide))
+
     entries = [dict(id="a"), dict(id="b"), dict(id="c"), dict(id="d")]
     counts = {"a": 0, "b": 5, "c": 3}
     has_ref = lambda e: e["id"] in ("a", "c")

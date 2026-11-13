@@ -11,9 +11,11 @@
   产一条 Qwen-Image-Edit 编辑指令；失败/超时 → 本地模板兜底，绝不阻塞出卡。
 - 本地模板：无 astrbot 依赖的确定性拼装（可独立测试）。
 
-变化维度（outfit/background/pose/expression/body）由种子决定论派生：
-同角色同天第 seq 张恒定（重试不换装）。body 维度大权重保持原样，
+变化维度（artstyle/outfit/background/pose/expression/body/compose）由种子决定论
+派生：同角色同天第 seq 张恒定（重试不换装）。body 维度大权重保持原样，
 小概率触发身高/体型/胸部变化（用户明确要的「萝莉变高挑」一类）。
+v0.19.0 起新增 artstyle（画风）维度——此前画风完全由底模决定，换主题只换
+衣服与背景，一组立绘看起来像同一套流程的复制品。
 """
 from __future__ import annotations
 
@@ -267,8 +269,50 @@ BODY = [
     {"w": 4, "zh": "健身后的紧致身材", "en": "toned, athletic"},
 ]
 
+# 画风维度（v0.19.0）：用户反馈「主题里应该要加上画风，现在画风太单一」。
+# 此前变化维度只有服装/背景/姿势/表情/体型，画风完全由底模决定——同一角色的
+# 多张图看起来就像同一个画师同一套流程，换主题也只换了衣服和背景。
+# 权重语义：空项 = 不写画风（交给底模自己的默认风格），保留一小部分避免
+# 「每张都硬换风格」到失真；非空项按权重摇。
+ARTSTYLES = [
+    {"w": 8, "zh": "", "en": ""},
+    {"w": 9, "zh": "日系动画赛璐璐上色",
+     "en": "anime coloring, cel shading, clean lineart, crisp highlights"},
+    {"w": 8, "zh": "厚涂半写实数字绘画",
+     "en": "semi-realistic, thick painting, digital painting, detailed shading"},
+    {"w": 7, "zh": "清透水彩绘本",
+     "en": "watercolor, traditional media, soft colors, paper texture"},
+    {"w": 6, "zh": "古典油画质感",
+     "en": "oil painting, painterly, canvas texture, chiaroscuro"},
+    {"w": 6, "zh": "赛博霓虹插画",
+     "en": "cyberpunk, neon lights, high contrast, glowing, chromatic aberration"},
+    {"w": 6, "zh": "暗黑哥特插画",
+     "en": "gothic, dark fantasy, moody lighting, desaturated colors"},
+    {"w": 5, "zh": "复古 90 年代动画",
+     "en": "retro anime, 1990s, vintage, film grain, muted palette"},
+    {"w": 5, "zh": "国风水墨淡彩",
+     "en": "ink wash painting, chinese ink, sumi-e, muted colors"},
+    {"w": 4, "zh": "浮世绘木刻版画",
+     "en": "ukiyo-e, woodblock print, flat colors, japanese art"},
+    {"w": 4, "zh": "黑白漫画网点",
+     "en": "manga, monochrome, screentone, comic style, lineart"},
+    {"w": 4, "zh": "粉彩少女漫画",
+     "en": "shoujo manga, pastel colors, sparkles, delicate lineart"},
+    {"w": 4, "zh": "3D 渲染动画风",
+     "en": "3d render, cgi, smooth shading, subsurface scattering, ambient occlusion"},
+    {"w": 3, "zh": "黏土手办质感",
+     "en": "clay render, figurine, plastic model, studio lighting"},
+    {"w": 3, "zh": "像素艺术",
+     "en": "pixel art, 16-bit, dithering"},
+    {"w": 3, "zh": "彩色铅笔手绘",
+     "en": "colored pencil, sketch, hand-drawn, hatching"},
+    {"w": 4, "zh": "扁平矢量插画",
+     "en": "flat color, vector art, thick outline, minimalist"},
+]
+
 DIMS = {
     "compose": COMPOSE,
+    "artstyle": ARTSTYLES,
     "outfit": OUTFITS,
     "background": BACKGROUNDS,
     "pose": POSES,
@@ -278,8 +322,10 @@ DIMS = {
 
 # ---------- 主题预设（试画台「第 2 步：提示词」用） ----------
 # {dim}_kw：从对应维度池里按中文子串筛子集，再在该子集内按种子加权
-# （支持 outfit / background / pose / compose 四个维度，缺省 = 不约束该维度）；
-# 筛不出子集（池里没这个词）就退回全池随机。custom 由用户在预览面板自填。
+# （支持 outfit / background / pose / compose / expression / artstyle 六个维度，
+# 缺省 = 不约束该维度）；筛不出子集（池里没这个词）就退回全池随机。custom 由用户
+# 在预览面板自填。v0.19.0：每个内容主题都补了 artstyle_kw（画风收束到贴合该主题
+# 的几种），另加 art_* 纯画风主题（整组图想统一成某种画风时直接选）。
 # tpl_ 前缀 = 「立绘模板」：按 character sheet 行业惯例强制构图 + 标准站姿 +
 # 平静表情（微笑上限）+ 纯色背景。服装不置空、按种子从 OUTFITS 池随机
 # （v0.7.2 曾置空回归原始服装，用户反馈模板也要能换装——v0.7.4 起随机 +
@@ -288,47 +334,76 @@ THEMES = (
     {"id": "random", "label": "随机（按种子变化）", "outfit_kw": [], "bg_kw": []},
     {"id": "tpl_standing", "label": "【模板】纯色背景 · 正常站姿",
      "outfit_kw": [], "bg_kw": ["纯"], "pose_kw": ["标准站姿"],
-     "expression_kw": ["微笑"], "compose_kw": ["正常站姿"]},
+     "expression_kw": ["微笑"], "compose_kw": ["正常站姿"],
+     "artstyle_kw": ["赛璐璐", "厚涂"]},
     # v0.13.0：单图 / 三视图 / 四视图三套底稿模板，统一灰底（character sheet 惯例），
     # 图生图配上「本次生成源」多选（正/侧/背分图）即可按参考图出底稿。
     {"id": "tpl_single", "label": "【模板】单图 · 正面全身（灰底）",
      "outfit_kw": [], "bg_kw": ["灰"], "pose_kw": ["标准站姿"],
-     "expression_kw": ["微笑"], "compose_kw": ["单张全身立绘"]},
+     "expression_kw": ["微笑"], "compose_kw": ["单张全身立绘"],
+     "artstyle_kw": ["赛璐璐", "厚涂"]},
     {"id": "tpl_3view", "label": "【模板】三视图（正/侧/背 · 灰底）",
      "outfit_kw": [], "bg_kw": ["灰"], "pose_kw": ["标准站姿"],
-     "expression_kw": ["微笑"], "compose_kw": ["三视图"]},
+     "expression_kw": ["微笑"], "compose_kw": ["三视图"],
+     "artstyle_kw": ["赛璐璐", "厚涂"]},
     {"id": "tpl_4view", "label": "【模板】四视图（正/侧/背/¾ · 灰底）",
      "outfit_kw": [], "bg_kw": ["灰"], "pose_kw": ["标准站姿"],
-     "expression_kw": ["微笑"], "compose_kw": ["四视图"]},
+     "expression_kw": ["微笑"], "compose_kw": ["四视图"],
+     "artstyle_kw": ["赛璐璐", "厚涂"]},
     # —— v0.14.0：主题子集全面扩充 + 关键词修正。教训：
     #    ① swimsuit 原只用「泳装」一词，漏掉池里叫「泳衣」的款式；
     #    ② office 原「西装」「马甲」两个宽泛词会把 JK 制服吸进职场子集；
     #    ③ idol 原 outfit 子集只有 1 项（永远打歌服）。
     #    关键词全部改成池条目命名自带的专属词（命中校验在 tests/test_prompt_gen.py）。
     {"id": "swimsuit", "label": "泳装 · 夏日",
-     "outfit_kw": ["泳装", "泳衣", "比基尼", "纱笼"], "bg_kw": ["海边", "泳池", "水上", "度假"]},
+     "outfit_kw": ["泳装", "泳衣", "比基尼", "纱笼"], "bg_kw": ["海边", "泳池", "水上", "度假"],
+     "artstyle_kw": ["水彩", "赛璐璐", "扁平"]},
     {"id": "campus", "label": "校园 · JK",
      "outfit_kw": ["水手服", "西装夹克", "针织开衫", "背带", "马甲衬衫JK", "百褶裙",
                    "运动外套", "校服", "体操服", "拉拉队"],
-     "bg_kw": ["教室", "樱花", "天台", "走廊", "图书馆", "体育馆"]},
+     "bg_kw": ["教室", "樱花", "天台", "走廊", "图书馆", "体育馆"],
+     "artstyle_kw": ["赛璐璐", "少女漫画", "水彩"]},
     {"id": "wedding", "label": "婚纱 · 典礼",
-     "outfit_kw": ["婚纱", "礼服", "秀禾", "白无垢"], "bg_kw": ["纯白", "浅粉", "教堂", "拱门", "宴会"]},
+     "outfit_kw": ["婚纱", "礼服", "秀禾", "白无垢"], "bg_kw": ["纯白", "浅粉", "教堂", "拱门", "宴会"],
+     "artstyle_kw": ["油画", "水彩", "赛璐璐"]},
     {"id": "office", "label": "职场 · 通勤",
      "outfit_kw": ["职业西装", "西装裤装", "通勤", "铅笔裙", "西裤", "毛衣", "航空制服"],
-     "bg_kw": ["咖啡馆", "霓虹", "办公室", "写字楼", "天桥"]},
+     "bg_kw": ["咖啡馆", "霓虹", "办公室", "写字楼", "天桥"],
+     "artstyle_kw": ["厚涂", "扁平", "赛璐璐"]},
     {"id": "kimono", "label": "和风 · 浴衣",
-     "outfit_kw": ["浴衣", "和服", "振袖", "访问着", "巫女"], "bg_kw": ["和室", "樱花", "祭典", "温泉", "枯山水"]},
+     "outfit_kw": ["浴衣", "和服", "振袖", "访问着", "巫女"], "bg_kw": ["和室", "樱花", "祭典", "温泉", "枯山水"],
+     "artstyle_kw": ["浮世绘", "水墨", "水彩"]},
     {"id": "maid", "label": "女仆 · 咖啡厅",
-     "outfit_kw": ["女仆"], "bg_kw": ["咖啡馆", "咖啡店", "客厅", "沙发"]},
+     "outfit_kw": ["女仆"], "bg_kw": ["咖啡馆", "咖啡店", "客厅", "沙发"],
+     "artstyle_kw": ["赛璐璐", "水彩", "扁平"]},
     {"id": "gothic", "label": "暗黑 · 哥特",
-     "outfit_kw": ["哥特", "女巫", "吸血鬼", "魔法学院"], "bg_kw": ["霓虹", "雨", "古堡", "烛光", "墓园"]},
+     "outfit_kw": ["哥特", "女巫", "吸血鬼", "魔法学院"], "bg_kw": ["霓虹", "雨", "古堡", "烛光", "墓园"],
+     "artstyle_kw": ["哥特", "油画"]},
     {"id": "home", "label": "居家 · 慵懒",
      "outfit_kw": ["睡衣", "睡袍", "睡裙", "T恤", "卫衣", "家居服", "毛衣"],
-     "bg_kw": ["雨", "和室", "咖啡馆", "客厅", "卧室"]},
+     "bg_kw": ["雨", "和室", "咖啡馆", "客厅", "卧室"],
+     "artstyle_kw": ["水彩", "少女漫画", "赛璐璐"]},
     {"id": "idol", "label": "偶像 · 舞台",
-     "outfit_kw": ["打歌服", "舞台", "演出服"], "bg_kw": ["圣诞", "霓虹", "星空", "演唱会", "直播间"]},
+     "outfit_kw": ["打歌服", "舞台", "演出服"], "bg_kw": ["圣诞", "霓虹", "星空", "演唱会", "直播间"],
+     "artstyle_kw": ["赛博", "3D 渲染", "赛璐璐"]},
     {"id": "party", "label": "旗袍 · 东方",
-     "outfit_kw": ["旗袍"], "bg_kw": ["和室", "樱花", "绿意花园", "中式庭院", "红灯笼"]},
+     "outfit_kw": ["旗袍"], "bg_kw": ["和室", "樱花", "绿意花园", "中式庭院", "红灯笼"],
+     "artstyle_kw": ["水墨", "油画", "浮世绘"]},
+    # —— v0.19.0：纯画风主题。只约束 artstyle 维度（服装/背景/姿势仍按种子随机），
+    #    适合「让这角色的这一批图统一成某种画风」；批量补图的内容主题轮换会自动
+    #    带上它们（batch_fill.content_theme_ids 排除的只有 random 与 tpl_）。
+    {"id": "art_watercolor", "label": "画风 · 清透水彩", "artstyle_kw": ["水彩"]},
+    {"id": "art_oil", "label": "画风 · 古典油画", "artstyle_kw": ["油画"]},
+    {"id": "art_ink", "label": "画风 · 国风水墨", "artstyle_kw": ["水墨"]},
+    {"id": "art_ukiyoe", "label": "画风 · 浮世绘", "artstyle_kw": ["浮世绘"]},
+    {"id": "art_cyber", "label": "画风 · 赛博霓虹", "artstyle_kw": ["赛博"]},
+    {"id": "art_gothic", "label": "画风 · 暗黑哥特", "artstyle_kw": ["哥特"]},
+    {"id": "art_retro", "label": "画风 · 复古 90s", "artstyle_kw": ["复古"]},
+    {"id": "art_manga", "label": "画风 · 黑白漫画", "artstyle_kw": ["漫画"]},
+    {"id": "art_3d", "label": "画风 · 3D 渲染", "artstyle_kw": ["3D 渲染"]},
+    {"id": "art_clay", "label": "画风 · 黏土手办", "artstyle_kw": ["黏土"]},
+    {"id": "art_pixel", "label": "画风 · 像素艺术", "artstyle_kw": ["像素"]},
+    {"id": "art_flat", "label": "画风 · 扁平插画", "artstyle_kw": ["扁平"]},
 )
 
 
@@ -342,9 +417,9 @@ def get_theme(theme_id: str) -> dict | None:
 def apply_theme(picks: dict, seed_int: int, theme: dict | None) -> dict:
     """主题约束：带维度关键词的主题在对应维度池子集内重摇（其余维度保持种子随机）。
 
-    支持 outfit / background / pose / compose / expression 五维（v0.7.0 起
-    pose/compose，v0.7.2 起 expression）；⚠️ background 的主题键是历史沿革的
-    bg_kw（不是 background_kw），别写错。
+    支持 artstyle / outfit / background / pose / compose / expression 六维
+    （v0.7.0 起 pose/compose，v0.7.2 起 expression，v0.19.0 起 artstyle）；
+    ⚠️ background 的主题键是历史沿革的 bg_kw（不是 background_kw），别写错。
     plain_dims：列出的维度直接置空（zh/en 均空 = 提示词不提及）——机制保留
     （v0.7.2 曾用它关掉模板变装，v0.7.4 起模板恢复随机穿搭，当前无主题使用）。
     纯函数：同 (seed, theme) 恒定；子集为空时不动（回全池结果）。
@@ -379,7 +454,8 @@ def _sub(seed_int: int, tag: str, modulus: int) -> int:
 # ---------- 维度抽签（v0.14.0 提取：全池 / 主题子集两条路径共用） ----------
 
 # 主题的维度关键词键名。⚠️ background 是历史沿革的 bg_kw，别写错。
-_THEME_KW_KEYS = {"outfit": "outfit_kw", "background": "bg_kw", "pose": "pose_kw",
+_THEME_KW_KEYS = {"artstyle": "artstyle_kw", "outfit": "outfit_kw",
+                  "background": "bg_kw", "pose": "pose_kw",
                   "compose": "compose_kw", "expression": "expression_kw"}
 
 
@@ -578,8 +654,10 @@ def force_single_view(picks: dict) -> dict:
 
 
 # 维度展示顺序（预览面板 chip 与变化短语列表共用；v0.14.0 提取为常量单一来源）
-DIM_ORDER = (("构图视图", "compose"), ("服装", "outfit"), ("背景与光照", "background"),
-             ("姿势动作", "pose"), ("表情", "expression"), ("体型", "body"))
+# v0.19.0：新增「画风」维度，排在构图之后（先定风格，再定穿什么/在哪）
+DIM_ORDER = (("构图视图", "compose"), ("画风", "artstyle"), ("服装", "outfit"),
+             ("背景与光照", "background"), ("姿势动作", "pose"),
+             ("表情", "expression"), ("体型", "body"))
 
 
 def variation_zh_list(picks: dict) -> list:
@@ -604,6 +682,10 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "") -> str:
     for label, zh in variation_zh_list(picks):
         if label == "构图视图":
             parts.append(f"把构图改为{zh}")
+        elif label == "画风":
+            # v0.19.0：画风是整体观感，指令里单独点明「面部与发型保持可辨认」
+            # （句尾虽已统一强调，但画风类改动最容易把脸画丢，这里再锚一次）
+            parts.append(f"把整体画风改为{zh}（人物面部与发型保持可辨认）")
         elif label == "服装":
             parts.append(f"把角色的服装换成{zh}")
         elif label == "背景与光照":
@@ -638,11 +720,15 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "") -> str:
 
 
 def build_t2i_prompt(entry: dict, picks: dict) -> str:
-    """danbooru 系底模（anima/illustrious/noobai/pony 等）用：tags 拼装 + 变化 tag。"""
+    """danbooru 系底模（anima/illustrious/noobai/pony 等）用：tags 拼装 + 变化 tag。
+
+    v0.19.0：画风 tag 紧跟质量词（booru 惯例：质量/风格 → 角色 → 其余），
+    这样底模更容易把整张图往该画风上拉。
+    """
     base = "1girl, solo, best quality, looking at viewer"
     tags = str(entry.get("tags_en") or "").strip().rstrip(",")
     extra = []
-    for tag in ("compose", "outfit", "background", "pose", "expression", "body"):
+    for tag in ("artstyle", "compose", "outfit", "background", "pose", "expression", "body"):
         en = str((picks.get(tag) or {}).get("en") or "").strip().strip(",")
         if en:
             extra.append(en)
@@ -661,6 +747,10 @@ def build_t2i_natural_local(entry: dict, picks: dict, custom: str = "") -> str:
     MOSS 三式混用皆可，本地不写长句是保底——真 caption 交给 LLM 通道。
     """
     segs = ["best quality, highres, solo, full body portrait"]
+    # v0.19.0：画风 tag 紧跟质量词，再上角色 tags、其余维度
+    az = str((picks.get("artstyle") or {}).get("en") or "").strip().strip(",")
+    if az:
+        segs.append(az)
     tags = str(entry.get("tags_en") or "").strip().rstrip(",")
     if tags:
         segs.append(tags)
@@ -679,6 +769,10 @@ def build_t2i_qwen_local(entry: dict, picks: dict, custom: str = "") -> str:
     本地只能给个结构完整的短版，真长段交给 LLM 通道）。"""
     zh = [str((picks.get(k) or {}).get("zh") or "").strip().strip("。")
           for k in ("compose", "background", "outfit", "pose", "expression", "body")]
+    # v0.19.0：画风写成一句独立的「整体画风为…」，放在描述最前（先定风格）
+    az = str((picks.get("artstyle") or {}).get("zh") or "").strip().strip("。")
+    if az:
+        zh.insert(0, f"整体画风为{az}")
     extra = str(custom or "").strip().strip("。")
     if extra:
         zh.append(extra)
@@ -702,6 +796,8 @@ _SYSTEM_PROMPT = (
     "编辑由自然语言指令驱动）撰写图生图编辑指令。"
     "写法要点：一句话内「动作+目标+约束」，句尾强调保持人物面部特征、"
     "发型发色与角色辨识度不变；避免一次塞太多改动。"
+    "若改动维度里有「画风」，把它写成「把整体画风改为…（人物面部与发型保持可辨认）」，"
+    "画风类改动最容易把脸画丢，必须点明保持辨识度。"
     "输出纪律：只输出一条简体中文编辑指令本身——不要解释、不要引号、"
     "不要 markdown、不要分点，总长不超过 110 字。"
 )
@@ -714,7 +810,9 @@ _SYSTEM_T2I_NATURAL = (
     "动作姿势、表情、场景与光照、构图（默认 full body portrait；多视图要求时用 "
     "character sheet, multiple views, front view, side view, back view）；角色身份锚定——"
     "把已给 tags 里的发色/发型/瞳色/标志性特征自然融入描述，点名用"
-    "「规范英文名（作品名）」句式。禁止：8k/highly detailed 之类质量词堆砌"
+    "「规范英文名（作品名）」句式。若维度里给了「画风」，把它翻成对应英文风格词"
+    "（如 watercolor / oil painting / cel shading / ink wash / pixel art）写进描述，"
+    "整段保持同一画风。禁止：8k/highly detailed 之类质量词堆砌"
     "（最多以 best quality, highres 开头）、markdown、解释性文字。"
     "输出纪律：只输出提示词本体，一段话，15~50 词，不超过 80 词。"
 )
@@ -726,7 +824,9 @@ _SYSTEM_T2I_QWEN = (
     "撰写单人角色立绘提示词。写法：一段连贯的中文描述（5~10 句），覆盖角色"
     "外观（把已给 tags 的发色/发型/瞳色/服装特征写成自然语句）、服装、姿势、"
     "表情、背景环境与光影、构图（默认单人完整竖版立绘；若改动维度要求三/四视图，"
-    "则写成同一张图内并列展示正面、侧面、背面的角色设定稿）；不写比例数字、"
+    "则写成同一张图内并列展示正面、侧面、背面的角色设定稿）；若维度里给了「画风」，"
+    "把它写成一句「整体画风为…」并让全段描述都贴合该画风（上色方式、笔触、"
+    "光影质感跟着变）；不写比例数字、"
     "不写 best quality 之类画质套话、不用 markdown、不写标签串。"
     "输出纪律：只输出提示词本体一段话，不要解释、不要引号、不要分点。"
 )
