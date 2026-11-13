@@ -514,7 +514,7 @@ class MoeWaifuPlugin(Star):
             # v0.15.0：seq 改「历史最大 + 1」——旧实现 seq = 库存数，删过立绘后
             # count 回退，下一次生成复用旧 seq → 编号重复、同日种子撞车。
             # pool_size 只留给上方配额判定，不再兼做序号。
-            seq = self._store.next_portrait_seq(char_id)
+            seq = self._store.alloc_portrait_seq(char_id)
             seed_int = pool.portrait_seed_int(char_id, date, seq, salt)
             if bool(self._cfg("announce_enabled", True)):
                 await self._send_plain(event, self._summon_line(decision, self._gen_queue))

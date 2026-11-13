@@ -875,17 +875,17 @@
                   <div class="gen-strip" v-if="genSources.length > 0">
                     <div v-for="g in genSources" :key="g.kind + ':' + g.path"
                          class="gal-item" :class="{ 'ref-selected': galRefsSel.indexOf(g.path) >= 0 }"
-                         :title="g.kind === 'ref' ? '参考图' : '立绘 #' + g.seq">
+                         :title="g.kind === 'ref' ? '参考图' : '立绘 #' + g.display_no">
                       <img v-if="g.thumb" :src="g.thumb" class="clickable-img" alt="生成源"
                            title="点击查看大图"
-                           @click.stop="openViewer(g.path, g.kind === 'ref' ? '参考图' : '#' + g.seq)">
+                           @click.stop="openViewer(g.path, g.kind === 'ref' ? '参考图' : '#' + g.display_no)">
                       <div v-else class="gal-meta">文件丢失</div>
                       <div class="gal-meta gen-sel"
                            title="点击选中 / 取消（多选顺序 = 图1/图2/图3）"
                            @click.stop="selectGenSource(g)">
                         {{ galRefsSel.indexOf(g.path) >= 0
                            ? "已选 #" + (galRefsSel.indexOf(g.path) + 1)
-                           : (g.kind === "ref" ? "参考图" : "立绘 #" + g.seq) }}
+                           : (g.kind === "ref" ? "参考图" : "立绘 #" + g.display_no) }}
                       </div>
                     </div>
                   </div>
@@ -930,7 +930,7 @@
                   <div class="gal-item" :class="{ 'is-disabled': !it.active }">
                     <img v-if="it.thumb" :src="it.thumb" class="clickable-img"
                          title="点击查看大图" alt="立绘缩略"
-                         @click.stop="openViewer(it.file, '#' + it.seq)">
+                         @click.stop="openViewer(it.file, '#' + it.display_no)">
                     <div v-else class="gal-meta">文件丢失</div>
                     <!-- 已停用：只能看详情 / 恢复 / 彻底删除 -->
                     <div class="gal-ops" v-if="!it.active">
@@ -973,7 +973,7 @@
                          会抛 TypeError → 整个立绘墙渲染中断（真机「只有标题没图片」
                          的根因；mock fixture 是字符串才一直没炸）——必须先 String() -->
                     <div class="gal-meta" :title="it.seed != null ? 'seed ' + it.seed : ''">
-                      #{{ it.seq }} · {{ it.date }} · seed {{ String(it.seed == null ? "" : it.seed).slice(0, 8) }}{{ String(it.seed == null ? "" : it.seed).length > 8 ? "…" : "" }}{{ isCover(it) ? " · 封面" : "" }}{{ galDrawRefAbs === it.abs ? " · 出卡源" : "" }}{{ !it.active ? " · 已停用" : "" }}
+                      #{{ it.display_no }} · {{ it.date }} · seed {{ String(it.seed == null ? "" : it.seed).slice(0, 8) }}{{ String(it.seed == null ? "" : it.seed).length > 8 ? "…" : "" }}{{ isCover(it) ? " · 封面" : "" }}{{ galDrawRefAbs === it.abs ? " · 出卡源" : "" }}{{ !it.active ? " · 已停用" : "" }}
                     </div>
                   </div>
                 </n-gi>
@@ -2077,7 +2077,7 @@
              style="width: 580px;">
       <n-space vertical size="small" v-if="galDetail">
         <div class="bind-tip" style="margin-top: 0;">
-          #{{ galDetail.seq }} · {{ galDetail.date }} · {{ portraitStrategyLabel(galDetail.strategy) }} · seed {{ galDetail.seed }}
+          #{{ galDetail.display_no }} · {{ galDetail.date }} · {{ portraitStrategyLabel(galDetail.strategy) }} · seed {{ galDetail.seed }}
         </div>
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
           <span class="bind-tip" style="margin-top: 0;">生成时间</span>
@@ -4299,11 +4299,13 @@
         var out = [];
         // v0.19.8：用 galRefsView 的展示序（主参考第一、出卡源第二）
         galRefsView.value.forEach(function (r) {
-          out.push({ kind: "ref", path: r.path, thumb: r.thumb, seq: 0 });
+          out.push({ kind: "ref", path: r.path, thumb: r.thumb,
+                     seq: 0, display_no: 0 });
         });
         galItems.value.forEach(function (it) {
           if (it.abs) {
-            out.push({ kind: "portrait", path: it.abs, thumb: it.thumb, seq: it.seq });
+            out.push({ kind: "portrait", path: it.abs, thumb: it.thumb,
+                       seq: it.seq, display_no: it.display_no });
           }
         });
         return out;
@@ -4793,7 +4795,7 @@
         if (!armDelete(it.file)) return;
         try {
           await apiPost("portraits/delete", { file: it.file });
-          message.success("已停用 #" + it.seq + "（不参与抽卡与配额；已抽到的记录不受影响，可在「查看已停用」中恢复）");
+          message.success("已停用 #" + it.display_no + "（不参与抽卡与配额；已抽到的记录不受影响，可在「查看已停用」中恢复）");
           delArm.value = "";
           await refreshAll();
         } catch (e) { /* 已提示 */ }
@@ -4803,7 +4805,7 @@
         if (!it || !it.file) return;
         try {
           await apiPost("portraits/restore", { file: it.file });
-          message.success("已恢复 #" + it.seq + "（重新参与抽卡与配额）");
+          message.success("已恢复 #" + it.display_no + "（重新参与抽卡与配额）");
           await refreshAll();
         } catch (e) { /* 已提示 */ }
       }
@@ -4813,7 +4815,7 @@
         if (!armDelete("hard:" + it.file)) return;
         try {
           await apiPost("portraits/delete_hard", { file: it.file, confirm: true });
-          message.success("已彻底删除 #" + it.seq + "（文件已移入回收站）");
+          message.success("已彻底删除 #" + it.display_no + "（文件已移入回收站）");
           delArm.value = "";
           await refreshAll();
         } catch (e) { /* 已提示 */ }
@@ -4826,7 +4828,7 @@
         try {
           var res = await apiPost("portraits/move_to_ref",
             { file: it.file, id: galCharId.value });
-          message.success("已转移到参考图库：立绘 #" + it.seq +
+          message.success("已转移到参考图库：立绘 #" + it.display_no +
             (res && res.to ? " → " + res.to : "") + "（立绘库里已移走）");
           await refreshAll();
         } catch (e) { /* 已提示 */ }

@@ -96,6 +96,9 @@ def main():
         def next_portrait_seq(self, cid):
             return 0
 
+        def alloc_portrait_seq(self, cid):
+            return 0
+
         def add_portrait(self, *a, **k):
             self.rows.append((a, k))
 

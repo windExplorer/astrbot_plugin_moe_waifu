@@ -252,7 +252,7 @@ class BatchRunner:
                 item["name"] = str(entry.get("name") or cid)
                 item["theme_label"] = labels.get(theme_id, theme_id)
                 # 每张现取 seq（中途可能有人抽卡/手补，动态取保证不撞号）
-                seq = plugin._store.next_portrait_seq(cid) if plugin._store else 0
+                seq = plugin._store.alloc_portrait_seq(cid) if plugin._store else 0
                 item["seq"] = seq
                 seed_int = pool.portrait_seed_int(cid, date, seq, salt)
                 try:

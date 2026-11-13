@@ -731,10 +731,13 @@ async def h_portraits_list(plugin) -> dict:
         return err("缺少 char_id")
     items = []
     # v0.21.0：连停用行一起返回（active 字段区分），前端默认隐藏、可切换查看
-    for row in plugin._store.list_portraits(cid, include_disabled=True):
+    # v0.23.1：seq 是唯一序列（删图不回收、会跳号），另给一个按现存档案
+    # 顺排的 display_no 供界面显示；排序 / 种子 / 文件名一律仍用 seq。
+    for idx, row in enumerate(plugin._store.list_portraits(cid, include_disabled=True)):
         full = Path(plugin._data_dir) / row["file"]
         items.append({
-            "file": row["file"], "seq": row["seq"], "date": row["date"],
+            "file": row["file"], "seq": row["seq"],
+            "display_no": idx + 1, "date": row["date"],
             "seed": row["seed"], "exists": full.is_file(),
             # abs：绝对路径（v0.6.0）——立绘可被选为图生图源；draw 侧
             # Path(ref).exists() 按 CWD 解析相对路径，必须传绝对路径
@@ -958,7 +961,7 @@ def _move_ref_to_portrait(plugin, cid: str, path: str) -> dict:
     if not plugin._store:
         raise ValueError("插件未初始化完成")
     date = plugin._today()
-    seq = plugin._store.next_portrait_seq(cid)
+    seq = plugin._store.alloc_portrait_seq(cid)
     seed = int(hashlib.sha256(src.read_bytes()).hexdigest()[:8], 16) % 100000
     new_rel = draw.archive_portrait(str(src), plugin._data_dir, cid, date, seq, seed)
     plugin._store.add_portrait(cid, new_rel, seed, date, seq, "moved")
@@ -1210,7 +1213,7 @@ async def _run_job(plugin, job_id: str, entry: dict, kind: str,
     date = plugin._today()
     salt = str(plugin._cfg("salt", "moe-waifu"))
     # v0.15.0：seq 改单调「历史最大 + 1」，修「删过立绘后编号重复、种子撞车」
-    seq = plugin._store.next_portrait_seq(char_id)
+    seq = plugin._store.alloc_portrait_seq(char_id)
     seed_int = pool.portrait_seed_int(char_id, date, seq, salt)
     draw_cfg = plugin._draw_cfg()
     # v0.20.0：「random」= 从内容主题池按种子实摇（预览与生成同口径），
@@ -1294,7 +1297,7 @@ async def h_job_archive(plugin) -> dict:
         return err("插件未初始化完成")
     cid = job["char_id"]
     date = plugin._today()
-    seq = plugin._store.next_portrait_seq(cid)
+    seq = plugin._store.alloc_portrait_seq(cid)
     rel = draw.archive_portrait(job["src_path"], plugin._data_dir, cid, date, seq,
                                 int(job.get("seed") or 0))
     plugin._store.add_portrait(cid, rel, int(job.get("seed") or 0), date, seq, "try",
@@ -1798,7 +1801,8 @@ async def h_prompt_preview(plugin) -> dict:
                                 if d != "outfit"]
     date = plugin._today()
     salt = str(plugin._cfg("salt", "moe-waifu"))
-    # v0.15.0：与实际生成同口径（next_portrait_seq），预览编号 = 实出编号
+    # v0.23.1：预览只读查询「下一个可用 seq」，绝不消耗号；实际生成走
+    # alloc_portrait_seq() 原子占用，正常情况下预览编号 = 实出编号。
     seq = plugin._store.next_portrait_seq(cid) if plugin._store else 0
     seed_int = pool.portrait_seed_int(cid, date, seq, salt)
     if attempt:

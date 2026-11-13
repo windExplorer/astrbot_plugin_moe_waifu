@@ -58,6 +58,13 @@ CREATE TABLE IF NOT EXISTS portraits (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_portraits_char ON portraits(char_id, seq);
+-- v0.23.1：立绘 seq 单调分配器。seq 是「这张图的唯一序列」，不是可复用的
+-- 展示编号——彻底删除（硬删行）后也不能把号还回去，否则同角色同日会算出
+-- 同一个 portrait_seed_int、归档文件名也可能撞。只增不减，删行不重置。
+CREATE TABLE IF NOT EXISTS portrait_seq (
+  char_id  TEXT PRIMARY KEY,
+  next_seq INTEGER NOT NULL DEFAULT 0
+);
 -- v0.20.0：参考图生成信息（转存/转入参考图时随文件记录；手动上传的图没有）
 CREATE TABLE IF NOT EXISTS ref_meta (
   file       TEXT PRIMARY KEY,            -- refs/ 相对路径（与 strategy.refs 同口径）
@@ -228,6 +235,9 @@ class Store:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(SCHEMA)
+        # v0.23.1：seq 分配是「读 → +1 → 提交」，进程内必须串行，否则抽卡与
+        # 工坊补图并发时会拿到同一个 seq（唯一序列 ≠ 连续展示编号）。
+        self._seq_lock = threading.RLock()
         self._migrate()
         self._conn.commit()
 
@@ -238,6 +248,11 @@ class Store:
             for col, ddl in cols.items():
                 if col not in have:
                     self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+        # v0.23.1：老库升级时按现存行初始化计数器（只插不覆盖）。此后即使
+        # 彻底删掉最大 seq 的行，next_seq 也不会跟着 MAX(seq) 回退。
+        self._conn.execute(
+            "INSERT OR IGNORE INTO portrait_seq(char_id, next_seq) "
+            "SELECT char_id, COALESCE(MAX(seq), -1) + 1 FROM portraits GROUP BY char_id")
 
     def close(self):
         try:
@@ -370,6 +385,14 @@ class Store:
              prompt, str(theme or ""), str(dims or ""),
              int(width or 0), int(height or 0)),
         )
+        # v0.23.1：任何写入都把计数器推到 max(当前, 本次 seq+1)。外部直接
+        # 指定 seq 的路径（参考图转立绘、老数据、测试）也不会让后续分配撞号。
+        with self._seq_lock:
+            self._conn.execute(
+                "INSERT INTO portrait_seq(char_id, next_seq) VALUES(?, ?) "
+                "ON CONFLICT(char_id) DO UPDATE SET "
+                "next_seq = MAX(next_seq, excluded.next_seq)",
+                (char_id, int(seq) + 1))
         self._conn.commit()
 
     def portrait_by_file(self, file: str) -> dict | None:
@@ -410,17 +433,51 @@ class Store:
         return out
 
     def next_portrait_seq(self, char_id: str) -> int:
-        """该角色的下一个立绘序号 = 历史最大 seq + 1（v0.15.0 修重复编号）。
+        """查询下一个可用 seq（**只读、不消耗**）：预览与实际生成同口径。
 
-        旧实现 seq = COUNT(*)：删过立绘（单删 / 转参考图 / 清空）后 count 回退，
-        下一次生成会复用已用过的 seq → 编号重复、seed 撞车（同角色同日同 seq
-        的种子完全相同）。改用 MAX+1 单调递增，对历史重复行也安全。
+        v0.23.1：优先读持久化计数器 `portrait_seq.next_seq`。旧口径
+        `MAX(seq)+1` 在「彻底删除最大 seq 那张」后会回退，导致同一天算出
+        相同的 portrait_seed_int、归档文件名也可能撞；计数器只增不减，
+        删行 / 停用都不回收号。计数器缺行（全新角色）时回退 MAX(seq)+1。
+        真正要占用一个号请用 alloc_portrait_seq()。
         """
-        row = self._conn.execute(
-            "SELECT COALESCE(MAX(seq), -1) + 1 AS n FROM portraits WHERE char_id=?",
-            (char_id,),
-        ).fetchone()
-        return int(row["n"]) if row is not None else 0
+        with self._seq_lock:
+            row = self._conn.execute(
+                "SELECT next_seq FROM portrait_seq WHERE char_id=?",
+                (str(char_id),)).fetchone()
+            if row is not None:
+                return int(row["next_seq"])
+            row = self._conn.execute(
+                "SELECT COALESCE(MAX(seq), -1) + 1 AS n FROM portraits "
+                "WHERE char_id=?", (str(char_id),)).fetchone()
+            return int(row["n"]) if row is not None else 0
+
+    def alloc_portrait_seq(self, char_id: str) -> int:
+        """原子分配一个 seq（实际生成路径用），返回后该号即被占用、永不复用。
+
+        RLock 串行化「读计数器 → +1 写回 → commit」，避免抽卡与工坊补图
+        并发时两张图拿到同一号。允许跳号（生成失败 / 取消也消耗一个号）——
+        seq 是 ID 而不是展示序号，界面上的连续编号由接口另给 display_no。
+        """
+        with self._seq_lock:
+            row = self._conn.execute(
+                "SELECT next_seq FROM portrait_seq WHERE char_id=?",
+                (str(char_id),)).fetchone()
+            if row is None:
+                base = self._conn.execute(
+                    "SELECT COALESCE(MAX(seq), -1) + 1 AS n FROM portraits "
+                    "WHERE char_id=?", (str(char_id),)).fetchone()
+                n = int(base["n"]) if base is not None else 0
+                self._conn.execute(
+                    "INSERT INTO portrait_seq(char_id, next_seq) VALUES(?, ?)",
+                    (str(char_id), n + 1))
+            else:
+                n = int(row["next_seq"])
+                self._conn.execute(
+                    "UPDATE portrait_seq SET next_seq=? WHERE char_id=?",
+                    (n + 1, str(char_id)))
+            self._conn.commit()
+            return n
 
     def count_portraits(self, char_id: str) -> int:
         # v0.21.0：只数启用行——停用的立绘不占配额（清库/满库判定随之上移）
