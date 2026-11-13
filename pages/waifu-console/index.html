@@ -2209,15 +2209,17 @@
             <n-radio-button value="chars">按角色</n-radio-button>
           </n-radio-group>
           <n-select v-if="batchMode === 'packs'" v-model:value="batchPacks" multiple
-                    :options="packOpts" size="small" style="width: 240px;" clearable></n-select>
+                    :options="packOpts" size="small" style="width: 240px;" clearable
+                    placeholder="留空 = 全部卷"></n-select>
           <!-- v0.25.3：作品多选不能复用带「全部作品」哨兵的 seriesOpts—— -->
           <!-- 哨兵 value="" 会被当成真实 series 发给后端，过滤后 0 命中。 -->
+          <!-- v0.25.4：三种范围都是「留空 = 全部」，后端空选择不再过滤。 -->
           <n-select v-if="batchMode === 'series'" v-model:value="batchSeries" multiple
                     :options="batchSeriesOpts" size="small" style="width: 240px;"
                     clearable filterable placeholder="留空 = 全部作品"></n-select>
           <n-select v-if="batchMode === 'chars'" v-model:value="batchChars" multiple
                     :options="batchCharOpts" size="small" style="width: 240px;" clearable
-                    filterable></n-select>
+                    filterable placeholder="留空 = 全部角色"></n-select>
           <n-button size="small" :loading="batchPreviewLoading"
                     :disabled="batchRunning" @click="doBatchPreview">预览</n-button>
         </div>

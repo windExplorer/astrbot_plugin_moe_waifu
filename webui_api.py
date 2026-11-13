@@ -2116,14 +2116,22 @@ def _batch_scope_entries(plugin, body) -> list:
     for p in packs:
         if not p.get("enabled", True):
             continue
+        # v0.25.4：卷名只在卷对象上，条目里通常没有 pack 字段——用原始条目
+        # `e.get("pack")` 判断会让「按卷」模式连选了卷都 0 命中。
+        pack_name = str(p.get("pack") or "")
         for e in p.get("entries") or []:
             if not e.get("verified", False):
                 continue
-            if mode == "packs" and (not sel_packs or str(e.get("pack") or "") not in sel_packs):
+            # v0.25.4：**空选择 = 不过滤（全部）**。旧写法 `not sel_x or ...`
+            # 会在没勾任何项时把所有角色都 continue 掉——这正是「不选作品就
+            # 补不了图」的原因；只有真的选了才收窄范围。
+            if mode == "packs" and sel_packs and pack_name not in sel_packs:
                 continue
-            if mode == "series" and (not sel_series or str(e.get("series") or "") not in sel_series):
+            if mode == "series" and sel_series \
+                    and str(e.get("series") or "") not in sel_series:
                 continue
-            if mode == "chars" and (not sel_chars or str(e.get("id") or "") not in sel_chars):
+            if mode == "chars" and sel_chars \
+                    and str(e.get("id") or "") not in sel_chars:
                 continue
             out.append(e)
     return out
