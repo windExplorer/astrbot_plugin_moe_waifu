@@ -1096,7 +1096,11 @@ def _delete_portrait_core(plugin, rel: str) -> dict:
     if full.is_file() and _path_is_referenced(plugin, rel):
         relocated = _copy_into_refs(plugin, full)
         _rewrite_path_refs(plugin, rel, relocated)
-    moved, trash_dir = _trash_files(plugin, [rel])
+    # v0.27.0：删行前把整行写进回收站 _meta.json——否则光有文件、还原时
+    # 缺 char_id / seq / seed / prompt，搬回来也进不了库。
+    row = plugin._store.portrait_by_file(rel) if plugin._store else None
+    moved, trash_dir = _trash_files(
+        plugin, [rel], meta={rel: dict(row)} if row else None)
     if moved != 1:
         raise RuntimeError("移入回收站失败")
     plugin._store.delete_portrait(rel)
@@ -2544,23 +2548,37 @@ def _delete_card_files(plugin, paths) -> int:
     return n
 
 
-def _trash_files(plugin, paths) -> tuple:
+def _trash_root(plugin) -> Path:
+    return Path(plugin._data_dir) / "_trash"
+
+
+def _trash_files(plugin, paths, meta: dict | None = None) -> tuple:
     """把 data 目录内的文件**移进回收站**而非直接删除，返回 (移动数, 回收站目录)。
 
     v0.19.5 事故教训（用户实测）：调试页「清空老婆立绘库」直接把 portraits/
     下的文件 unlink 了，误点之后角色的立绘彻底找不回来。调试类破坏性动作一律
     先搬到 `data/_trash/<时间戳>/<原相对路径>`——误点还能手动搬回原处，
     而且不会悄悄占着 portraits/（不影响库存计数与配额判定）。
+
+    v0.27.0：可传 `meta={相对路径: 立绘行 dict}`，写入同目录 `_meta.json`。
+    光有文件是救不回来的——删行后工坊不认孤儿文件，还原时得靠这份记录把
+    char_id / seq / seed / prompt 一起写回去。同一秒多次删除会各自建目录
+    （stamp 冲突时加 `-2`、`-3`），避免后一次覆盖前一次的 meta。
     """
     moved = 0
     if not paths:
         return moved, ""
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    trash_root = Path(plugin._data_dir) / "_trash" / stamp
+    base = time.strftime("%Y%m%d-%H%M%S")
+    stamp, n = base, 1
+    while (_trash_root(plugin) / stamp).exists():
+        n += 1
+        stamp = f"{base}-{n}"
+    trash_root = _trash_root(plugin) / stamp
     try:
         data_root = Path(plugin._data_dir).resolve()
     except Exception:
         return moved, ""
+    saved: dict = {}
     for p in paths:
         fp = _safe_data_file(plugin, str(p or ""))
         if fp is None:
@@ -2574,9 +2592,205 @@ def _trash_files(plugin, paths) -> tuple:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(fp), str(dest))
             moved += 1
+            key = str(rel).replace("\\", "/")
+            if meta and isinstance(meta.get(key), dict):
+                saved[key] = meta[key]
         except Exception:
             logger.warning(f"[{PLUGIN_NAME}] 移入回收站失败：{fp}")
+    if saved:
+        try:
+            (trash_root / "_meta.json").write_text(
+                json.dumps({"files": saved}, ensure_ascii=False, indent=2),
+                encoding="utf-8")
+        except Exception:
+            logger.warning(f"[{PLUGIN_NAME}] 回收站元数据写入失败\n"
+                           f"{traceback.format_exc()}")
     return moved, (str(trash_root) if moved else "")
+
+
+# 归档文件名：`<日期>_<seq三位>_<seed后五位>[_<摘要>].png`（见 draw.archive_portrait）
+_PORTRAIT_NAME_RE = re.compile(
+    r"^(?P<date>\d{4}-\d{2}-\d{2})_(?P<seq>\d{1,4})_(?P<seed>\d{1,8})"
+    r"(?:_(?P<digest>[0-9a-f]{6,16}))?$")
+
+
+def _safe_trash_file(plugin, stamp: str, rel: str) -> Path | None:
+    """校验「回收站时间戳 + 相对路径」并返回可读文件（防路径穿越）。"""
+    st = str(stamp or "").strip()
+    r = str(rel or "").strip().replace("\\", "/")
+    if not st or not r or "/" in st or ".." in Path(st).parts:
+        return None
+    if ".." in Path(r).parts:
+        return None
+    try:
+        root = (_trash_root(plugin) / st).resolve()
+        fp = (root / r).resolve()
+        if root not in fp.parents:
+            return None
+    except Exception:
+        return None
+    return fp if fp.is_file() else None
+
+
+def _char_of_portrait_rel(rel: str) -> str:
+    """`portraits/<char_id>/xxx.png` → char_id（取不到返回空串）。"""
+    parts = str(rel or "").replace("\\", "/").split("/")
+    if len(parts) >= 3 and parts[0] == "portraits":
+        return parts[1]
+    return ""
+
+
+def _trash_scan(plugin) -> list:
+    """扫描回收站：按时间戳分组返回可展示清单（只读，含小缩略图）。"""
+    root = _trash_root(plugin)
+    if not root.is_dir():
+        return []
+    out = []
+    for stamp_dir in sorted((d for d in root.iterdir() if d.is_dir()),
+                            key=lambda d: d.name, reverse=True):
+        meta: dict = {}
+        try:
+            mf = stamp_dir / "_meta.json"
+            if mf.is_file():
+                meta = (json.loads(mf.read_text(encoding="utf-8")) or {}).get("files") or {}
+                if not isinstance(meta, dict):
+                    meta = {}
+        except Exception:
+            meta = {}
+        files = []
+        for fp in sorted(stamp_dir.rglob("*")):
+            if not fp.is_file() or fp.name == "_meta.json":
+                continue
+            if fp.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+                continue
+            try:
+                rel = str(fp.relative_to(stamp_dir)).replace("\\", "/")
+                size = int(fp.stat().st_size)
+            except Exception:
+                continue
+            row = meta.get(rel) if isinstance(meta.get(rel), dict) else {}
+            files.append({
+                "rel": rel,
+                "name": fp.name,
+                "size": size,
+                "thumb": _thumb_data_url(str(fp), 120),
+                "kind": rel.split("/")[0] if "/" in rel else "其它",
+                "meta_ok": bool(row),
+                "char_id": str(row.get("char_id") or _char_of_portrait_rel(rel)),
+            })
+            if len(files) >= 200:
+                break
+        if files:
+            out.append({"stamp": stamp_dir.name,
+                        "count": len(files),
+                        "size": sum(f["size"] for f in files),
+                        "files": files})
+    return out
+
+
+async def h_trash_list(plugin) -> dict:
+    """回收站清单（只读）：按时间戳分组，附缩略图与是否带还原元数据。"""
+    groups = _trash_scan(plugin)
+    return ok({"groups": groups,
+               "total_files": sum(g["count"] for g in groups),
+               "total_size": sum(g["size"] for g in groups)})
+
+
+async def h_trash_restore(plugin) -> dict:
+    """还原回收站条目：搬回原位置，能重建的立绘行一并写回。
+
+    body: {items: [{stamp, rel}, ...]}。优先级：`_meta.json` 里的行数据 >
+    从归档文件名解析（`<日期>_<seq>_<seed后五位>`）。目标已存在一律不覆盖。
+    """
+    body = await _body()
+    items = body.get("items")
+    if not isinstance(items, list) or not items:
+        return err("缺少 items（要还原的回收站条目）")
+    if not plugin._store:
+        return err("插件未初始化完成")
+    data_root = Path(plugin._data_dir)
+    restored, rebuilt, skipped = [], [], []
+    for it in items[:200]:
+        if not isinstance(it, dict):
+            continue
+        stamp = str(it.get("stamp") or "").strip()
+        rel = str(it.get("rel") or "").strip().replace("\\", "/")
+        src = _safe_trash_file(plugin, stamp, rel)
+        if src is None:
+            skipped.append({"rel": rel, "reason": "文件不存在或路径非法"})
+            continue
+        dest = (data_root / rel)
+        try:
+            dest.resolve().relative_to(data_root.resolve())
+        except Exception:
+            skipped.append({"rel": rel, "reason": "目标路径非法"})
+            continue
+        if dest.exists():
+            skipped.append({"rel": rel, "reason": "目标位置已有同名文件"})
+            continue
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dest))
+        except Exception as exc:
+            skipped.append({"rel": rel, "reason": f"搬回失败：{exc}"})
+            continue
+        restored.append(rel)
+        # 只给立绘重建行（参考图 / 卡片不需要 portraits 行）
+        if not rel.startswith("portraits/") or plugin._store.portrait_by_file(rel):
+            continue
+        row: dict = {}
+        try:
+            mf = _trash_root(plugin) / stamp / "_meta.json"
+            if mf.is_file():
+                raw = (json.loads(mf.read_text(encoding="utf-8")) or {}).get("files") or {}
+                if isinstance(raw.get(rel), dict):
+                    row = raw[rel]
+        except Exception:
+            row = {}
+        cid = str(row.get("char_id") or _char_of_portrait_rel(rel))
+        if not cid:
+            continue
+        m = _PORTRAIT_NAME_RE.match(Path(rel).stem)
+        date = str(row.get("date") or (m.group("date") if m else ""))
+        seq = int(row.get("seq") if row.get("seq") is not None
+                  else (m.group("seq") if m else 0) or 0)
+        seed = int(row.get("seed") if row.get("seed") is not None
+                   else (m.group("seed") if m else 0) or 0)
+        plugin._store.add_portrait(
+            cid, rel, seed, date, seq, str(row.get("strategy") or "base"),
+            prompt=row.get("prompt") or "", theme=str(row.get("theme") or ""),
+            dims=str(row.get("dims") or ""),
+            width=int(row.get("width") or 0), height=int(row.get("height") or 0))
+        if row and int(row.get("active", 1) or 0) == 0:
+            plugin._store.set_portrait_active(rel, False)
+        rebuilt.append(rel)
+    return ok({"restored": len(restored), "rebuilt": len(rebuilt),
+               "skipped": skipped[:20], "skipped_count": len(skipped)})
+
+
+async def h_trash_purge(plugin) -> dict:
+    """清空回收站（需 confirm）。body.stamps 非空 = 只清这几组，空 = 全清。"""
+    body = await _body()
+    if not body.get("confirm"):
+        return err("缺少 confirm=true（清空回收站不可逆）")
+    root = _trash_root(plugin)
+    if not root.is_dir():
+        return ok({"dirs": 0, "files": 0})
+    wanted = [str(s).strip() for s in (body.get("stamps") or [])
+              if str(s).strip() and "/" not in str(s) and ".." not in str(s)]
+    dirs = files = 0
+    for d in sorted(root.iterdir()):
+        if not d.is_dir():
+            continue
+        if wanted and d.name not in wanted:
+            continue
+        try:
+            files += sum(1 for f in d.rglob("*") if f.is_file())
+            shutil.rmtree(d)
+            dirs += 1
+        except Exception:
+            logger.warning(f"[{PLUGIN_NAME}] 清除回收站目录失败：{d}")
+    return ok({"dirs": dirs, "files": files})
 
 
 async def h_records_draws(plugin) -> dict:
@@ -3314,6 +3528,10 @@ def register(plugin) -> None:
         ("/pools/duplicates", h_duplicates, ["GET", "POST"]),
         ("/pools/dedupe", h_dedupe, ["POST"]),
         ("/relational/status", h_relational_status, ["GET", "POST"]),
+        # v0.27.0：回收站（删除的文件先落 data/_trash，可查看 / 还原 / 清空）
+        ("/trash/list", h_trash_list, ["GET", "POST"]),
+        ("/trash/restore", h_trash_restore, ["POST"]),
+        ("/trash/purge", h_trash_purge, ["POST"]),
         ("/pools/delete_entry", h_delete_entry, ["POST"]),
         ("/pools/set_pack", h_set_pack, ["POST"]),
         ("/pools/set_verified", h_set_verified, ["POST"]),

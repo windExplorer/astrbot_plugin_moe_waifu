@@ -98,6 +98,17 @@
      「预览」按钮会随范围左右平移，切范围时不好定位 */
   .batch-scope-slot { width: 248px; flex: 0 0 auto; display: flex;
     align-items: center; }
+  /* v0.27.0：回收站清单 */
+  .trash-group { border: 1px solid rgba(128,128,128,.22); border-radius: 8px;
+    padding: 8px 10px; margin-bottom: 8px; }
+  .trash-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 6px; }
+  .trash-row { display: flex; align-items: center; gap: 10px;
+    padding: 4px 0; border-top: 1px dashed rgba(128,128,128,.18); }
+  .trash-thumb { width: 42px; height: 42px; object-fit: cover; border-radius: 6px;
+    flex: none; background: rgba(128,128,128,.12); }
+  .trash-meta { flex: 1; min-width: 0; }
+  .trash-rel { font-size: 12px; word-break: break-all; }
   /* v0.16.0：批量补图弹窗行 */
   .batch-row { display: flex; align-items: center; gap: 8px; font-size: 12px;
     padding: 2px 0; }
@@ -1566,6 +1577,49 @@
                     </table>
                   </div>
                   <div v-else class="bind-tip">点「刷新状态」读取；读不到就去看 AstrBot 启动日志里的「关系模型迁移」。</div>
+                </div>
+              </n-card>
+              <!-- v0.27.0：回收站（删除的文件在 data/_trash，可查看 / 还原 / 清空） -->
+              <n-card size="small" title="回收站" :bordered="true">
+                <div class="stack">
+                  <div class="bind-tip" style="margin-top: 0;">
+                    彻底删除、清空立绘库、清签带走的文件都会移到
+                    <b>data/_trash/&lt;时间戳&gt;/</b>，不占配额、不影响抽卡。
+                    还原会把文件搬回原位，并尽量把立绘行（角色、序号、种子）一起写回。
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <n-button size="small" :loading="trashBusy" @click="loadTrash">刷新</n-button>
+                    <n-button size="small" type="error" secondary :loading="trashBusy"
+                              :disabled="!trashTotalFiles" @click="doTrashPurgeAll">{{ trashPurgeText }}</n-button>
+                    <span v-if="trashTotalFiles" style="font-size: 12px; opacity: .7;">
+                      {{ trashTotalFiles }} 个文件 · {{ trashTotalSizeText }}
+                    </span>
+                  </div>
+                  <div v-if="trashGroups.length">
+                    <div v-for="g in trashGroups" :key="g.stamp" class="trash-group">
+                      <div class="trash-head">
+                        <b>{{ g.stamp }}</b>
+                        <span class="bind-tip" style="margin-top: 0;">{{ g.count }} 个 · {{ g.sizeText }}</span>
+                        <n-button size="tiny" :loading="trashBusy"
+                                  @click="doTrashRestoreGroup(g)">全部还原</n-button>
+                        <n-button size="tiny" :loading="trashBusy"
+                                  @click="doTrashPurgeGroup(g)">清空该组</n-button>
+                      </div>
+                      <div v-for="f in g.files" :key="g.stamp + '|' + f.rel" class="trash-row">
+                        <img v-if="f.thumb" :src="f.thumb" class="trash-thumb">
+                        <div class="trash-meta">
+                          <div class="trash-rel">{{ f.rel }}</div>
+                          <div class="bind-tip" style="margin-top: 0;">
+                            {{ f.kind }} · {{ f.sizeText }}<span v-if="f.char_id"> · 角色 {{ f.char_id }}</span><span v-if="!f.meta_ok"> · 无元数据（按文件名还原）</span>
+                          </div>
+                        </div>
+                        <n-button size="tiny" :loading="trashBusy"
+                                  @click="doTrashRestoreOne(g, f)">还原</n-button>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else-if="trashLoaded" class="bind-tip">回收站是空的。</div>
+                  <div v-else class="bind-tip">点「刷新」读取回收站内容。</div>
                 </div>
               </n-card>
               <n-card size="small" title="状态查询" :bordered="true">
@@ -5504,6 +5558,83 @@
         } catch (e) { relStatus.value = null; } finally { relBusy.value = false; }
       }
 
+      // ---- 回收站（v0.27.0）：data/_trash 下按时间戳分组的文件，可还原 / 清空 ----
+      var trashGroups = Vue.ref([]);
+      var trashBusy = Vue.ref(false);
+      var trashLoaded = Vue.ref(false);
+      var trashTotalFiles = Vue.ref(0);
+      var trashTotalSizeText = Vue.ref("");
+      var trashPurgeText = Vue.computed(function () {
+        return delArm.value === "trash:all"
+          ? ("确认清空 " + trashTotalFiles.value + " 个文件？")
+          : "清空回收站";
+      });
+      function _trashSizeText(n) {
+        var v = Number(n || 0);
+        if (v >= 1048576) return (v / 1048576).toFixed(1) + " MB";
+        if (v >= 1024) return Math.round(v / 1024) + " KB";
+        return v + " B";
+      }
+      async function loadTrash() {
+        trashBusy.value = true;
+        try {
+          var res = await apiPost("trash/list", {});
+          var groups = (res && res.groups) || [];
+          groups.forEach(function (g) {
+            g.sizeText = _trashSizeText(g.size);
+            (g.files || []).forEach(function (f) { f.sizeText = _trashSizeText(f.size); });
+          });
+          trashGroups.value = groups;
+          trashTotalFiles.value = (res && res.total_files) || 0;
+          trashTotalSizeText.value = _trashSizeText((res && res.total_size) || 0);
+          trashLoaded.value = true;
+        } catch (e) { /* 已提示 */ } finally { trashBusy.value = false; }
+      }
+      async function _trashRestore(items) {
+        if (!items.length) return;
+        trashBusy.value = true;
+        try {
+          var res = await apiPost("trash/restore", { items: items });
+          message.success("已还原 " + (res.restored || 0) + " 个文件"
+            + ((res.rebuilt || 0) ? "，重建立绘记录 " + res.rebuilt + " 条" : "")
+            + ((res.skipped_count || 0) ? "，跳过 " + res.skipped_count + " 个" : ""));
+          await refreshAll();
+          await loadTrash();
+        } catch (e) { /* 已提示 */ } finally { trashBusy.value = false; }
+      }
+      function doTrashRestoreOne(g, f) {
+        return _trashRestore([{ stamp: g.stamp, rel: f.rel }]);
+      }
+      function doTrashRestoreGroup(g) {
+        return _trashRestore((g.files || []).map(function (f) {
+          return { stamp: g.stamp, rel: f.rel };
+        }));
+      }
+      async function _trashPurge(stamps) {
+        trashBusy.value = true;
+        try {
+          var res = await apiPost("trash/purge", { stamps: stamps, confirm: true });
+          delArm.value = "";
+          message.success("已清除 " + (res.files || 0) + " 个文件");
+          await loadTrash();
+        } catch (e) { /* 已提示 */ } finally { trashBusy.value = false; }
+      }
+      async function doTrashPurgeGroup(g) {
+        if (!armDelete("trash:" + g.stamp)) {
+          message.info("再点一次「清空该组」确认删除这 " + g.count
+            + " 个文件（不可恢复，3 秒内有效）");
+          return;
+        }
+        return _trashPurge([g.stamp]);
+      }
+      async function doTrashPurgeAll() {
+        if (!armDelete("trash:all")) {
+          message.info("再点一次确认清空整个回收站（不可恢复，3 秒内有效）");
+          return;
+        }
+        return _trashPurge([]);
+      }
+
       var dbgStateUid = Vue.ref("");
       var dbgState = Vue.ref(null);
       var dbgStateLoading = Vue.ref(false);
@@ -5789,7 +5920,7 @@
         if (m === "records") { loadFilterOpts(); loadRecords(); loadRecEvents(); loadRecJobs(); }
         else if (m === "stats") { loadStats(); }
         else if (m === "users") { loadUsers(); }
-        else if (m === "debug") { loadDebugHistory(); loadRelStatus(); }
+        else if (m === "debug") { loadDebugHistory(); loadRelStatus(); loadTrash(); }
         else if (m === "overview") { loadOverview(); }
         else if (m === "chars") { fetchPools(); }
         else if (m === "works") { loadWorks().then(resyncCurrentWork); }
@@ -6235,6 +6366,12 @@
         loadUsers: loadUsers, setUserPage: setUserPage, openUser: openUser,
         dbgStateUid: dbgStateUid, dbgState: dbgState, dbgStateLoading: dbgStateLoading,
         relStatus: relStatus, relBusy: relBusy, loadRelStatus: loadRelStatus,
+        // v0.27.0：回收站
+        trashGroups: trashGroups, trashBusy: trashBusy, trashLoaded: trashLoaded,
+        trashTotalFiles: trashTotalFiles, trashTotalSizeText: trashTotalSizeText,
+        trashPurgeText: trashPurgeText, loadTrash: loadTrash,
+        doTrashRestoreOne: doTrashRestoreOne, doTrashRestoreGroup: doTrashRestoreGroup,
+        doTrashPurgeGroup: doTrashPurgeGroup, doTrashPurgeAll: doTrashPurgeAll,
         dbgRecent: dbgRecent, dbgAudit: dbgAudit, dbgConfigRows: dbgConfigRows,
         loadDebugState: loadDebugState, loadDebugHistory: loadDebugHistory,
         pickRecentUser: pickRecentUser, doQuickAction: doQuickAction,
