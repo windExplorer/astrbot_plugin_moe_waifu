@@ -2,6 +2,27 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.19.2 (2026-11-13)
+
+维度下拉加高度上限 + 内部滚动条：不再把整个页面撑出滚动（版本 v0.19.1 -> v0.19.2）。
+
+- **现象（用户）**：生成立绘弹窗里点维度 chip 的值（服装 / 背景 / 画风 / 姿势…），
+  下拉（`n-popselect`）把整个池子一次铺开——服装池 50+ 项、画风池 31 项——菜单比
+  视口还高，连带**整个页面**被撑出滚动条。
+- **根因**：vendored naive-ui 的菜单高度不是写死的，而是靠 CSS 变量 `--n-height`
+  控制（`InternalSelectMenu` 的样式里 `.n-scrollbar / .n-virtual-list
+  { max-height: var(--n-height) }`）。这个变量只在调用方显式传了 height 时才由内联
+  样式写入；`n-popselect` 不传 → 变量未定义 → `max-height` 整条失效 → 菜单无限高。
+  （实测 vendored bundle：`--n-height` 由 `useStyles` 输出到菜单根节点的 style 上。）
+- **修复（纯 CSS，`pages/waifu-console/index.html`）**：
+  - 给菜单根类兜底 `--n-height: 300px`（`.n-popselect-menu` / `.n-base-select-menu`）；
+  - 双保险：把内层 `.n-scrollbar` / `.n-virtual-list` 也钉一次
+    `max-height: 300px !important`（去掉任一条都还能正常封顶；内联样式也压得住）；
+  - 顺带收益：主题下拉（27→37 项）、角色选择下拉等所有 `n-select` 菜单一起封顶，
+    超出部分走 naive 自己的滚动条，不再顶穿 iframe。
+- **验证**：`test_template_structure` / `test_inline_js`（node --check）/
+  `test_html_integrity` 全 OK。
+
 ## v0.19.1 (2026-11-13)
 
 画风扩容：补 15 款「介质系」非主流画风 + 10 个对应纯画风主题（版本 v0.19.0 -> v0.19.1）。
