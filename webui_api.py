@@ -2470,7 +2470,8 @@ def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
         decision = draw.plan_source(gen_mode, pool_size, quota, has_src, roll, i2i_prob)
     # v0.19.4：模拟也给出「为什么这么出图」，与落库的 decision_note 同一句
     decision_note = draw.explain_decision(gen_mode, decision, pool_size, quota,
-                                          has_src, i2i_prob, roll)
+                                          has_src, i2i_prob, roll,
+                                          today_portrait=bool(today_row))
     pick = None
     if decision == "reuse_today":
         pick = {"file": today_row["file"] if today_row else "", "index": None}

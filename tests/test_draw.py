@@ -46,8 +46,11 @@ check("满配额→取库", draw.decision_of("a", "d", None, 5, 5) == "from_pool
 # v0.19.3：img2img 模式不受满配额短路（用户实报：配了只用图生图模板却一直取立绘）
 check("img2img 满配额→仍走生成决策",
       draw.decision_of("a", "d", None, 5, 5, "img2img") == "generate")
-check("img2img 当日已有→仍复用（一人一天一位）",
-      draw.decision_of("a", "d", {"file": "x"}, 5, 5, "img2img") == "reuse_today")
+# v0.19.6：img2img 连「当日已有立绘」也不复用（每次都按出卡源现画）
+check("img2img 当日已有立绘→仍现画（不 reuse_today）",
+      draw.decision_of("a", "d", {"file": "x"}, 5, 5, "img2img") == "generate")
+check("mix 当日已有立绘→复用（同角色同天共享不变）",
+      draw.decision_of("a", "d", {"file": "x"}, 5, 5, "mix") == "reuse_today")
 check("mix 满配额→取库（mode 参与判定后行为不变）",
       draw.decision_of("a", "d", None, 5, 5, "mix") == "from_pool")
 check("pool 满配额→取库", draw.decision_of("a", "d", None, 9, 5, "pool") == "from_pool")
@@ -206,8 +209,12 @@ check("img2img 无模板图且库空→老链路",
 check("非法 mode→mix", draw.plan_source("what", 2, 5, True, 0, 100) == "generate_i2i")
 
 # ---------- explain_decision（v0.19.4：这次为什么这么出图，落库+日志+工坊同一句） ----------
-check("说明-当日复用",
-      "复用当日立绘" in draw.explain_decision("mix", "reuse_today", 3, 5, True))
+check("说明-当日复用（同角色同天共享，并给出重画办法）",
+      "同角色同一天人人同款" in draw.explain_decision("mix", "reuse_today", 3, 5, True)
+      and "重试今日老婆立绘" in draw.explain_decision("mix", "reuse_today", 3, 5, True))
+_az_shared = draw.explain_decision("img2img", "generate_i2i", 2, 5, True, 50, 10,
+                                   today_portrait=True)
+check("说明-img2img 当日已有立绘仍现画", "不共享、仍现画" in _az_shared)
 _az = draw.explain_decision("img2img", "generate_i2i", 5, 5, True)
 check("说明-img2img 满配额仍现画", "只用图生图模板" in _az and "仍现画" in _az)
 _az2 = draw.explain_decision("img2img", "from_pool", 5, 5, False)

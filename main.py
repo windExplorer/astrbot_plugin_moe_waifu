@@ -553,7 +553,8 @@ class MoeWaifuPlugin(Star):
         # v0.19.4：决策原因随签落库 + 进日志。用户口径：「每次抽卡用的什么方式、
         # 为什么、什么原因导致回退」要能事后查到——光有 decision 一个词不够。
         note = draw.explain_decision(mode, decision, pool_size, quota,
-                                     bool(draw_src), i2i_prob, roll)
+                                     bool(draw_src), i2i_prob, roll,
+                                     today_portrait=bool(today_row))
         if pool_missing:
             note += "；该库存立绘文件已丢失，本次改为重新生成"
         if i2i_degraded:

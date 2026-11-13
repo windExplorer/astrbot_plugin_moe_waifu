@@ -643,10 +643,14 @@ def decision_of(char_id: str, date_str: str, today_row: dict | None,
       - 其它模式（mix / pool）→ 维持原「集满配额就取图、不浪费算力」。
     `mode` 默认空串 = 老行为（debug 模拟等未传的旧调用点安全）。
     """
+    if str(mode) == "img2img":
+        # v0.19.6：img2img（只用图生图模板）连「当日复用」也不参与——该模式的
+        # 语义是「每次都按出卡源现画」。旧实现今天只要生成过一张同角色的立绘，
+        # 后面所有抽签（含重置后再抽）都返回 reuse_today，用户实报
+        # 「后台显示当日复用立绘，没有图生图了」。
+        return "generate"
     if today_row is not None:
         return "reuse_today"
-    if str(mode) == "img2img":
-        return "generate"
     if pool_size < max(1, int(quota)):
         return "generate"
     return "from_pool"
@@ -693,7 +697,8 @@ def plan_source(mode: str, pool_size: int, quota: int, has_ref: bool,
 
 
 def explain_decision(mode: str, decision: str, pool_size: int, quota: int,
-                     has_ref: bool, i2i_prob: int = 50, roll: int = 0) -> str:
+                     has_ref: bool, i2i_prob: int = 50, roll: int = 0,
+                     today_portrait: bool = False) -> str:
     """把「这次为什么这么出图」翻成一句可读的中文原因（纯函数，可测）。
 
     v0.19.4：用户实报「配置只用图生图模板却一直取立绘」——只靠最终 decision
@@ -711,11 +716,16 @@ def explain_decision(mode: str, decision: str, pool_size: int, quota: int,
         full = pool_size >= quota
         stock = f"库存 {pool_size}/{quota}"
         if d == "reuse_today":
-            return "当天已抽到过同一角色，直接复用当日立绘（一人一天一位）"
+            return ("该角色今天就生成过立绘 → 直接复用当日那张（同角色同一天人人同款，"
+                    "省算力）；想重画用「重试今日老婆立绘」，或把出图方式改成"
+                    "「只用图生图模板」")
         if m == "img2img":
             if d == "generate_i2i":
-                return ("出图方式=只用图生图模板 → 按出卡源图生图"
+                base = ("出图方式=只用图生图模板 → 按出卡源图生图"
                         + ("（库存已满，该模式仍现画）" if full else f"（{stock}，未满配额）"))
+                if today_portrait:
+                    base += "；当日该角色已有立绘，img2img 模式不共享、仍现画"
+                return base
             if d == "from_pool":
                 return ("出图方式=只用图生图模板，但该角色未指定「出卡图生图源」"
                         f" → 回退立绘库取图（{stock}）")

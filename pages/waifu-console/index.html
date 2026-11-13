@@ -1133,9 +1133,11 @@
                   <n-card size="small" title="抽签流水（含被换掉的老婆）" :bordered="true">
                     <template #header-extra>
                       <n-space size="small" align="center">
+                        <!-- v0.19.6：流水改分页，共 N 条 + 每页 15 -->
+                        <span class="bind-tip" style="margin: 0;">共 {{ recEventsTotal }} 条</span>
                         <n-select v-model:value="recEventKind" size="small" clearable
                                   :options="eventKindOpts" placeholder="全部类型" style="width: 130px;"
-                                  @update:value="loadRecEvents"></n-select>
+                                  @update:value="recEventPage = 1; loadRecEvents()"></n-select>
                         <n-button size="small" @click="loadRecEvents">刷新</n-button>
                       </n-space>
                     </template>
@@ -1155,6 +1157,12 @@
                       </tbody>
                     </table>
                     <n-empty v-else description="还没有流水（v0.9.0 起的抽取才会记）" size="small"></n-empty>
+                    <div style="display: flex; justify-content: center; margin-top: 10px;"
+                         v-if="recEventsTotal > recEventSize">
+                      <n-pagination size="small" :item-count="recEventsTotal"
+                                    :page-size="recEventSize" :page="recEventPage"
+                                    @update:page="setRecEventPage"></n-pagination>
+                    </div>
                   </n-card>
                 </n-gi>
                 <n-gi>
@@ -1164,7 +1172,7 @@
                         <span class="bind-tip" style="margin: 0;">共 {{ recJobsTotal }} 条</span>
                         <n-select v-model:value="recJobStatus" size="small" clearable
                                   :options="jobStatusOpts" style="width: 150px;"
-                                  @update:value="loadRecJobs"></n-select>
+                                  @update:value="recJobPage = 1; loadRecJobs()"></n-select>
                         <n-button size="small" :loading="recJobsLoading" @click="loadRecJobs">刷新</n-button>
                       </n-space>
                     </template>
@@ -1184,6 +1192,12 @@
                       </tbody>
                     </table>
                     <n-empty v-else-if="!recJobsLoading" description="暂无生成任务" size="small"></n-empty>
+                    <div style="display: flex; justify-content: center; margin-top: 10px;"
+                         v-if="recJobsTotal > recJobSize">
+                      <n-pagination size="small" :item-count="recJobsTotal"
+                                    :page-size="recJobSize" :page="recJobPage"
+                                    @update:page="setRecJobPage"></n-pagination>
+                    </div>
                   </n-card>
                 </n-gi>
               </n-grid>
@@ -1549,7 +1563,9 @@
                     </n-button>
                   </n-space>
                   <div class="rec-note">
-                    「重置」只删今天这一条签（连带卡图与当天流水），历史记录不动；
+                    「重置」= 删今天这一条签（含当天流水、卡图）+ <b>把该角色今日已生成的立绘也移入回收站</b>，
+                    所以下次抽到同一角色会重新生成而不是「当日复用」（v0.19.6，旧版只删签，
+                    常见困惑：重置了还是当日复用立绘）。历史记录不动；
                     「清空该用户全部签」才是把这个 QQ 的所有抽签记录都删掉（连带卡图，种子重派）；
                     「强制换签」把 nonce+1 重派种子，下次「今日老婆」出新的角色，不受每日换签上限限制。
                   </div>
@@ -4487,7 +4503,9 @@
       var DECISION_LABELS = {
         generate: "生成新立绘", from_pool: "立绘库取图",
         generate_i2i: "图生图模板生成",
-        reuse_today: "当日复用立绘", "": "—"
+        // v0.19.6：旧文案「当日复用立绘」让人以为是「这个用户今天抽过了」，
+        // 实际判断的是「该角色今天已生成过立绘」（同角色同一天人人同款）
+        reuse_today: "当日已有立绘（复用）", "": "—"
       };
       function decisionLabel(d) { return DECISION_LABELS[d] || d || "—"; }
       // 库里 created_at/updated_at 是 UTC ISO（...Z）。直接裸显既不好读又比本地时间
@@ -4596,10 +4614,18 @@
       var filterOpts = Vue.ref({ groups: [], platforms: [], chars: [] });
       var recDetailOpen = Vue.ref(false);
       var recDetail = Vue.ref(null);
+      // v0.19.6：流水与生成任务改为**分页**（用户口径：记录太多把页面撑太长要滚）。
+      // 后端 /records/events 与 /records/jobs 早就支持 limit+offset 并返回 total，
+      // 只是前端一直固定拉 50/100 条。
       var recEvents = Vue.ref([]);
+      var recEventsTotal = Vue.ref(0);
+      var recEventPage = Vue.ref(1);
+      var recEventSize = 15;
       var recEventKind = Vue.ref(null);
       var recJobs = Vue.ref([]);
       var recJobsTotal = Vue.ref(0);
+      var recJobPage = Vue.ref(1);
+      var recJobSize = 15;
       var recJobsLoading = Vue.ref(false);
       var recJobStatus = Vue.ref(null);
       var rangeQuickOpts = [
@@ -4686,21 +4712,31 @@
       }
       async function loadRecEvents() {
         try {
-          var res = await apiGet("records/events", { limit: 50, kind: recEventKind.value || "" });
+          var res = await apiGet("records/events", {
+            limit: recEventSize,
+            offset: (recEventPage.value - 1) * recEventSize,
+            kind: recEventKind.value || ""
+          });
           recEvents.value = (res && res.rows) || [];
+          recEventsTotal.value = (res && res.total) || 0;
           ensureAvatars(recEvents.value);
         } catch (e) { /* 已提示 */ }
       }
+      function setRecEventPage(p) { recEventPage.value = p; loadRecEvents(); }
       async function loadRecJobs() {
         recJobsLoading.value = true;
         try {
-          var res = await apiPost("records/jobs", { status: recJobStatus.value || "", limit: 100 });
+          var res = await apiPost("records/jobs", {
+            status: recJobStatus.value || "", limit: recJobSize,
+            offset: (recJobPage.value - 1) * recJobSize
+          });
           recJobs.value = (res && res.items) || [];
           recJobsTotal.value = (res && res.total) || 0;
         } catch (e) { /* 已提示 */ } finally {
           recJobsLoading.value = false;
         }
       }
+      function setRecJobPage(p) { recJobPage.value = p; loadRecJobs(); }
 
       // ---- 数据统计 ----
       var statsDays = Vue.ref(30);
@@ -5053,10 +5089,24 @@
                             (res && res.row ? res.row.nonce : "?") + "，下次抽签出新角色");
           } else if (kind === "clear_today") {
             res = await apiPost("debug/clear_draws", { user_id: uid, date: today });
+            // v0.19.6：重置要「真重来」——顺手把该角色**今天已生成的那张立绘**
+            // 也移入回收站。否则下次抽到同一角色会命中「当日复用立绘」（判断的是
+            // portraits 表里该角色当天的立绘，与这个 QQ 的签无关），用户实报
+            // 「重置了还是有今日记录、不图生图、不重新生成」。
+            var pr = null;
+            if (row && row.char_id) {
+              try {
+                pr = await apiPost("debug/reset_char_day",
+                                   { char_id: row.char_id, date: today });
+              } catch (e2) { /* 已提示；不挡主流程 */ }
+            }
             message.success("已重置今日签 " + uid + "（删除 " +
-                            ((res && res.cleared) || 0) + " 条，连带删卡 " +
-                            ((res && res.cards_deleted) || 0) +
-                            " 张；统计次数已同步扣减，下次抽取种子已重派）");
+                            ((res && res.cleared) || 0) + " 条，卡图进回收站 " +
+                            ((res && res.cards_trashed) || 0) + " 张；" +
+                            (row && row.char_name ? row.char_name : "该角色") +
+                            " 今日立绘也移入回收站 " +
+                            ((pr && pr.files_trashed) || 0) +
+                            " 张。统计次数已扣减、种子已重派，下次抽取会重新生成）");
           } else if (kind === "clear_all_draws") {
             // v0.19.5：不带 date = 清该用户所有日期的签（用户口径：清「所选 QQ 用户
             // 抽取的老婆记录」）；卡图进回收站，可找回
@@ -5595,6 +5645,10 @@
         resetRecFilters: resetRecFilters, openRecDetail: openRecDetail, gotoUser: gotoUser,
         recDetailOpen: recDetailOpen, recDetail: recDetail,
         recEvents: recEvents, recEventKind: recEventKind, loadRecEvents: loadRecEvents,
+        // v0.19.6：流水 / 生成任务审计分页
+        recEventsTotal: recEventsTotal, recEventPage: recEventPage,
+        recEventSize: recEventSize, setRecEventPage: setRecEventPage,
+        recJobPage: recJobPage, recJobSize: recJobSize, setRecJobPage: setRecJobPage,
         recJobs: recJobs, recJobsTotal: recJobsTotal, recJobsLoading: recJobsLoading,
         recJobStatus: recJobStatus, jobStatusOpts: jobStatusOpts, loadRecJobs: loadRecJobs,
         statsDays: statsDays, statsRangeOpts: statsRangeOpts, statsData: statsData,
