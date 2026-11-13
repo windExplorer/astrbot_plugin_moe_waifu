@@ -69,7 +69,7 @@ ROUTES = """
 /prompt/pools
 /batch/preview /batch/start /batch/status /batch/stop
 /works/discover /works/discover_add
-/pools/import /pools/duplicates /pools/dedupe
+/pools/import /pools/duplicates /pools/dedupe /relational/status
 """.split()
 
 STORE_METHODS = """

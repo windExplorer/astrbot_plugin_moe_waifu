@@ -14,6 +14,8 @@ draw_jobs（生图审计）/ debug_history（调试操作与查询审计）。
 from __future__ import annotations
 
 import functools
+import hashlib
+import json
 import sqlite3
 import threading
 from datetime import date as _date, datetime, timedelta, timezone
@@ -65,6 +67,47 @@ CREATE TABLE IF NOT EXISTS portrait_seq (
   char_id  TEXT PRIMARY KEY,
   next_seq INTEGER NOT NULL DEFAULT 0
 );
+-- v0.24.0 关系模型改造 阶段 1：主键 / 业务键分离。自增 id 是唯一编号，
+-- char_id / series / name 等语义化字符串保留为 UNIQUE 自然键（抽签种子、
+-- 候选排序、日志、工坊 API 全靠它们，不换成数字）。此阶段只建表 + 迁移，
+-- 现有读写路径仍走 JSON，行为不变。
+CREATE TABLE IF NOT EXISTS assets (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind       TEXT NOT NULL DEFAULT '',        -- portrait/ref/cover/card/try
+  path       TEXT NOT NULL UNIQUE,           -- 相对 data 目录，正斜杠
+  sha256     TEXT NOT NULL DEFAULT '',       -- 内容寻址（同内容不同路径也能对上）
+  width      INTEGER NOT NULL DEFAULT 0,
+  height     INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS packs (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  name    TEXT NOT NULL UNIQUE,
+  title   TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS works (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  name           TEXT NOT NULL UNIQUE,       -- 作品名（series）
+  category       TEXT NOT NULL DEFAULT 'other',
+  color          TEXT NOT NULL DEFAULT '',
+  cover_asset_id INTEGER,
+  created_at     TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS characters (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  char_id       TEXT NOT NULL UNIQUE,        -- 语义化自然键，如 hatsune_miku
+  pack_id       INTEGER,
+  work_id       INTEGER,
+  name          TEXT NOT NULL DEFAULT '',
+  tags_en       TEXT NOT NULL DEFAULT '',
+  verified      INTEGER NOT NULL DEFAULT 0,
+  strategy_json TEXT NOT NULL DEFAULT '{}',
+  cover_path    TEXT NOT NULL DEFAULT '',
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_characters_work ON characters(work_id);
+CREATE INDEX IF NOT EXISTS idx_assets_kind ON assets(kind);
 -- v0.20.0：参考图生成信息（转存/转入参考图时随文件记录；手动上传的图没有）
 CREATE TABLE IF NOT EXISTS ref_meta (
   file       TEXT PRIMARY KEY,            -- refs/ 相对路径（与 strategy.refs 同口径）
@@ -152,6 +195,8 @@ _MIGRATIONS = {
         # v0.21.0：软删除（停用）。已抽到这张的用户仍可溯源（draws/draw_events
         # 里的 portrait_file 指向的文件与行都还在），只是不再参与抽卡/配额
         "active": "INTEGER NOT NULL DEFAULT 1",
+        # v0.24.0：关系模型阶段 1，指向 assets.id（全部图片统一编号）
+        "asset_id": "INTEGER",
     },
     "draws": {
         "seed_hex": "TEXT NOT NULL DEFAULT ''",
@@ -385,6 +430,12 @@ class Store:
              prompt, str(theme or ""), str(dims or ""),
              int(width or 0), int(height or 0)),
         )
+        # v0.24.0：每张立绘登记进 assets（全局唯一编号）并回填 asset_id。
+        # 同一路径被复用时 register_asset 只补哈希 / 尺寸，不重复建记录。
+        aid = self.register_asset("portrait", file,
+                                  width=int(width or 0), height=int(height or 0))
+        self._conn.execute(
+            "UPDATE portraits SET asset_id=? WHERE file=?", (aid, file))
         # v0.23.1：任何写入都把计数器推到 max(当前, 本次 seq+1)。外部直接
         # 指定 seq 的路径（参考图转立绘、老数据、测试）也不会让后续分配撞号。
         with self._seq_lock:
@@ -394,6 +445,160 @@ class Store:
                 "next_seq = MAX(next_seq, excluded.next_seq)",
                 (char_id, int(seq) + 1))
         self._conn.commit()
+
+    # ---------- 关系模型（v0.24.0 阶段 1） ----------
+
+    @staticmethod
+    def _sha256_of(path) -> str:
+        try:
+            h = hashlib.sha256()
+            with Path(path).open("rb") as fp:
+                for chunk in iter(lambda: fp.read(1 << 20), b""):
+                    h.update(chunk)
+            return h.hexdigest()
+        except OSError:
+            return ""
+
+    def register_asset(self, kind: str, path: str, sha256: str = "",
+                       width: int = 0, height: int = 0) -> int:
+        """登记一张图片，返回全局唯一 `assets.id`；同路径复用不重复建记录。
+
+        覆盖立绘 / 参考图 / 封面 / 卡片 / 试画产物。封面若与已有图片同路径，
+        复用同一个 asset_id ——「一张图一个编号」，不按引用次数重复发号。
+        """
+        rel = str(path or "").strip().replace("\\", "/")
+        if not rel:
+            return 0
+        row = self._conn.execute(
+            "SELECT id, sha256, width, height FROM assets WHERE path=?",
+            (rel,)).fetchone()
+        if row is not None:
+            if (sha256 and not row["sha256"]) or (width and not row["width"]):
+                self._conn.execute(
+                    "UPDATE assets SET sha256=COALESCE(NULLIF(?, ''), sha256), "
+                    "width=CASE WHEN ? > 0 THEN ? ELSE width END, "
+                    "height=CASE WHEN ? > 0 THEN ? ELSE height END WHERE id=?",
+                    (sha256, width, width, height, height, row["id"]))
+                self._conn.commit()
+            return int(row["id"])
+        cur = self._conn.execute(
+            "INSERT INTO assets(kind, path, sha256, width, height, created_at) "
+            "VALUES(?,?,?,?,?,?)",
+            (str(kind or ""), rel, str(sha256 or ""), int(width or 0),
+             int(height or 0), _now()))
+        self._conn.commit()
+        return int(cur.lastrowid or 0)
+
+    def relational_status(self) -> dict:
+        """各表数量（工坊只读状态接口用）。"""
+        out = {}
+        for table in ("assets", "packs", "works", "characters", "portraits"):
+            row = self._conn.execute(
+                f"SELECT COUNT(*) AS n FROM {table}").fetchone()
+            out[table] = int(row["n"]) if row else 0
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM portraits WHERE asset_id > 0").fetchone()
+        out["portraits_with_asset"] = int(row["n"]) if row else 0
+        return out
+
+    def migrate_relational(self, pools_dir, data_dir,
+                           series_scope=None, logger=None) -> dict:
+        """幂等迁移：卷 JSON → packs/works/characters，图片 → assets。
+
+        只纳入 `series ∈ series_scope`（默认原神 / 鸣潮 / 异环），其余作品留在
+        JSON 里不删，等稳定后再纳入。重复启动不产生重复行，新表可随时重建。
+        阶段 1 不改任何现有读写路径 —— JSON 仍是真源，抽卡 / 工坊行为不变。
+        """
+        scope = {str(s).strip() for s in
+                 (series_scope or ("原神", "鸣潮", "异环")) if str(s).strip()}
+        pools_dir, data_dir = Path(pools_dir), Path(data_dir)
+        stats = {"scope": sorted(scope), "skipped": 0}
+        # 1) 卷 / 作品 / 角色
+        for path in (sorted(pools_dir.glob("*.json"))
+                     if pools_dir.is_dir() else []):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(data, dict) or not isinstance(data.get("entries"), list):
+                continue
+            pack_name = str(data.get("pack") or path.stem).strip()
+            if not pack_name:
+                continue
+            self._conn.execute(
+                "INSERT OR IGNORE INTO packs(name, title, enabled) VALUES(?,?,?)",
+                (pack_name, str(data.get("title") or pack_name),
+                 1 if data.get("enabled", True) else 0))
+            prow = self._conn.execute(
+                "SELECT id FROM packs WHERE name=?", (pack_name,)).fetchone()
+            pack_id = int(prow["id"]) if prow else 0
+            for raw in data["entries"]:
+                if not isinstance(raw, dict):
+                    stats["skipped"] += 1
+                    continue
+                cid = str(raw.get("id") or "").strip()
+                name = str(raw.get("name") or "").strip()
+                series = str(raw.get("series") or "").strip()
+                if not cid or not name or series not in scope:
+                    stats["skipped"] += 1
+                    continue
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO works(name, category, color, created_at) "
+                    "VALUES(?,?,?,?)",
+                    (series, str(raw.get("category") or "other"),
+                     str(raw.get("color") or ""), _now()))
+                wrow = self._conn.execute(
+                    "SELECT id FROM works WHERE name=?", (series,)).fetchone()
+                work_id = int(wrow["id"]) if wrow else 0
+                st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
+                self._conn.execute(
+                    "INSERT INTO characters(char_id, pack_id, work_id, name, tags_en,"
+                    " verified, strategy_json, cover_path, created_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(char_id) DO UPDATE SET pack_id=excluded.pack_id,"
+                    " work_id=excluded.work_id, name=excluded.name,"
+                    " tags_en=excluded.tags_en, verified=excluded.verified,"
+                    " strategy_json=excluded.strategy_json,"
+                    " cover_path=excluded.cover_path",
+                    (cid, pack_id, work_id, name, str(raw.get("tags_en") or ""),
+                     1 if raw.get("verified") else 0,
+                     json.dumps(st, ensure_ascii=False),
+                     str(raw.get("cover") or ""), _now()))
+        self._conn.commit()
+        # 2) 立绘行：登记并回填 asset_id
+        for row in self._conn.execute(
+                "SELECT file, width, height FROM portraits").fetchall():
+            rel = str(row["file"] or "").replace("\\", "/")
+            aid = self.register_asset(
+                "portrait", rel, sha256=self._sha256_of(data_dir / rel),
+                width=int(row["width"] or 0), height=int(row["height"] or 0))
+            self._conn.execute("UPDATE portraits SET asset_id=? WHERE file=?",
+                               (aid, row["file"]))
+        self._conn.commit()
+        # 3) data 目录下其它图片（参考图 / 卡片 / 试画缓存）
+        exts = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+        for kind, sub in (("ref", "refs"), ("card", "cards"),
+                          ("try", "try_cache")):
+            folder = data_dir / sub
+            if not folder.is_dir():
+                continue
+            for f in sorted(folder.iterdir()):
+                if not f.is_file() or f.suffix.lower() not in exts:
+                    continue
+                self.register_asset(kind, f"{sub}/{f.name}",
+                                    sha256=self._sha256_of(f))
+        # 4) 角色封面（可能落在 portraits/ 与 refs/ 之外）
+        for row in self._conn.execute(
+                "SELECT cover_path FROM characters WHERE cover_path <> ''").fetchall():
+            rel = str(row["cover_path"] or "").replace("\\", "/")
+            if rel:
+                self.register_asset("cover", rel)
+        for table in ("assets", "packs", "works", "characters"):
+            stats[table] = int(self._conn.execute(
+                f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"])
+        if logger is not None:
+            logger.info(f"[moe_waifu] 关系模型迁移（阶段 1）：{stats}")
+        return stats
 
     def portrait_by_file(self, file: str) -> dict | None:
         """按相对路径取立绘行（转参考图时把 prompt/theme/seed 带走）。"""

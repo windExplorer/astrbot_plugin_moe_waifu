@@ -563,6 +563,17 @@ def _dedupe_snapshot(plugin) -> list:
     return out
 
 
+async def h_relational_status(plugin) -> dict:
+    """关系模型阶段 1 只读状态：各表数量与立绘 asset_id 覆盖情况。
+
+    阶段 1 只建表 + 迁移，不改现有读写路径；这个接口供工坊核对地基是否
+    就绪（assets 是否覆盖全部图片、characters 是否只含约定作品）。
+    """
+    if not plugin._store:
+        return err("插件未初始化完成")
+    return ok({"status": plugin._store.relational_status()})
+
+
 async def h_duplicates(plugin) -> dict:
     """扫描全库重复角色（只读预览，不改动数据）。"""
     groups = _dedupe_snapshot(plugin)
@@ -737,6 +748,8 @@ async def h_portraits_list(plugin) -> dict:
         full = Path(plugin._data_dir) / row["file"]
         items.append({
             "file": row["file"], "seq": row["seq"],
+            # v0.24.0：全局图片唯一编号（assets.id），与角色内 seq 分开
+            "asset_id": int(row.get("asset_id") or 0),
             "display_no": idx + 1, "date": row["date"],
             "seed": row["seed"], "exists": full.is_file(),
             # abs：绝对路径（v0.6.0）——立绘可被选为图生图源；draw 侧
@@ -3232,6 +3245,7 @@ def register(plugin) -> None:
         ("/pools/import", h_import_pack, ["POST"]),
         ("/pools/duplicates", h_duplicates, ["GET", "POST"]),
         ("/pools/dedupe", h_dedupe, ["POST"]),
+        ("/relational/status", h_relational_status, ["GET", "POST"]),
         ("/pools/delete_entry", h_delete_entry, ["POST"]),
         ("/pools/set_pack", h_set_pack, ["POST"]),
         ("/pools/set_verified", h_set_verified, ["POST"]),

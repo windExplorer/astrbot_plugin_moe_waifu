@@ -110,6 +110,14 @@ class MoeWaifuPlugin(Star):
             bundled = Path(__file__).resolve().parent / "seed_pool.json"
             pool.install_seed_pool(self._data_dir / "pools", bundled, logger)
             self._store = store.Store(self._data_dir / "waifu.db")
+            # v0.24.0 关系模型阶段 1：幂等迁移（只纳入三游戏）。表已由
+            # Store.__init__ 建好；地基失败不能阻塞插件启动。
+            try:
+                self._store.migrate_relational(
+                    self._data_dir / "pools", self._data_dir, logger=logger)
+            except Exception:
+                logger.error(f"[{PLUGIN_NAME}] 关系模型迁移失败\n"
+                             f"{traceback.format_exc()}")
             try:  # 角色库工坊（Dashboard 登录墙内，仅管理员使用）
                 from . import webui_api
                 webui_api.register(self)
