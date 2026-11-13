@@ -62,6 +62,7 @@ ROUTES = """
 /debug/state /debug/history /debug/simulate /debug/rerender
 /portraits/move_to_ref /refs/move_to_portrait /refs/orphans
 /refs/orphan_delete
+/portraits/restore /portraits/delete_hard
 /refs/set_draw_source /overview
 /prompt/pools
 /batch/preview /batch/start /batch/status /batch/stop

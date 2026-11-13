@@ -142,6 +142,9 @@ _MIGRATIONS = {
         "dims": "TEXT",
         "width": "INTEGER NOT NULL DEFAULT 0",
         "height": "INTEGER NOT NULL DEFAULT 0",
+        # v0.21.0：软删除（停用）。已抽到这张的用户仍可溯源（draws/draw_events
+        # 里的 portrait_file 指向的文件与行都还在），只是不再参与抽卡/配额
+        "active": "INTEGER NOT NULL DEFAULT 1",
     },
     "draws": {
         "seed_hex": "TEXT NOT NULL DEFAULT ''",
@@ -420,25 +423,34 @@ class Store:
         return int(row["n"]) if row is not None else 0
 
     def count_portraits(self, char_id: str) -> int:
+        # v0.21.0：只数启用行——停用的立绘不占配额（清库/满库判定随之上移）
         row = self._conn.execute(
-            "SELECT COUNT(*) AS n FROM portraits WHERE char_id=?", (char_id,)
+            "SELECT COUNT(*) AS n FROM portraits WHERE char_id=? AND active=1",
+            (char_id,),
         ).fetchone()
         return int(row["n"]) if row else 0
 
     def portrait_by_date(self, char_id: str, date: str) -> dict | None:
-        """当天已生成的立绘（当日复用）；同天多张取 seq 最大的一张。"""
+        """当天已生成的立绘（当日复用）；同天多张取 seq 最大的一张。
+        v0.21.0：停用的行不参与当日复用。"""
         row = self._conn.execute(
-            "SELECT * FROM portraits WHERE char_id=? AND date=? ORDER BY seq DESC LIMIT 1",
+            "SELECT * FROM portraits WHERE char_id=? AND date=? AND active=1"
+            " ORDER BY seq DESC LIMIT 1",
             (char_id, date),
         ).fetchone()
         return dict(row) if row else None
 
-    def list_portraits(self, char_id: str) -> list:
-        """按 seq 升序返回该角色全部立绘（满库取图按此排序 + pool_index 取模）。"""
-        rows = self._conn.execute(
-            "SELECT * FROM portraits WHERE char_id=?"
-            " ORDER BY seq ASC, created_at ASC, id ASC", (char_id,)
-        ).fetchall()
+    def list_portraits(self, char_id: str, include_disabled: bool = False) -> list:
+        """按 seq 升序返回该角色立绘（满库取图按此排序 + pool_index 取模）。
+
+        v0.21.0：默认只返回启用行（抽卡/配额语义）；工坊立绘墙传
+        include_disabled=True 连停用行一起拿（前端默认隐藏、可切换查看）。
+        """
+        sql = "SELECT * FROM portraits WHERE char_id=?"
+        if not include_disabled:
+            sql += " AND active=1"
+        sql += " ORDER BY seq ASC, created_at ASC, id ASC"
+        rows = self._conn.execute(sql, (char_id,)).fetchall()
         return [dict(r) for r in rows]
 
     def list_portraits_all(self) -> list:
@@ -451,6 +463,15 @@ class Store:
     def delete_portrait(self, file: str) -> None:
         self._conn.execute("DELETE FROM portraits WHERE file=?", (file,))
         self._conn.commit()
+
+    def set_portrait_active(self, file: str, active: bool) -> int:
+        """v0.21.0：软删除（停用）/ 恢复。返回受影响行数（0 = 路径不存在）。"""
+        cur = self._conn.execute(
+            "UPDATE portraits SET active=? WHERE file=?",
+            (1 if active else 0, str(file or "")),
+        )
+        self._conn.commit()
+        return cur.rowcount if cur.rowcount > 0 else 0
 
     # ---------- draw_jobs ----------
 

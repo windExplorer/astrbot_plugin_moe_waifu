@@ -109,6 +109,29 @@ def test_move_to_ref_carries_meta(root: Path):
     st.close()
 
 
+def test_soft_delete_flow(root: Path):
+    """v0.21.0：删除接口=软删除（文件与行保留可溯源）；
+    彻底删除仅对停用行开放且必须 confirm=true。"""
+    plugin, st = make_plugin(root)
+    rel = "portraits/c1/a.png"
+    put_portrait(root, st, rel, b"DDD")
+    r1 = asyncio.run(call_handler(plugin, api.h_portrait_delete, {"file": rel}))
+    check("删除接口=软删除", r1["status"] == "ok" and r1["data"].get("disabled") == rel,
+          str(r1))
+    check("文件仍在（已抽到的用户可溯源）", (root / rel).is_file())
+    check("行仍在且 active=0", st.portrait_by_file(rel) is not None
+          and int(st.portrait_by_file(rel)["active"]) == 0)
+    check("配额不再计停用行", st.count_portraits("c1") == 0)
+    r2 = asyncio.run(call_handler(plugin, api.h_portrait_delete_hard, {"file": rel}))
+    check("未确认拒绝彻底删除", r2["status"] == "error", str(r2))
+    r3 = asyncio.run(call_handler(plugin, api.h_portrait_delete_hard,
+                                  {"file": rel, "confirm": True}))
+    check("停用后可彻底删除", r3["status"] == "ok", str(r3))
+    check("彻底删除后行没了", st.portrait_by_file(rel) is None)
+    check("文件已离开原位（进回收站）", not (root / rel).is_file())
+    st.close()
+
+
 def test_roundtrip(root: Path):
     plugin, st = make_plugin(root)
     rel = "portraits/c1/a.png"
@@ -378,6 +401,7 @@ def test_orphan_delete(root: Path):
 def main():
     jobs = [("move_to_ref", test_move_to_ref),
             ("move_to_ref_meta", test_move_to_ref_carries_meta),
+            ("soft_delete_flow", test_soft_delete_flow),
             ("roundtrip", test_roundtrip),
             ("delete_legacy", test_delete_legacy_dirty_data),
             ("delete_clean", test_delete_clean_portrait),

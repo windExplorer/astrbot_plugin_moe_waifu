@@ -427,6 +427,32 @@ def test_ref_meta_and_dims(tmp: Path):
     st.close()
 
 
+def test_soft_delete(tmp: Path):
+    """v0.21.0：软删除（停用）——文件与行保留（已抽到的用户可溯源），
+    不参与配额 / 当日复用 / 满库取图；seq 不复用（停用行也占号）。"""
+    st, plugin = fresh(tmp)
+    st.add_portrait("a_char", "portraits/a_char/1.png", 42, TODAY, 0, "base")
+    st.add_portrait("a_char", "portraits/a_char/2.png", 43, TODAY, 1, "base")
+    check("初始两张都启用", st.count_portraits("a_char") == 2)
+    check("停用返回 1 行", st.set_portrait_active("portraits/a_char/1.png", False) == 1)
+    check("停用后配额只数启用行", st.count_portraits("a_char") == 1)
+    check("停用行不在默认列表",
+          [r["file"] for r in st.list_portraits("a_char")] == ["portraits/a_char/2.png"])
+    check("工坊墙连停用行一起拿",
+          len(st.list_portraits("a_char", include_disabled=True)) == 2)
+    check("停用行不参与当日复用",
+          st.portrait_by_date("a_char", TODAY)["file"] == "portraits/a_char/2.png")
+    check("seq 不复用（停用行也占号，防种子撞车）", st.next_portrait_seq("a_char") == 2)
+    check("停用不存在的路径返回 0",
+          st.set_portrait_active("portraits/x/y.png", False) == 0)
+    check("恢复后重新参与配额",
+          st.set_portrait_active("portraits/a_char/1.png", True) == 1
+          and st.count_portraits("a_char") == 2)
+    check("停用期间行一直在（溯源）",
+          st.portrait_by_file("portraits/a_char/1.png") is not None)
+    st.close()
+
+
 def main():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
@@ -442,6 +468,7 @@ def main():
                      ("discover_add", test_discover_add_core),
                      ("trash_files", test_trash_files),
                      ("ref_meta", test_ref_meta_and_dims),
+                     ("soft_delete", test_soft_delete),
                      ("cores", test_cores)):
         with tempfile.TemporaryDirectory() as td:
             print(f"--- {name} ---")

@@ -475,7 +475,8 @@ async def h_portraits_list(plugin) -> dict:
     if not cid or not plugin._store:
         return err("缺少 char_id")
     items = []
-    for row in plugin._store.list_portraits(cid):
+    # v0.21.0：连停用行一起返回（active 字段区分），前端默认隐藏、可切换查看
+    for row in plugin._store.list_portraits(cid, include_disabled=True):
         full = Path(plugin._data_dir) / row["file"]
         items.append({
             "file": row["file"], "seq": row["seq"], "date": row["date"],
@@ -495,6 +496,8 @@ async def h_portraits_list(plugin) -> dict:
             "dims": row.get("dims") or "",
             "width": int(row.get("width") or 0),
             "height": int(row.get("height") or 0),
+            # v0.21.0：软删除标记（0 = 已停用）
+            "active": int(row.get("active") or 0),
         })
     return ok({"char_id": cid, "items": items})
 
@@ -769,8 +772,33 @@ async def h_ref_move_to_portrait(plugin) -> dict:
         return err(f"转移失败：{exc}")
 
 
+def _disable_portrait_core(plugin, rel: str) -> dict:
+    """v0.21.0：软删除（停用）。文件与行都保留——已抽到这张的用户仍可溯源
+    （draws / draw_events 里的 portrait_file 指向不变），只是该图不再参与
+    抽卡（当日复用/满库取图）与配额。"""
+    if not _safe_portrait_rel(rel):
+        raise ValueError("非法路径")
+    if not plugin._store:
+        raise ValueError("插件未初始化完成")
+    if plugin._store.set_portrait_active(rel, False) == 0:
+        raise ValueError("立绘行不存在")
+    return {"disabled": rel}
+
+
+def _restore_portrait_core(plugin, rel: str) -> dict:
+    """v0.21.0：恢复停用的立绘（重新参与抽卡与配额）。"""
+    if not _safe_portrait_rel(rel):
+        raise ValueError("非法路径")
+    if not plugin._store:
+        raise ValueError("插件未初始化完成")
+    if plugin._store.set_portrait_active(rel, True) == 0:
+        raise ValueError("立绘行不存在")
+    return {"restored": rel}
+
+
 def _delete_portrait_core(plugin, rel: str) -> dict:
-    """删除立绘；若它还被参考图引用（老版脏数据），先另存到 refs/ 保活。"""
+    """彻底删除（v0.21.0 起仅对已停用的立绘开放，且走回收站可手动找回）；
+    若它还被参考图引用（老版脏数据），先另存到 refs/ 保活。"""
     if not _safe_portrait_rel(rel):
         raise ValueError("非法路径")
     full = Path(plugin._data_dir) / rel
@@ -778,24 +806,59 @@ def _delete_portrait_core(plugin, rel: str) -> dict:
     if full.is_file() and _path_is_referenced(plugin, rel):
         relocated = _copy_into_refs(plugin, full)
         _rewrite_path_refs(plugin, rel, relocated)
-    try:
-        full.unlink(missing_ok=True)
-    except Exception as exc:
-        raise RuntimeError(f"删除文件失败：{exc}")
+    moved, trash_dir = _trash_files(plugin, [rel])
+    if moved != 1:
+        raise RuntimeError("移入回收站失败")
     plugin._store.delete_portrait(rel)
-    return {"deleted": rel, "relocated_to": relocated}
+    return {"deleted": rel, "relocated_to": relocated, "trash": trash_dir}
 
 
 async def h_portrait_delete(plugin) -> dict:
+    """v0.21.0：单张删除 = 软删除（停用），文件与行保留、可恢复、可溯源。"""
     body = await _body()
     try:
         return ok(await asyncio.to_thread(
-            _delete_portrait_core, plugin, str(body.get("file") or "").strip()))
+            _disable_portrait_core, plugin, str(body.get("file") or "").strip()))
     except (ValueError, RuntimeError) as exc:
         return err(str(exc))
     except Exception as exc:
-        logger.warning(f"[{PLUGIN_NAME}] 删除立绘失败\n{traceback.format_exc()}")
-        return err(f"删除失败：{exc}")
+        logger.warning(f"[{PLUGIN_NAME}] 停用立绘失败\n{traceback.format_exc()}")
+        return err(f"停用失败：{exc}")
+
+
+async def h_portrait_restore(plugin) -> dict:
+    body = await _body()
+    try:
+        return ok(await asyncio.to_thread(
+            _restore_portrait_core, plugin, str(body.get("file") or "").strip()))
+    except (ValueError, RuntimeError) as exc:
+        return err(str(exc))
+    except Exception as exc:
+        logger.warning(f"[{PLUGIN_NAME}] 恢复立绘失败\n{traceback.format_exc()}")
+        return err(f"恢复失败：{exc}")
+
+
+async def h_portrait_delete_hard(plugin) -> dict:
+    """彻底删除（文件进回收站 + 删行）。只对已停用的立绘开放，且必须带
+    confirm=true（前端两段确认 + 服务端强校验，对齐调试区危险操作口径）。"""
+    body = await _body()
+    if not body.get("confirm"):
+        return err("缺少 confirm=true（彻底删除是不可逆操作）")
+    rel = str(body.get("file") or "").strip()
+    try:
+        if not plugin._store:
+            return err("插件未初始化完成")
+        row = plugin._store.portrait_by_file(rel)
+        if row is None:
+            return err("立绘行不存在")
+        if int(row.get("active") or 0) == 1:
+            return err("该立绘仍在启用中：请先停用（软删除）再彻底删除")
+        return ok(await asyncio.to_thread(_delete_portrait_core, plugin, rel))
+    except (ValueError, RuntimeError) as exc:
+        return err(str(exc))
+    except Exception as exc:
+        logger.warning(f"[{PLUGIN_NAME}] 彻底删除立绘失败\n{traceback.format_exc()}")
+        return err(f"彻底删除失败：{exc}")
 
 
 # ---------- 试画 / 补图（后台 job + 轮询） ----------
@@ -859,6 +922,9 @@ async def h_job_start(plugin) -> dict:
                 return err("请先指定本次图生图源：选一张或多张参考图/立绘，或填 URL / 本地路径（不会自动取参考图列表里的图）")
     # 预览确认过的提示词直通（v0.5.9）：非空时不再走 prompt_gen，按原文出图
     prompt_override = str(body.get("prompt") or "").strip()[:2000]
+    # v0.21.0：确认提示词直通时前端同步带来本轮变化维度（预览面板展示的那份，
+    # 与提示词同源）——manual 路径没有维度就无法随档、详情弹窗看不到维度
+    dims_override = str(body.get("dims") or "").strip()[:2000]
     # v0.15.0：主题 id 随任务记录（未确认提示词时也参与生成），归档写进立绘行
     theme_id = str(body.get("theme") or "").strip()
     job_id = f"{kind}:{cid}:{int(time.time() * 1000)}"
@@ -868,7 +934,7 @@ async def h_job_start(plugin) -> dict:
     _prune_jobs(plugin)
     loop = asyncio.get_running_loop()
     loop.create_task(_run_job(plugin, job_id, entry, kind, prompt_override,
-                              no_archive, theme_id))
+                              no_archive, theme_id, dims_override))
     return ok({"job_id": job_id, "label": pool.entry_label(entry)})
 
 
@@ -883,7 +949,7 @@ def _prune_jobs(plugin) -> None:
 
 async def _run_job(plugin, job_id: str, entry: dict, kind: str,
                    prompt_override: str = "", no_archive: bool = False,
-                   theme_id: str = "") -> None:
+                   theme_id: str = "", dims_override: str = "") -> None:
     job = plugin._jobs.get(job_id, {})
     char_id = entry["id"]
     date = plugin._today()
@@ -909,13 +975,17 @@ async def _run_job(plugin, job_id: str, entry: dict, kind: str,
         prompt=prompt_text,
     )
     duration = int((time.monotonic() - t0) * 1000)
-    # v0.20.0：变化维度 / 图片尺寸随档记录（手动提示词直通时维度不适用）
+    # v0.20.0：变化维度 / 图片尺寸随档记录。
+    # v0.21.0：manual（确认提示词直通）路径改用前端随 prompt 带来的维度
+    # （预览面板展示的那份，含 attempt/dim_state 影响，比后端复算更准确）
     dims_json = ""
     if prompt_src != "manual":
         dims_json = json.dumps(prompt_gen.describe_variations(
             seed_int, theme_rec,
             force_single=(str(entry.get("strategy_type") or "") == "img2img")),
             ensure_ascii=False)
+    elif dims_override:
+        dims_json = dims_override
     img_w, img_h = draw.image_size(src) if src else (0, 0)
     plugin._store.log_job(char_id, date, "try" if kind == "try" else "refill", status,
                           "workshop", entry["strategy_type"], seed_int, error, duration, src or "")
@@ -2884,6 +2954,9 @@ def register(plugin) -> None:
         ("/portraits/index", h_portraits_index, ["GET"]),
         ("/portraits/list", h_portraits_list, ["GET", "POST"]),
         ("/portraits/delete", h_portrait_delete, ["POST"]),
+        # v0.21.0：软删除的恢复 / 彻底删除
+        ("/portraits/restore", h_portrait_restore, ["POST"]),
+        ("/portraits/delete_hard", h_portrait_delete_hard, ["POST"]),
         # v0.9.1：真·移动语义的互转（旧 /refs/bind 保留给上传/外部调用）
         ("/portraits/move_to_ref", h_portrait_move_to_ref, ["POST"]),
         ("/refs/move_to_portrait", h_ref_move_to_portrait, ["POST"]),

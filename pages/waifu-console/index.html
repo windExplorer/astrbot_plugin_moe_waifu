@@ -136,6 +136,8 @@
     box-shadow: inset 0 0 0 2px rgba(224,162,60,.50); }
   .pin-main.pin-draw { background: rgba(214,51,132,.10);
     box-shadow: inset 0 0 0 2px rgba(214,51,132,.50), inset 0 0 0 4px rgba(224,162,60,.50); }
+  /* v0.21.0：停用的立绘置灰（软删除可见态） */
+  .gal-item.is-disabled { opacity: .45; }
   .drag-overlay { position: fixed; inset: 0; background: rgba(214,51,132,.10);
     border: 2.5px dashed #d63384; z-index: 9999; display: flex;
     align-items: center; justify-content: center; pointer-events: none; }
@@ -897,7 +899,12 @@
             <!-- 立绘区 -->
             <div>
               <div class="sec-title">立绘
-                <span class="cnt">{{ galItems.length }}/{{ meta.quota }} · 不足配额会按种子自动补生{{ galDrawRef ? " · 出卡源已指定" : "" }}</span>
+                <span class="cnt">{{ galItems.length }}/{{ meta.quota }} · 不足配额会按种子自动补生{{ galDrawRef ? " · 出卡源已指定" : "" }}<template v-if="galDisabledCount > 0"> · 已停用 {{ galDisabledCount }}（不占配额）</template></span>
+                <!-- v0.21.0：停用的立绘默认隐藏，点这里切换显示 -->
+                <span class="bind-tip" style="margin-top: 0; cursor: pointer;"
+                      v-if="galDisabledCount > 0"
+                      @click="galShowDisabled = !galShowDisabled">
+                  {{ galShowDisabled ? "隐藏已停用" : "查看已停用" }}</span>
                 <!-- v0.15.0：排序（默认最新在前；编号正序=库里 seq 升序）。seq 改
                      「历史最大+1」单调派发，删立绘不再复用编号 -->
                 <n-select v-model:value="galSort" size="tiny" :bordered="false"
@@ -917,12 +924,27 @@
               </div>
               <n-grid v-else-if="galItems.length > 0" :cols="uiCols" :x-gap="10" :y-gap="10">
                 <n-gi v-for="it in galItemsView" :key="it.file">
-                  <div class="gal-item">
+                  <!-- v0.21.0：停用的立绘置灰展示（仅查看/恢复/彻底删除） -->
+                  <div class="gal-item" :class="{ 'is-disabled': !it.active }">
                     <img v-if="it.thumb" :src="it.thumb" class="clickable-img"
                          title="点击查看大图" alt="立绘缩略"
                          @click.stop="openViewer(it.file, '#' + it.seq)">
                     <div v-else class="gal-meta">文件丢失</div>
-                    <div class="gal-ops">
+                    <!-- 已停用：只能看详情 / 恢复 / 彻底删除 -->
+                    <div class="gal-ops" v-if="!it.active">
+                      <w-icon-btn icon="info" size="tiny" type="info"
+                                  tip="查看详情"
+                                  @click.stop="openGalDetail(it)"></w-icon-btn>
+                      <w-icon-btn icon="refresh" size="tiny" type="success"
+                                  tip="恢复启用（重新参与抽卡与配额）"
+                                  @click.stop="doRestorePortrait(it)"></w-icon-btn>
+                      <w-icon-btn icon="trash" size="tiny" type="error"
+                                  :armed="delArm === 'hard:' + it.file"
+                                  :tip="delArm === 'hard:' + it.file
+                                        ? '再点一次确认彻底删除' : '彻底删除（文件进回收站 + 删行）'"
+                                  @click.stop="doDeletePortraitHard(it)"></w-icon-btn>
+                    </div>
+                    <div class="gal-ops" v-else>
                       <w-icon-btn icon="info" size="tiny" type="info"
                                   tip="查看详情（主题 / 提示词 / seed 全文）"
                                   @click.stop="openGalDetail(it)"></w-icon-btn>
@@ -941,7 +963,7 @@
                                   @click.stop="movePortraitToRef(it)"></w-icon-btn>
                       <w-icon-btn icon="trash" size="tiny" type="error"
                                   :armed="delArm === it.file"
-                                  :tip="delArm === it.file ? '再点一次确认删除' : '删除立绘'"
+                                  :tip="delArm === it.file ? '再点一次确认停用' : '停用（软删除：不参与抽卡与配额，已抽到的记录可溯源，随时可恢复）'"
                                   @click.stop="doDeletePortrait(it)"></w-icon-btn>
                     </div>
                     <!-- v0.13.2：seed 只显前 8 位（全文挪 tooltip），meta 回到单行。
@@ -949,7 +971,7 @@
                          会抛 TypeError → 整个立绘墙渲染中断（真机「只有标题没图片」
                          的根因；mock fixture 是字符串才一直没炸）——必须先 String() -->
                     <div class="gal-meta" :title="it.seed != null ? 'seed ' + it.seed : ''">
-                      #{{ it.seq }} · {{ it.date }} · seed {{ String(it.seed == null ? "" : it.seed).slice(0, 8) }}{{ String(it.seed == null ? "" : it.seed).length > 8 ? "…" : "" }}{{ isCover(it) ? " · 封面" : "" }}{{ galDrawRefAbs === it.abs ? " · 出卡源" : "" }}
+                      #{{ it.seq }} · {{ it.date }} · seed {{ String(it.seed == null ? "" : it.seed).slice(0, 8) }}{{ String(it.seed == null ? "" : it.seed).length > 8 ? "…" : "" }}{{ isCover(it) ? " · 封面" : "" }}{{ galDrawRefAbs === it.abs ? " · 出卡源" : "" }}{{ !it.active ? " · 已停用" : "" }}
                     </div>
                   </div>
                 </n-gi>
@@ -2062,6 +2084,8 @@
             {{ galDetail.width }} × {{ galDetail.height }}
           </n-tag>
           <span v-else class="bind-tip" style="margin-top: 0;">尺寸未知（v0.20.0 之前的旧图）</span>
+          <n-tag size="small" type="warning" :bordered="false"
+                 v-if="galDetail.active === 0">已停用（不参与抽卡，记录可溯源）</n-tag>
         </div>
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
           <span class="bind-tip" style="margin-top: 0;">主题</span>
@@ -3754,6 +3778,10 @@
           var payload = { kind: "try", id: tryCharId.value,
                           prompt: String(tryPrompt.value || "").trim(),
                           theme: tryTheme.value || "" };
+          // v0.21.0：维度随提示词直通（试画台预览展示的那份；体型单独展示在此合并）
+          var _td = (tryDims.value || []).map(function (d) { return [d.label, d.zh]; });
+          if (String(tryBodyZh.value || "").trim()) _td.push(["体型", tryBodyZh.value]);
+          payload.dims = JSON.stringify(_td);
           var ov = overrideOf();
           if (ov) payload.override = ov;
           var res = await apiPost("jobs/start", payload);
@@ -4154,8 +4182,15 @@
       var galPromptConfirmed = Vue.ref(false);
       // v0.15.0：立绘排序（默认最新在前）+ 详情弹窗
       var galSort = Vue.ref("newest");
+      // v0.21.0：停用的立绘默认隐藏（查看开关在立绘区标题行）
+      var galShowDisabled = Vue.ref(false);
+      var galDisabledCount = Vue.computed(function () {
+        return (galItems.value || []).filter(function (it) { return !it.active; }).length;
+      });
       var galItemsView = Vue.computed(function () {
-        var arr = (galItems.value || []).slice();
+        var arr = (galItems.value || []).filter(function (it) {
+          return galShowDisabled.value || it.active;
+        });
         arr.sort(function (a, b) {
           if (galSort.value === "newest") {
             // 最新在前：seq 降序；历史重复 seq 行按归档时间降序兜底
@@ -4545,6 +4580,11 @@
           }
           payload.prompt = pt;
         }
+        // v0.21.0：随提示词同步本轮变化维度——工坊「生成立绘」永远走确认提示词
+        // 直通（manual），后端复算不了维度，必须由前端把预览面板展示的这份带上
+        payload.dims = JSON.stringify((galDims.value || [])
+          .filter(function (d) { return String(d.zh || "").trim(); })
+          .map(function (d) { return [d.label, d.zh]; }));
         refillRunning.value = true;
         refillError.value = "";
         try {
@@ -4594,12 +4634,32 @@
         });
       });
       async function doDeletePortrait(it) {
+        // v0.21.0：删除 = 软删除（停用）。文件与行保留、可溯源可恢复；
+        // 彻底删除只对已停用的图开放（走回收站 + 服务端 confirm 强校验）
         if (!armDelete(it.file)) return;
         try {
-          var res = await apiPost("portraits/delete", { file: it.file });
-          message.success("已删除 #" + it.seq + "（低于配额时会自动补生）" +
-            (res && res.relocated_to
-              ? "；该图仍被参考图引用，已自动另存到参考图库，那边不受影响" : ""));
+          await apiPost("portraits/delete", { file: it.file });
+          message.success("已停用 #" + it.seq + "（不参与抽卡与配额；已抽到的记录不受影响，可在「查看已停用」中恢复）");
+          delArm.value = "";
+          await refreshAll();
+        } catch (e) { /* 已提示 */ }
+      }
+      // v0.21.0：恢复停用的立绘
+      async function doRestorePortrait(it) {
+        if (!it || !it.file) return;
+        try {
+          await apiPost("portraits/restore", { file: it.file });
+          message.success("已恢复 #" + it.seq + "（重新参与抽卡与配额）");
+          await refreshAll();
+        } catch (e) { /* 已提示 */ }
+      }
+      // v0.21.0：彻底删除（仅已停用的立绘；文件进回收站 + 删行）
+      async function doDeletePortraitHard(it) {
+        if (!it || !it.file) return;
+        if (!armDelete("hard:" + it.file)) return;
+        try {
+          await apiPost("portraits/delete_hard", { file: it.file, confirm: true });
+          message.success("已彻底删除 #" + it.seq + "（文件已移入回收站）");
           delArm.value = "";
           await refreshAll();
         } catch (e) { /* 已提示 */ }
@@ -5858,6 +5918,9 @@
         resetGalDimCtl: resetGalDimCtl, loadGalPools: loadGalPools,
         // v0.15.0：立绘排序 + 详情弹窗 + 生成源交互
         galSort: galSort, galItemsView: galItemsView,
+        // v0.21.0：软删除（停用/恢复/彻底删除）
+        galShowDisabled: galShowDisabled, galDisabledCount: galDisabledCount,
+        doRestorePortrait: doRestorePortrait, doDeletePortraitHard: doDeletePortraitHard,
         // v0.18.2：切换角色的载入态（骨架 + 文案）
         galSwitching: galSwitching, galSwitchTip: galSwitchTip,
         galDetailOpen: galDetailOpen, galDetail: galDetail,
