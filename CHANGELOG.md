@@ -2,6 +2,34 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.18.1 (2026-11-13)
+
+批量补图「预览」报 postMessage 克隆错误：出站参数统一纯化（版本 v0.18.0 -> v0.18.1）。
+
+- **现象（用户）**：工坊 → 角色库 →「批量补图」→ 点「预览」，弹窗报
+  `Failed to execute 'postMessage' on 'Window': [object Object] could not be cloned.`，
+  预览表格永远是空的；「开始补图」同样受影响。
+- **根因**：插件页的桥（`astrbot/dashboard/plugin_page_bridge.js`）把
+  `{channel, kind, requestId, action, endpoint, body}` **整包**交给
+  `window.parent.postMessage`，而 postMessage 走**结构化克隆**——结构化克隆
+  不支持 `Proxy`。`batchPayload()` 直接把 `batchPacks.value` /
+  `batchSeries.value` / `batchChars.value` 放进了 body，而 `Vue.ref([]).value`
+  是 `reactive()` 代理（数组属于对象，深响应式）。于是 `send()` 里同步抛
+  `DataCloneError`，Promise 被 reject，`apiPost` 的 catch 把原始报错弹了出来
+  ——请求**根本没发出**，后端 `/batch/preview` 从未被调用（日志无痕）。
+  其它调用点（试画台 / 立绘详情）都是现拼的纯对象/`slice()` 出来的普通数组，
+  所以只有批量补图这一处暴露。
+- **修复（前端 `pages/waifu-console/index.html`）**：
+  - 新增 `plain(v, fallback)`：JSON 深拷贝（`JSON.parse(JSON.stringify(v))`），
+    把响应式代理转成纯数据。
+  - `apiGet` / `apiPost` 的出站参数一律过 `plain()`——从根上封住这一类问题，
+    以后新增接口不会再踩；顺带把 `null/undefined` 统一收敛成 `{}`。
+  - `batchPayload()` 的三个数组显式 `slice()` 出新数组（双保险 + 语义更清楚）。
+- **守卫**：`tests/test_html_integrity.py` 新增三条静态检查（`plain()` 存在、
+  `apiGet`/`apiPost` 出站参数经 `plain()` 包裹），防止以后有人绕过统一出口。
+- **验证**：`tests/test_inline_js.py`（node --check）、`tests/test_template_structure.py`、
+  `tests/test_html_integrity.py` 全通过。
+
 ## v0.18.0 (2026-11-13)
 
 作品发现：输入作品名 → websearch(可选增强) + 对话模型起草角色清单 → 勾选入库（待办清单最后一项主功能）（版本 v0.17.0 -> v0.18.0）。

@@ -51,6 +51,17 @@ def main():
     for token in ("AstrBotPluginPage", "bridgeReady", "app.mount"):
         check(f"主脚本含 {token}", token in main_body)
 
+    # v0.18.1：桥用 window.parent.postMessage 传包，而 postMessage 走结构化克隆
+    # ——结构化克隆**不支持 Proxy**。Vue 的 ref([]).value 是 reactive 代理，直接
+    # 塞进出站参数会在 send() 里同步抛 DataCloneError
+    # 「Failed to execute 'postMessage' on 'Window': [object Object] could not
+    # be cloned.」（请求根本发不出去）。故 apiGet/apiPost 必须统一过 plain()。
+    check("plain() 纯化工具存在", "function plain(" in main_body)
+    check("apiGet 出站参数经 plain()",
+          "bridge.apiGet(path, plain(params, {}))" in main_body)
+    check("apiPost 出站参数经 plain()",
+          "bridge.apiPost(path, plain(body, {}))" in main_body)
+
     print("test_html_integrity: ALL OK")
 
 

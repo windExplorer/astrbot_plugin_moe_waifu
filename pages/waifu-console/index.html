@@ -2549,9 +2549,24 @@
     try { return bridge.getContext() || {}; } catch (e) { return {}; }
   }
 
+  // ⚠️ v0.18.1：出站参数必须先转成「纯对象」再交给桥。
+  // 桥（astrbot/dashboard/plugin_page_bridge.js）是 window.parent.postMessage
+  // 传整个 {channel, kind, action, endpoint, body} 包，而 postMessage 走结构化
+  // 克隆——结构化克隆**不支持 Proxy**。Vue 的 ref([]) / ref({}) 的 .value 正是
+  // reactive 代理，直接塞进 body 会在 send() 里同步抛
+  // DataCloneError：Failed to execute 'postMessage' on 'Window':
+  // [object Object] could not be cloned. 请求根本没发出（与后端无关）。
+  // 批量补图「预览」就是踩了这个：batchPayload() 直接把 batchPacks.value 等
+  // 三个响应式数组放进了 body。所有出站参数统一 JSON 深拷贝成纯数据。
+  function plain(v, fallback) {
+    if (v === null || v === undefined) return fallback;
+    try { return JSON.parse(JSON.stringify(v)); }
+    catch (e) { return fallback; }
+  }
+
   async function apiGet(path, params) {
     try {
-      return await bridge.apiGet(path, params || {});
+      return await bridge.apiGet(path, plain(params, {}));
     } catch (e) {
       message.error(String((e && e.message) || e));
       throw e;
@@ -2559,7 +2574,7 @@
   }
   async function apiPost(path, body) {
     try {
-      return await bridge.apiPost(path, body || {});
+      return await bridge.apiPost(path, plain(body, {}));
     } catch (e) {
       message.error(String((e && e.message) || e));
       throw e;
@@ -3928,9 +3943,12 @@
         });
       });
       function batchPayload() {
+        // v0.18.1：数组一律 slice 出新数组——ref([]).value 是响应式代理，
+        // 直接进 body 会让桥的 postMessage 结构化克隆失败（见 apiPost 处注释）
         return { mode: batchMode.value,
-                 packs: batchPacks.value, series: batchSeries.value,
-                 chars: batchChars.value };
+                 packs: (batchPacks.value || []).slice(),
+                 series: (batchSeries.value || []).slice(),
+                 chars: (batchChars.value || []).slice() };
       }
       function openBatchModal() {
         batchOpen.value = true;
