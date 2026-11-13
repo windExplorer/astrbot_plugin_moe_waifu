@@ -967,6 +967,9 @@
                   每行一句——卡片按抽签种子随机显示其中一句（只写一句就固定显示）。
                   「保存印象语」只改这一处，不会动参考图 / 封面 / 画法。
                 </div>
+                <div class="bind-tip" style="margin-top: 0;" v-if="wsStatusText">
+                  {{ wsStatusText }}
+                </div>
                 <n-alert v-if="!String(detailEntry.series || '').trim()" type="warning"
                          :show-icon="false">
                   该角色没填「作品名」——联网检索只能按名字搜，同名角色很容易串台。
@@ -3609,7 +3612,15 @@
             .map(function (s) { return s.trim(); }).filter(Boolean);
           var merged = cur.concat(quotes.filter(function (q) { return cur.indexOf(q) < 0; }));
           form.value.quote = merged.join("\n");
-          message.success("已生成 " + quotes.length + " 句，删改后记得点保存");
+          // v0.29.2：联网失败必须喊出来——按角色名瞎编正是「和原作对不上」的源头
+          if ((res && res.source) === "websearch+llm") {
+            message.success("已生成 " + quotes.length
+              + " 句（已联网核对设定，摘要 " + ((res && res.search_len) || 0)
+              + " 字），删改后记得点保存");
+          } else {
+            message.warning("没拿到网络资料：" + ((res && res.web_reason) || "联网检索不可用")
+              + "。本次只按角色名生成，可能与原作不符，请逐句把关");
+          }
         } catch (e) { /* apiPost 已提示 */ } finally {
           quoteGenLoading.value = false;
         }
@@ -4356,6 +4367,29 @@
       var galQuotesSuggest = Vue.ref([]);
       var galQuotesMsg = Vue.ref("");
       var galQuotesMsgType = Vue.ref("info");
+      // 联网检索可用性（v0.29.2）：进详情页就查一次，好坏直接摆在卡上，
+      // 别等点了「联网补写」生成出一堆按名字瞎编的句子才发现
+      var webSearchStatus = Vue.ref(null);
+      async function loadWebSearchStatus() {
+        try {
+          var res = await apiGet("websearch/status");
+          webSearchStatus.value = res || null;
+        } catch (e) { webSearchStatus.value = null; }
+      }
+      var wsStatusText = Vue.computed(function () {
+        var s = webSearchStatus.value;
+        if (!s) { return ""; }
+        if (!s.available) {
+          return "⚠️ 联网检索不可用：" + (s.reason || "未启用任何 web_search_* 工具");
+        }
+        var names = (s.tools || []).map(function (t) {
+          var n = String(t.name || "").replace("web_search_", "");
+          if (!t.active) { n += "（未激活）"; }
+          if (!t.key) { n += "（未配 Key）"; }
+          return n;
+        }).join(" / ");
+        return "联网检索可用：" + names;
+      });
       function entryQuotesText(e) {
         if (!e) return "";
         if (Array.isArray(e.quotes) && e.quotes.length) { return e.quotes.join("\n"); }
@@ -4417,13 +4451,22 @@
           var merged = cur.concat(quotes.filter(function (q) { return cur.indexOf(q) < 0; }));
           galQuotes.value = merged.join("\n");
           galQuotesDirty.value = true;
-          galQuotesMsgType.value = (res && res.source) === "websearch+llm" ? "info" : "warning";
-          galQuotesMsg.value = "已补写 " + quotes.length + " 句"
-            + ((res && res.source) === "websearch+llm"
-              ? ("（已联网核对《" + String((e.series || "未填作品")) + "》设定，摘要 "
-                 + ((res && res.search_len) || 0) + " 字）")
-              : "（⚠️ 没拿到网络资料，只按角色名生成；去 AstrBot 启用任一 web_search_* 并配 Key 才能核对原作设定）")
-            + "，删改后点「保存印象语」";
+          var gotWeb = (res && res.source) === "websearch+llm";
+          if (!gotWeb) {
+            // v0.29.2：联网失败必须又响又明——光在卡上放一行小字用户根本看不到
+            var why = (res && res.web_reason) || "联网检索不可用";
+            message.warning("没拿到网络资料：" + why
+              + "。本次只按角色名生成，可能与原作不符");
+            galQuotesMsgType.value = "error";
+            galQuotesMsg.value = "⚠️ 联网失败：" + why
+              + "。已按角色名生成 " + quotes.length
+              + " 句（可能与原作不符）——建议在 AstrBot 配好联网搜索后重跑，或人工逐句改";
+          } else {
+            galQuotesMsgType.value = "info";
+            galQuotesMsg.value = "已补写 " + quotes.length + " 句（已联网核对《"
+              + String((e.series || "未填作品")) + "》设定，摘要 "
+              + ((res && res.search_len) || 0) + " 字），删改后点「保存印象语」";
+          }
         } catch (e2) { /* apiPost 已提示 */ } finally {
           galQuotesGenLoading.value = false;
         }
@@ -4452,13 +4495,23 @@
           galQuotesSuggest.value = items;
           var changed = items.filter(function (it) { return it.text !== it.old; }).length;
           var gotWeb = (res && res.source) === "websearch+llm";
-          galQuotesMsgType.value = changed ? "warning" : "success";
-          galQuotesMsg.value = (gotWeb
-            ? ("已联网检索《" + String((e.series || "未填作品")) + "》设定（摘要 "
-               + ((res && res.search_len) || 0) + " 字）后逐句校对")
-            : "⚠️ 没拿到网络资料（AstrBot 未启用 web_search_* 或没配 Key），本次只按角色名用模型判断，同名角色容易串台")
-            + "：" + (changed ? (changed + " 句建议改写，逐句点「采用」才写回")
-                             : "全部贴合角色，无需改动");
+          if (!gotWeb) {
+            // v0.29.2：联网失败同样 toast + 醒目 alert（原因带上后端给的人话）
+            var why = (res && res.web_reason) || "联网检索不可用";
+            message.warning("没拿到网络资料：" + why
+              + "。本次只按角色名用模型判断，同名角色容易串台");
+            galQuotesMsgType.value = "error";
+            galQuotesMsg.value = "⚠️ 联网失败：" + why
+              + "。本次仅用模型校对" + (changed ? ("（" + changed + " 句建议改写）")
+                                              : "（暂未发现建议）");
+          } else {
+            galQuotesMsgType.value = changed ? "warning" : "success";
+            galQuotesMsg.value = "已联网检索《" + String((e.series || "未填作品"))
+              + "》设定（摘要 " + ((res && res.search_len) || 0)
+              + " 字）后逐句校对："
+              + (changed ? (changed + " 句建议改写，逐句点「采用」才写回")
+                         : "全部贴合角色，无需改动");
+          }
         } catch (e2) { /* apiPost 已提示 */ } finally {
           galQuotesCheckLoading.value = false;
         }
@@ -4494,6 +4547,7 @@
       }
       async function loadGallery() {
         loadingGal.value = true;
+        loadWebSearchStatus();   // v0.29.2：联网状态不挡主流程，失败静默（卡上无提示）
         try {
           var idx = await apiGet("portraits/index");
           galChars.value = (idx && idx.chars) || [];
@@ -6702,6 +6756,7 @@
         galQuotes: galQuotes, markQuotesDirty: markQuotesDirty,
         galQuotesSaving: galQuotesSaving, galQuotesGenLoading: galQuotesGenLoading,
         galQuotesCheckLoading: galQuotesCheckLoading,
+        wsStatusText: wsStatusText,
         galQuotesSuggest: galQuotesSuggest, galQuotesMsg: galQuotesMsg,
         galQuotesMsgType: galQuotesMsgType,
         saveGalQuotes: saveGalQuotes, genGalQuotes: genGalQuotes,

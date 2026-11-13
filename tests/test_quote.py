@@ -132,7 +132,7 @@ with tempfile.TemporaryDirectory() as td:
 
     # ---------- 4) 校对：一一对应 + 漏项兜底 ----------
     real_resolve = webui_api.prompt_gen._resolve_provider
-    real_search = webui_api._web_search_text
+    real_search = webui_api._web_search_text_ex
     calls = []
 
     async def fake_resolve(context, provider_id=""):
@@ -142,17 +142,18 @@ with tempfile.TemporaryDirectory() as td:
 
     async def fake_search(p, query, max_results=10, timeout=25):
         check("联网校对带上了角色名", "角色甲" in query, query)
-        return "检索摘要：角色甲是某作的女主角，说话很温柔。"
+        check("查询串锚定作品（书名号打头）", "《某作》" in query, query)
+        return "检索摘要：角色甲是某作的女主角，说话很温柔。", ""
 
     webui_api.prompt_gen._resolve_provider = fake_resolve
-    webui_api._web_search_text = fake_search
+    webui_api._web_search_text_ex = fake_search
     try:
         r = asyncio.run(_call(webui_api.h_quote_check, plugin,
                               {"name": "角色甲", "series": "某作",
                                "quotes": ["原句一", "原句二"], "web": True}))
     finally:
         webui_api.prompt_gen._resolve_provider = real_resolve
-        webui_api._web_search_text = real_search
+        webui_api._web_search_text_ex = real_search
     d = r["data"]
     check("校对返回 ok 且标注 websearch+llm", r["status"] == "ok"
           and d["source"] == "websearch+llm", str(r))
@@ -168,13 +169,13 @@ with tempfile.TemporaryDirectory() as td:
 
     # 联网失败/关闭 → 降级 llm，不报错
     async def empty_search(p, query, max_results=10, timeout=25):
-        return ""
+        return "", "all_failed"
 
     async def fake_resolve2(context, provider_id=""):
         return _fake_provider('[{"text": "原句一", "note": "保留"}]')
 
     webui_api.prompt_gen._resolve_provider = fake_resolve2
-    webui_api._web_search_text = empty_search
+    webui_api._web_search_text_ex = empty_search
     try:
         r = asyncio.run(_call(webui_api.h_quote_check, plugin,
                               {"name": "角色乙", "quotes": ["原句一"], "web": True}))
@@ -182,9 +183,11 @@ with tempfile.TemporaryDirectory() as td:
                                {"name": "角色乙", "quotes": [], "web": False}))
     finally:
         webui_api.prompt_gen._resolve_provider = real_resolve
-        webui_api._web_search_text = real_search
+        webui_api._web_search_text_ex = real_search
     check("无检索结果时降级 llm 且仍可用",
           r["status"] == "ok" and r["data"]["source"] == "llm", str(r))
+    check("降级时带上人话失败原因（web_reason）",
+          bool(r["data"].get("web_reason")), str(r["data"].get("web_reason")))
     check("没有印象语时明确拒绝", r2["status"] == "error", str(r2))
 
     # ---------- 5) 导入的 series 覆盖（作品页批量导入） ----------
@@ -289,6 +292,22 @@ check("只认 get_tool 的旧版仍可用（向后兼容）", "旧版" in txt, t
 
 txt = asyncio.run(webui_api._web_search_text(_WsPlugin(_MgrNone()), "q"))
 check("既无 get_func 也无 get_tool → 空串降级", txt == "")
+
+# v0.29.2：失败原因要能回到前端（_ex 版本）
+t, why = asyncio.run(webui_api._web_search_text_ex(_WsPlugin(_MgrNone()), "q"))
+check("ex 版本：接口不兼容 → no_getter", t == "" and why == "no_getter", why)
+t, why = asyncio.run(webui_api._web_search_text_ex(_WsPlugin(_MgrGetFunc([])), "q"))
+check("ex 版本：一个工具都没有 → no_tools", t == "" and why == "no_tools", why)
+t, why = asyncio.run(webui_api._web_search_text_ex(
+    _WsPlugin(_MgrGetFunc([_FakeTool("web_search_tavily",
+                                     "Error: Tavily API key is not configured in AstrBot.")])),
+    "q"))
+check("ex 版本：全部调用失败 → all_failed", t == "" and why == "all_failed", why)
+t, why = asyncio.run(webui_api._web_search_text_ex(
+    _WsPlugin(_MgrGetFunc([ok_tool])), "q"))
+check("ex 版本：成功原因码为空", "女主" in t and why == "", why)
+check("失败原因有人话文案", all(k in webui_api._WS_FAIL_TEXT
+                          for k in ("no_manager", "no_getter", "no_tools", "all_failed")))
 
 boom = _FakeTool("web_search_tavily", "", raises=True)
 good = _FakeTool("web_search_bocha", "第二个工具给出的可用摘要，长度足够")

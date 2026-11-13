@@ -2014,23 +2014,60 @@ def _tool_getter(manager):
     return None
 
 
-async def _web_search_text(plugin, query: str, max_results: int = 10,
-                           timeout: int = 25) -> str:
-    """内部 websearch 工具链（按常用顺序探测第一个真的能出结果的）。
+# 检索失败原因 → 给用户看的人话（前端弹 warning 用；空串 = 成功）
+_WS_FAIL_TEXT = {
+    "no_manager": "拿不到 AstrBot 的 LLM 工具管理器",
+    "no_getter": "AstrBot 工具管理器接口不兼容（既无 get_func 也无 get_tool）",
+    "no_tools": "AstrBot 未启用任何 web_search_* 工具（管理面板 → 提供商设置 → "
+                "启用联网搜索并填 API Key）",
+    "all_failed": "web_search 工具存在但全部调用失败（检查 API Key 是否有效、"
+                  "网络与余额）",
+}
 
-    失败/未配置/超时一律返回空串（调用方降级 LLM-only，功能不因此不可用）。
-    已激活的工具先用、禁用的后补，任何一步异常只跳过该工具。
+# 工具名 → AstrBot provider_settings 里的 Key 字段（状态页用来判断「配没配 Key」）
+_WEBSEARCH_KEY_FIELDS = {
+    "web_search_tavily": "websearch_tavily_key",
+    "web_search_bocha": "websearch_bocha_key",
+    "web_search_brave": "websearch_brave_key",
+    "web_search_baidu": "websearch_baidu_app_builder_key",
+    "web_search_exa": "websearch_exa_key",
+    "web_search_anysearch": "websearch_anysearch_key",
+    "web_search_serpapi": "websearch_serpapi_key",
+    "web_search_deepseek": "websearch_deepseek_key",
+}
+
+
+def _ws_provider_settings(plugin) -> dict:
+    """读 AstrBot 全局配置里的 provider_settings（拿不到就空 dict，别炸）。"""
+    try:
+        cfg = plugin.context.get_config()
+    except Exception:
+        return {}
+    try:
+        ps = cfg.get("provider_settings", {}) if isinstance(cfg, dict) else {}
+        return ps if isinstance(ps, dict) else {}
+    except Exception:
+        return {}
+
+
+async def _web_search_text_ex(plugin, query: str, max_results: int = 10,
+                              timeout: int = 25) -> tuple:
+    """联网检索完整版：返回 (摘要文本, 失败原因码)。
+
+    原因码见 _WS_FAIL_TEXT（"" = 成功）。v0.29.2：失败原因要能回到前端——
+    用户点了「联网补写」却拿到纯模型瞎编的结果，必须明确告诉他是没启用工具、
+    没配 Key 还是调用全挂，而不是一句含糊的「未取到网络检索」。
     """
     try:
         manager = plugin.context.get_llm_tool_manager()
         if manager is None:
             logger.warning("[" + PLUGIN_NAME + "] 拿不到 LLM 工具管理器，联网检索不可用")
-            return ""
+            return "", "no_manager"
         getter = _tool_getter(manager)
         if getter is None:
             logger.warning("[" + PLUGIN_NAME + "] FunctionToolManager 既无 get_func 也无 "
                            "get_tool，联网检索不可用（AstrBot 接口可能又改名了）")
-            return ""
+            return "", "no_getter"
         tools = []
         for name in _WEB_SEARCH_TOOL_NAMES:
             try:
@@ -2042,7 +2079,7 @@ async def _web_search_text(plugin, query: str, max_results: int = 10,
         if not tools:
             logger.info("[" + PLUGIN_NAME + "] 没有可用的 web_search_* 工具："
                         "请在 AstrBot 里启用任一联网搜索提供商并填 API Key")
-            return ""
+            return "", "no_tools"
         # 已激活优先，禁用/未激活的排后面兜底（它们的 call 里还会自己校验 Key）
         tools.sort(key=lambda t: 0 if bool(getattr(t, "active", True)) else 1)
         run_ctx = _ws_run_context(plugin)
@@ -2058,13 +2095,68 @@ async def _web_search_text(plugin, query: str, max_results: int = 10,
                 logger.info("[" + PLUGIN_NAME + "] 联网检索命中 "
                             + str(getattr(tool, "name", "?"))
                             + f"（{len(text)} 字）：{query}")
-                return text[:6000]
+                return text[:6000], ""
         logger.info("[" + PLUGIN_NAME + "] websearch 全部失败/未配 Key，降级 LLM-only："
                     + query)
+        return "", "all_failed"
     except Exception:
         logger.warning("[" + PLUGIN_NAME + "] websearch 不可用，降级 LLM-only",
                        exc_info=True)
-    return ""
+        return "", "all_failed"
+
+
+async def _web_search_text(plugin, query: str, max_results: int = 10,
+                           timeout: int = 25) -> str:
+    """内部 websearch 工具链（按常用顺序探测第一个真的能出结果的）。
+
+    失败/未配置/超时一律返回空串（调用方降级 LLM-only，功能不因此不可用）。
+    要拿失败原因（弹给用户看）请用 _web_search_text_ex。
+    """
+    return (await _web_search_text_ex(plugin, query, max_results=max_results,
+                                      timeout=timeout))[0]
+
+
+async def h_websearch_status(plugin) -> dict:
+    """联网检索可用性自检：哪些 web_search_* 工具在、激活没、Key 配没配。
+
+    详情页印象语卡进页面时拉一次，把「联网可用 / 为什么不可用」直接摆在
+    用户眼前，而不是等点了补写才发现生成的内容是瞎编的。
+    """
+    try:
+        manager = plugin.context.get_llm_tool_manager()
+    except Exception:
+        manager = None
+    if manager is None:
+        return ok({"available": False, "getter": "", "tools": [],
+                   "reason": _WS_FAIL_TEXT["no_manager"]})
+    getter = _tool_getter(manager)
+    if getter is None:
+        return ok({"available": False, "getter": "", "tools": [],
+                   "reason": _WS_FAIL_TEXT["no_getter"]})
+    ps = _ws_provider_settings(plugin)
+    tools = []
+    for name in _WEB_SEARCH_TOOL_NAMES:
+        try:
+            tool = getter(name)
+        except Exception:
+            tool = None
+        if tool is None:
+            continue
+        key_field = _WEBSEARCH_KEY_FIELDS.get(name, "")
+        has_key = False
+        try:
+            # Key 字段可能是 str 或 list（多 Key 轮换），有内容就算配了
+            has_key = bool(ps.get(key_field)) if key_field else False
+        except Exception:
+            has_key = False
+        tools.append({"name": name,
+                      "active": bool(getattr(tool, "active", True)),
+                      "key": has_key})
+    reason = "" if tools else _WS_FAIL_TEXT["no_tools"]
+    return ok({"available": bool(tools),
+               "getter": "get_func" if callable(getattr(manager, "get_func", None))
+                         else "get_tool",
+               "tools": tools, "reason": reason})
 
 
 def _character_query(name: str, series: str, extra: str = "角色设定 性格 名台词") -> str:
@@ -3620,10 +3712,13 @@ async def h_quote_gen(plugin) -> dict:
                    "或在本插件配置里指定「提示词模型 ID」")
     timeout = int(plugin._cfg("prompt_llm_timeout", 30) or 30) or 30
     search_text = ""
+    web_reason = ""
     if want_web:
-        search_text = await _web_search_text(
+        search_text, web_code = await _web_search_text_ex(
             plugin, _character_query(name, series, "角色设定 性格 名台词 口癖"),
             max_results=8)
+        if not search_text:
+            web_reason = _WS_FAIL_TEXT.get(web_code, web_code)
     segs = [_character_brief(name, series, tags)]
     if search_text:
         segs.append(_search_block(search_text))
@@ -3645,6 +3740,7 @@ async def h_quote_gen(plugin) -> dict:
     if not quotes:
         return err("LLM 没有返回可用句子，请重试")
     return ok({"quotes": quotes, "search_len": len(search_text),
+               "web_reason": web_reason,
                "source": "websearch+llm" if search_text else "llm"})
 
 
@@ -3712,10 +3808,13 @@ async def h_quote_check(plugin) -> dict:
                    "或在本插件配置里指定「提示词模型 ID」")
     timeout = int(plugin._cfg("prompt_llm_timeout", 30) or 30) or 30
     search_text = ""
+    web_reason = ""
     if want_web:
-        search_text = await _web_search_text(
+        search_text, web_code = await _web_search_text_ex(
             plugin, _character_query(name, series, "角色设定 性格 名台词 口癖"),
             max_results=8)
+        if not search_text:
+            web_reason = _WS_FAIL_TEXT.get(web_code, web_code)
     segs = [_character_brief(name, series, tags)]
     if search_text:
         segs.append(_search_block(search_text))
@@ -3753,6 +3852,7 @@ async def h_quote_check(plugin) -> dict:
     changed = sum(1 for it in items if it["text"] != it["old"])
     return ok({"items": items, "changed": changed,
                "search_len": len(search_text),
+               "web_reason": web_reason if not search_text else "",
                "source": "websearch+llm" if search_text else "llm"})
 
 
@@ -3823,6 +3923,8 @@ def register(plugin) -> None:
         # v0.29.0：角色详情页印象语——只改 quote/quotes 的轻量保存 + 逐句校对
         ("/pools/quote_save", h_quote_save, ["POST"]),
         ("/quote_check", h_quote_check, ["POST"]),
+        # v0.29.2：联网检索可用性自检（详情页印象语卡常驻显示，失败早知道）
+        ("/websearch/status", h_websearch_status, ["GET"]),
         ("/pools/duplicates", h_duplicates, ["GET", "POST"]),
         ("/pools/dedupe", h_dedupe, ["POST"]),
         ("/relational/status", h_relational_status, ["GET", "POST"]),

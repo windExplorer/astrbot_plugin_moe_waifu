@@ -2,6 +2,14 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.29.2 (2026-11-14)
+
+- **修「联网失败不吭声」**——用户拿着「AI 补写 5 句（联网）」生成的《异环》安魂曲印象语来对质：5 句全是把「安魂曲」当哥特歌姬的望文生义（弹安魂曲、唱到最后一刻、本小姐……），和真角色（嗜睡番茄萝莉、第三人称自称）完全不搭。这正是「联网失败却只给一行小字」的直接后果：v0.29.1 的提示埋在印象语卡的小 alert 里，用户根本注意不到，还以为真的联网了。
+  - **失败原因带回前端**：`_web_search_text` 拆出 `_web_search_text_ex` 返回 `(摘要, 失败原因码)`（`no_manager` / `no_getter` / `no_tools` / `all_failed`），`_WS_FAIL_TEXT` 映射成人话；`/quote_gen`、`/quote_check` 返回 `web_reason` 字段。
+  - **失败必须又响又明**：详情页「AI 补写 / 联网校对」、编辑抽屉「AI 补写印象语」三条链路，凡是要联网而没拿到资料的，一律 `message.warning` toast + 红色 alert 双提示，写清「没拿到网络资料：<原因>。本次只按角色名生成，可能与原作不符」；成功时则明示「已联网核对《作品》设定（摘要 N 字）」。
+  - **进页面就自检**：新端点 `GET /websearch/status` 报告哪些 `web_search_*` 工具在、激活没、Key 配没配（读 AstrBot `provider_settings` 的 `websearch_*_key`，含 baidu 的 `websearch_baidu_app_builder_key` 特例）；详情页印象语卡加载时拉一次，卡顶常驻一行「联网检索可用：tavily / bocha（未配 Key）…」或「⚠️ 联网检索不可用：<原因>」——点按钮之前就知道联网是好是坏。
+  - 测试：`test_quote.py` 新增 `_ex` 版原因码 4 项 + 降级带 `web_reason` 1 项，monkeypatch 目标同步改为 `_web_search_text_ex`；`test_webui_contract` 路由清单补 `/websearch/status`。
+
 ## v0.29.1 (2026-11-14)
 
 - **修「印象语联网校对其实从来没联网成功」**——用户反馈「总是只按角色名生成，和作品里实际的角色设定对不上」，实查是两层问题叠加：

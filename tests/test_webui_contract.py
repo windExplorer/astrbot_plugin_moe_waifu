@@ -81,6 +81,7 @@ ROUTES = """
 /portraits/set_active /trash/list /trash/restore /trash/purge
 /batch/preview /batch/reroll
 /pools/quote_save /quote_check
+/websearch/status
 """.split()
 
 STORE_METHODS = """
