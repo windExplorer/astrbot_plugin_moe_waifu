@@ -14,9 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import prompt_gen  # noqa: E402
 
 
-def check(name, cond):
+def check(name, cond, detail=""):
     if not cond:
-        print(f"FAIL: {name}")
+        print(f"FAIL: {name} {detail}")
         sys.exit(1)
     print(f"ok: {name}")
 
@@ -35,8 +35,9 @@ ENTRY = {"id": "miku", "name": "初音未来", "series": "Vocaloid",
 p1 = prompt_gen.pick_variations(12345)
 p2 = prompt_gen.pick_variations(12345)
 check("同种子同选择", p1 == p2)
-check("七个维度齐全", set(p1.keys()) == {"compose", "artstyle", "outfit", "background",
-                                     "pose", "expression", "body"})
+check("八个维度齐全（v0.25.7 加取景）",
+      set(p1.keys()) == {"compose", "framing", "artstyle", "outfit", "background",
+                         "pose", "expression", "body"})
 check("维度取自池内", p1["background"] in prompt_gen.BACKGROUNDS
       and p1["body"] in prompt_gen.BODY
       and p1["compose"] in prompt_gen.COMPOSE
@@ -85,7 +86,7 @@ check("natural 兜底按 MOSS Tag 顺序（Quality 开头）", nat.startswith("b
 check("natural 兜底保留角色 tags", "hatsune miku" in nat)
 check("natural 兜底禁质量词堆砌", "8k" not in nat and "highly detailed" not in nat)
 qwl = prompt_gen.build_t2i_qwen_local(ENTRY, prompt_gen.pick_variations(42))
-check("qwen 兜底是中文长描述", "竖版" in qwl and "。" in qwl)
+check("qwen 兜底是中文长描述", "角色立绘插画" in qwl and "。" in qwl)
 
 # 风格探测：无 astrbot 环境 → 回落 danbooru（安全默认）
 check("探测失败回落 danbooru",
@@ -386,7 +387,7 @@ check("force_single_view 置空 compose（纯函数不动原 dict）",
       and p_multi["compose"]["zh"] != "")
 check("元提示词不再硬编码「源是单人立绘」",
       "官方立绘（单人）" not in meta
-      and "多视角拼接" in meta and "收敛为单张全身立绘" in meta)
+      and "多视角拼接" in meta and "收敛为单张立绘" in meta)
 
 async def _run_i2i(seed):
     return await prompt_gen.build_generation_prompt(
@@ -471,7 +472,8 @@ check("画风 tag 进 danbooru 串",
 check("画风 tag 进 natural 兜底",
       "watercolor" in prompt_gen.build_t2i_natural_local(ENTRY, _p_az))
 check("画风进 qwen 中文兜底",
-      "整体画风为清透水彩绘本" in prompt_gen.build_t2i_qwen_local(ENTRY, _p_az))
+      "一幅清透水彩绘本的单人角色立绘插画"
+      in prompt_gen.build_t2i_qwen_local(ENTRY, _p_az))
 _az_inst = prompt_gen.build_local_instruction(ENTRY, _p_az)
 check("画风进图生图编辑指令并再锚一次辨识度",
       "把整体画风改为清透水彩绘本" in _az_inst and _az_inst.count("可辨认") >= 1)
@@ -565,5 +567,47 @@ check("describe_variations 与 variation_zh_list 同源",
 _dv_i2i = prompt_gen.describe_variations(777, force_single=True)
 check("describe_variations force_single 不含三/四视图",
       all("视图" not in zh for _, zh in _dv_i2i))
+
+# ---------- v0.25.7：画质三连（尾巴丢失 / 画风复古 / 全是全身） ----------
+# ① 取景：非全身项占多数，全身不再是默认
+_fr = prompt_gen.FRAMING
+_non_full = sum(it["w"] for it in _fr if it["zh"] and "全身" not in it["zh"])
+_total = sum(it["w"] for it in _fr)
+check("取景维度存在且偏非全身",
+      "framing" in prompt_gen.DIMS and _non_full * 100 // _total >= 60,
+      f"{_non_full}/{_total}")
+
+# ② 固有特征：尾巴/兽耳这类部件必须在指令里逐项点名
+_tail_entry = {"id": "x", "name": "狐娘", "tags_en": "1girl, fox ears, tail, long hair"}
+check("固有特征识别尾巴与兽耳",
+      "尾巴" in prompt_gen.identity_feature_text(_tail_entry)
+      and "狐狸耳" in prompt_gen.identity_feature_text(_tail_entry))
+check("无固有特征的角色返回空串",
+      prompt_gen.identity_feature_text({"tags_en": "1girl"}) == "")
+_inst_feat = prompt_gen.build_local_instruction(
+    _tail_entry, prompt_gen.pick_variations(42))
+check("编辑指令逐项锚定固有特征",
+      "尾巴" in _inst_feat and "不得丢失" in _inst_feat, _inst_feat[:120])
+check("英文特征串给 caption 用",
+      "tail" in prompt_gen.identity_feature_text(_tail_entry, "en"))
+
+# ③ 画风现代化：现代主题权重高于复古，复古 90s 已降权
+check("现代画风主题权重高于复古",
+      prompt_gen.art_theme_weight("art_modern")
+      > prompt_gen.art_theme_weight("art_retro")
+      and prompt_gen.art_theme_weight("art_retro") == 1)
+check("画风池含 2026 现代动漫画风",
+      any("现代日式动画" in str(it.get("zh") or "")
+          for it in prompt_gen.ARTSTYLES))
+check("复古 90s 已降权",
+      next(it["w"] for it in prompt_gen.ARTSTYLES if "复古 90" in str(it["zh"])) <= 2)
+
+# ④ Qwen 文生图兜底按官方公式：首句定框架、光照单独成句、不写指令腔
+_q = prompt_gen.build_t2i_qwen_local(
+    {"name": "初音未来", "tags_en": "hatsune miku, twintails"},
+    prompt_gen.pick_variations(42))
+check("Qwen 兜底首句定框架", _q.startswith("一幅"), _q[:40])
+check("Qwen 兜底光照单独成句", "光照" in _q)
+check("Qwen 兜底不写指令腔", "请画" not in _q and "帮我" not in _q)
 
 print("test_prompt_gen: ALL OK")

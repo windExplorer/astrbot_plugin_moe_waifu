@@ -247,6 +247,22 @@ COMPOSE = [
            "three-quarter view, grey background"},
 ]
 
+# 取景维度（v0.25.7）：用户反馈「批量出的图基本都是全身照，立绘不一定非要全身，
+# 半身特写也很好」。它和 COMPOSE 是两个正交维度——COMPOSE 管「有没有多视角拼接」，
+# FRAMING 管「裁到身体哪个位置」。非全身项合计 17/24 ≈ 71%，默认明显偏半身与特写，
+# 但保留 13% 不指定（交给底模与姿势自己决定）。
+FRAMING = [
+    {"w": 4, "zh": "", "en": ""},
+    {"w": 7, "zh": "半身构图（裁到腰部以上）",
+     "en": "cowboy shot, upper body visible"},
+    {"w": 6, "zh": "胸像特写（裁到胸口以上，突出面部与表情细节）",
+     "en": "close-up, portrait, upper body, face focus"},
+    {"w": 4, "zh": "膝上构图（露出膝盖以上）",
+     "en": "cowboy shot, knees visible"},
+    {"w": 3, "zh": "全身构图（完整呈现站姿与鞋子）",
+     "en": "full body, full length"},
+]
+
 EXPRESSIONS = [
     {"w": 8, "zh": "温柔微笑", "en": "smile"},
     {"w": 6, "zh": "害羞脸红", "en": "blush, shy"},
@@ -296,23 +312,40 @@ BODY = [
 # 想固定成某一款：提示词面板的「画风」chip 里锁定，或选对应的「画风 · xxx」主题。
 ARTSTYLES = [
     {"w": 8, "zh": "", "en": ""},
+    # v0.25.7：用户反馈「画风大部分太复古，想要 2026 年的现代动漫画风」。
+    # 现代系给最高权重，复古 / 工艺类整体降权（保留可手动选，但不再主导随机）。
+    {"w": 12, "zh": "现代日式动画（干净线稿 + 柔和赛璐璐 + 通透高光）",
+     "en": "modern anime illustration, clean lineart, soft cel shading, "
+           "vivid colors, detailed eyes, crisp highlights, polished finish"},
+    {"w": 11, "zh": "新海诚式电影动画（通透天空 + 体积光 + 高饱和渐变）",
+     "en": "cinematic anime, luminous sky, volumetric light, god rays, "
+           "vibrant gradient, hyper-detailed background, film-like composition"},
+    {"w": 10, "zh": "清透厚涂插画（细腻笔触 + 柔和边缘光）",
+     "en": "polished digital painting, soft brushwork, glossy highlights, "
+           "subtle rim light, refined rendering, contemporary illustration"},
+    {"w": 9, "zh": "轻小说插画（精致线稿 + 柔光 + 淡彩渐变）",
+     "en": "light novel illustration, refined lineart, soft bloom, "
+           "pastel gradient, delicate shading, modern anime art"},
+    {"w": 8, "zh": "潮流插画（高级灰 + 大面积留白 + 图形化色块）",
+     "en": "trendy illustration, muted premium palette, negative space, "
+           "graphic shapes, editorial poster vibe, contemporary design"},
     {"w": 9, "zh": "日系动画赛璐璐上色",
      "en": "anime coloring, cel shading, clean lineart, crisp highlights"},
     {"w": 8, "zh": "厚涂半写实数字绘画",
      "en": "semi-realistic, thick painting, digital painting, detailed shading"},
     {"w": 7, "zh": "清透水彩绘本",
      "en": "watercolor, traditional media, soft colors, paper texture"},
-    {"w": 6, "zh": "古典油画质感",
+    {"w": 3, "zh": "古典油画质感",
      "en": "oil painting, painterly, canvas texture, chiaroscuro"},
     {"w": 6, "zh": "赛博霓虹插画",
      "en": "cyberpunk, neon lights, high contrast, glowing, chromatic aberration"},
-    {"w": 6, "zh": "暗黑哥特插画",
+    {"w": 4, "zh": "暗黑哥特插画",
      "en": "gothic, dark fantasy, moody lighting, desaturated colors"},
-    {"w": 5, "zh": "复古 90 年代动画",
+    {"w": 2, "zh": "复古 90 年代动画",
      "en": "retro anime, 1990s, vintage, film grain, muted palette"},
-    {"w": 5, "zh": "国风水墨淡彩",
+    {"w": 3, "zh": "国风水墨淡彩",
      "en": "ink wash painting, chinese ink, sumi-e, muted colors"},
-    {"w": 4, "zh": "浮世绘木刻版画",
+    {"w": 2, "zh": "浮世绘木刻版画",
      "en": "ukiyo-e, woodblock print, flat colors, japanese art"},
     {"w": 4, "zh": "黑白漫画网点",
      "en": "manga, monochrome, screentone, comic style, lineart"},
@@ -340,31 +373,31 @@ ARTSTYLES = [
     {"w": 6, "zh": "电影感厚涂（逆光烟雾）",
      "en": "cinematic painting, volumetric light, rim light, atmospheric haze, "
            "shallow depth of field, film still composition"},
-    {"w": 5, "zh": "复古印刷海报风",
+    {"w": 2, "zh": "复古印刷海报风",
      "en": "retro print, 1970s advertisement illustration, halftone print, "
            "limited palette, offset misregistration, paper grain"},
-    {"w": 5, "zh": "岩彩重彩（矿物颜料）",
+    {"w": 2, "zh": "岩彩重彩（矿物颜料）",
      "en": "mineral pigment, gold accent, mural painting, textured pigment, "
            "dunhuang mural colors"},
-    {"w": 4, "zh": "铜版画蚀刻",
+    {"w": 2, "zh": "铜版画蚀刻",
      "en": "etching, engraving, cross-hatching, fine lines, monochrome print, "
            "intaglio texture"},
-    {"w": 4, "zh": "彩绘玻璃镶嵌",
+    {"w": 2, "zh": "彩绘玻璃镶嵌",
      "en": "stained glass, leaded lines, luminous backlit colors, glass mosaic, "
            "gothic window panes"},
-    {"w": 4, "zh": "Riso 孔版印刷",
+    {"w": 2, "zh": "Riso 孔版印刷",
      "en": "risograph, limited color palette, ink grain, misregistration, "
            "two-tone print"},
-    {"w": 4, "zh": "故障艺术 VHS",
+    {"w": 2, "zh": "故障艺术 VHS",
      "en": "glitch art, vhs, scanlines, chromatic aberration, datamosh, "
            "analog video noise"},
-    {"w": 4, "zh": "Y2K 千禧金属",
+    {"w": 2, "zh": "Y2K 千禧金属",
      "en": "y2k aesthetic, chrome, liquid metal, holographic iridescence, "
            "metallic gradient, translucent plastic"},
-    {"w": 4, "zh": "美式漫画",
+    {"w": 3, "zh": "美式漫画",
      "en": "american comic, bold ink outlines, halftone shading, dynamic angle, "
            "dramatic contrast"},
-    {"w": 4, "zh": "韩漫半写实",
+    {"w": 5, "zh": "韩漫半写实",
      "en": "manhwa style, semi-realistic, clean lineart, soft cel shading, "
            "glossy highlights"},
     {"w": 4, "zh": "丝网印刷波普",
@@ -382,6 +415,7 @@ ARTSTYLES = [
 
 DIMS = {
     "compose": COMPOSE,
+    "framing": FRAMING,
     "artstyle": ARTSTYLES,
     "outfit": OUTFITS,
     "background": BACKGROUNDS,
@@ -389,6 +423,56 @@ DIMS = {
     "expression": EXPRESSIONS,
     "body": BODY,
 }
+
+# ---------- 角色固有特征（v0.25.7） ----------
+# img2img 重绘最容易把「非人类部件」洗掉——用户实测「角色有尾巴，出来的图尾巴
+# 没了」。只写一句笼统的「保持角色辨识度」不够，必须把尾巴/兽耳/角/翅膀这些
+# 逐项点名。tags_en 是 danbooru 风格，直接子串匹配即可。
+IDENTITY_FEATURES = (
+    ("tail", "尾巴"), ("animal ears", "兽耳"), ("cat ears", "猫耳"),
+    ("fox ears", "狐狸耳"), ("dog ears", "狗耳"), ("rabbit ears", "兔耳"),
+    ("horns", "角"), ("dragon horns", "龙角"), ("single horn", "独角"),
+    ("wings", "翅膀"), ("halo", "光环"), ("elf ears", "精灵耳"),
+    ("pointy ears", "尖耳"), ("fangs", "虎牙"), ("ahoge", "呆毛"),
+    ("antenna", "触角"), ("fin ears", "鱼鳍耳"),
+    ("mechanical parts", "机械部件"), ("eyepatch", "眼罩"),
+)
+
+
+def identity_features(entry: dict) -> list:
+    """从 tags_en 里挑出角色固有特征，返回 [(en, zh)]。纯函数。"""
+    tags = str((entry or {}).get("tags_en") or "").lower()
+    if not tags:
+        return []
+    return [(en, zh) for en, zh in IDENTITY_FEATURES if en in tags]
+
+
+def identity_feature_text(entry: dict, lang: str = "zh") -> str:
+    """固有特征拼串（中文给编辑指令/中文描述，英文给 caption）。纯函数。"""
+    feats = identity_features(entry)
+    if lang == "en":
+        return ", ".join(en for en, _zh in feats)
+    return "、".join(zh for _en, zh in feats)
+
+
+# ---------- 画风主题权重（v0.25.7） ----------
+# `art_*` 纯画风主题在批量补图里等权洗牌时，复古 / 工艺类占了多数（用户反馈
+# 「大部分太复古」）。这里给每个主题一个权重：现代系 3、中性 2、复古工艺 1。
+# 只影响批量补图的主题轮换，不影响面板手动选择。
+_ART_THEME_W = {
+    "art_modern": 4, "art_shinkai": 4, "art_glossy": 3,
+    "art_cinematic": 2, "art_manhwa": 2, "art_3d": 2, "art_flat": 2,
+    "art_watercolor": 2, "art_penwash": 2, "art_cyber": 2,
+    "art_retro": 1, "art_oil": 1, "art_ink": 1, "art_ukiyoe": 1,
+    "art_gothic": 1, "art_retroprint": 1, "art_pigment": 1, "art_etching": 1,
+    "art_stainglass": 1, "art_riso": 1, "art_glitch": 1, "art_y2k": 1,
+    "art_manga": 1, "art_clay": 1, "art_pixel": 1,
+}
+
+
+def art_theme_weight(theme_id: str) -> int:
+    """`art_*` 主题在批量轮换里的相对权重（现代系更高）。纯函数。"""
+    return int(_ART_THEME_W.get(str(theme_id or ""), 2))
 
 # ---------- 主题预设（试画台「第 2 步：提示词」用） ----------
 # {dim}_kw：从对应维度池里按中文子串筛子集，再在该子集内按种子加权
@@ -462,6 +546,13 @@ THEMES = (
     # —— v0.19.0：纯画风主题。只约束 artstyle 维度（服装/背景/姿势仍按种子随机），
     #    适合「让这角色的这一批图统一成某种画风」；批量补图的内容主题轮换会自动
     #    带上它们（batch_fill.content_theme_ids 排除的只有 random 与 tpl_）。
+    # v0.25.7：现代动漫画风主题（批量轮换里权重最高，见 art_theme_weight）
+    {"id": "art_modern", "label": "画风 · 现代日式动画",
+     "artstyle_kw": ["现代日式动画"]},
+    {"id": "art_shinkai", "label": "画风 · 电影感动画（通透天空）",
+     "artstyle_kw": ["新海诚式"]},
+    {"id": "art_glossy", "label": "画风 · 清透厚涂",
+     "artstyle_kw": ["清透厚涂"]},
     {"id": "art_watercolor", "label": "画风 · 清透水彩", "artstyle_kw": ["水彩"]},
     {"id": "art_oil", "label": "画风 · 古典油画", "artstyle_kw": ["油画"]},
     {"id": "art_ink", "label": "画风 · 国风水墨", "artstyle_kw": ["水墨"]},
@@ -765,7 +856,8 @@ def force_single_view(picks: dict) -> dict:
 
 # 维度展示顺序（预览面板 chip 与变化短语列表共用；v0.14.0 提取为常量单一来源）
 # v0.19.0：新增「画风」维度，排在构图之后（先定风格，再定穿什么/在哪）
-DIM_ORDER = (("构图视图", "compose"), ("画风", "artstyle"), ("服装", "outfit"),
+DIM_ORDER = (("构图视图", "compose"), ("构图取景", "framing"),
+             ("画风", "artstyle"), ("服装", "outfit"),
              ("背景与光照", "background"), ("姿势动作", "pose"),
              ("表情", "expression"), ("体型", "body"))
 
@@ -811,6 +903,9 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "") -> str:
     for label, zh in variation_zh_list(picks):
         if label == "构图视图":
             parts.append(f"把构图改为{zh}")
+        elif label == "构图取景":
+            # v0.25.7：取景决定人物在画面里占多大、裁到哪，必须和姿势分开说
+            parts.append(f"把画面取景改为{zh}，人物大小随取景调整")
         elif label == "画风":
             # v0.19.0：画风是整体观感，指令里单独点明「面部与发型保持可辨认」
             # （句尾虽已统一强调，但画风类改动最容易把脸画丢，这里再锚一次）
@@ -832,7 +927,15 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "") -> str:
     # 图生图指令必须明确要求同一张图内并列多个视角。
     compose_zh = str((picks.get("compose") or {}).get("zh") or "")
     multi_view = ("三视图" in compose_zh) or ("四视图" in compose_zh)
+    framing_zh = str((picks.get("framing") or {}).get("zh") or "").strip()
     tail = "。保持人物的面部特征、发型发色与角色辨识度不变，只做上述改动；"
+    # v0.25.7：尾巴 / 兽耳 / 角 / 翅膀这类「非人类部件」是 img2img 最容易洗掉的
+    # 东西（用户实测「有尾巴的角色出图尾巴没了」）。笼统说「保持辨识度」不够，
+    # 必须逐项点名。
+    feat_zh = identity_feature_text(entry, "zh")
+    if feat_zh:
+        tail += (f"角色固有的「{feat_zh}」必须原样保留、清晰可见，"
+                 f"不得丢失、缩减或改写成别的部件；")
     # v0.13.3：非多视图指令必须显式处理「源是多视图设定稿」的情况——
     # 编辑类模型（Qwen 2.1 Edit）会强烈复刻输入图布局，只说「输出单人
     # 完整竖版立绘」拉不回单图，必须写明「只保留一个视角、去掉拼接」。
@@ -842,16 +945,21 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "") -> str:
     pose_zh = str((picks.get("pose") or {}).get("zh") or "").strip()
     if pose_zh and not multi_view:
         tail += f"姿势以「{pose_zh}」为唯一姿势，不要保留原姿势；"
+    # v0.25.7：不再一律「完整竖版立绘」——取景由 framing 维度决定
     tail += ("在同一张图内并列展示上述各个视角，输出角色设定稿"
              if multi_view
-             else "画面中只出现这一个人物、只保留一颗头部，"
-                  "输出单人完整竖版立绘；若参考图是多视角拼接的角色设定稿，"
-                  "只保留其中一个视角（通常是正面），去掉其余视角的拼接")
+             else "画面中只出现这一个人物、只保留一颗头部，输出单人竖版立绘"
+                  + (f"（{framing_zh}）" if framing_zh else "")
+                  + "；若参考图是多视角拼接的角色设定稿，"
+                    "只保留其中一个视角（通常是正面），去掉其余视角的拼接")
     if not parts:
-        return ("根据参考图重新绘制该角色的单人完整竖版立绘"
-                "（画面中只出现这一个人物；若参考图是多视角拼接的角色设定稿，"
-                "只保留其中一个视角、通常是正面，去掉其余视角的拼接）"
-                "，保持人物的面部特征、发型发色与角色辨识度不变")
+        keep = ("，保持人物的面部特征、发型发色与角色辨识度不变"
+                + (f"，角色固有的「{feat_zh}」必须原样保留" if feat_zh else ""))
+        return ("根据参考图重新绘制该角色的单人竖版立绘"
+                + (f"（{framing_zh}）" if framing_zh else "")
+                + "（画面中只出现这一个人物；若参考图是多视角拼接的角色设定稿，"
+                  "只保留其中一个视角、通常是正面，去掉其余视角的拼接）"
+                + keep)
     return "，".join(parts) + tail
 
 
@@ -864,8 +972,15 @@ def build_t2i_prompt(entry: dict, picks: dict) -> str:
     base = "1girl, solo, best quality, looking at viewer"
     tags = str(entry.get("tags_en") or "").strip().rstrip(",")
     extra = []
+    # v0.25.7：取景紧跟质量词；姿势 tag 里与取景矛盾的 "full body" 要摘掉
+    # （否则「upper body」+「full body」同串，底模会按后者画全身）
+    framing_en = str((picks.get("framing") or {}).get("en") or "").strip().strip(",")
+    if framing_en:
+        extra.append(framing_en)
     for tag in ("artstyle", "compose", "outfit", "background", "pose", "expression", "body"):
         en = str((picks.get(tag) or {}).get("en") or "").strip().strip(",")
+        if tag == "pose" and en and framing_en and "full body" not in framing_en:
+            en = re.sub(r",\s*,", ",", en.replace("full body", "")).strip(", ")
         if en:
             extra.append(en)
     segs = [base]
@@ -882,18 +997,27 @@ def build_t2i_natural_local(entry: dict, picks: dict, custom: str = "") -> str:
     按 MOSS-Image 规范的 Tag 串顺序拼（Quality → Character/Series → General）：
     MOSS 三式混用皆可，本地不写长句是保底——真 caption 交给 LLM 通道。
     """
-    segs = ["best quality, highres, solo, full body portrait"]
-    # v0.19.0：画风 tag 紧跟质量词，再上角色 tags、其余维度
+    # v0.25.7：不再硬编码 full body portrait——取景交给 framing 维度
+    segs = ["best quality, highres, solo"]
+    # v0.19.0：画风 tag 紧跟质量词，再上取景、角色 tags、其余维度
     az = str((picks.get("artstyle") or {}).get("en") or "").strip().strip(",")
     if az:
         segs.append(az)
+    framing_en = str((picks.get("framing") or {}).get("en") or "").strip().strip(",")
+    if framing_en:
+        segs.append(framing_en)
     tags = str(entry.get("tags_en") or "").strip().rstrip(",")
     if tags:
         segs.append(tags)
     for tag in ("compose", "outfit", "background", "pose", "expression", "body"):
         en = str((picks.get(tag) or {}).get("en") or "").strip().strip(",")
+        if tag == "pose" and en and framing_en and "full body" not in framing_en:
+            en = re.sub(r",\s*,", ",", en.replace("full body", "")).strip(", ")
         if en:
             segs.append(en)
+    feats = identity_feature_text(entry, "en")
+    if feats:
+        segs.append(f"keep {feats} clearly visible")
     extra = str(custom or "").strip().strip(",")
     if extra:
         segs.append(extra)
@@ -901,28 +1025,48 @@ def build_t2i_natural_local(entry: dict, picks: dict, custom: str = "") -> str:
 
 
 def build_t2i_qwen_local(entry: dict, picks: dict, custom: str = "") -> str:
-    """Qwen-Image-2.1 文生图用：中文长描述本地兜底（官方格式是约 20 句长段，
-    本地只能给个结构完整的短版，真长段交给 LLM 通道）。"""
-    zh = [str((picks.get(k) or {}).get("zh") or "").strip().strip("。")
-          for k in ("compose", "background", "outfit", "pose", "expression", "body")]
-    # v0.19.0：画风写成一句独立的「整体画风为…」，放在描述最前（先定风格）
+    """Qwen-Image-2.1 文生图用：按官方黄金公式拼的本地兜底短版。
+
+    官方指南给的顺序是「媒介 → 主体 → 动作 / 关系 → 构图 → 光照 → 材质」，
+    一段连贯自然语言、每个属性紧跟它修饰的对象、光照单独成句、只描述成品而
+    不写「请画/帮我生成」这类指令（v0.25.7 按该口径重排；真长段仍交给 LLM）。
+    """
+    name = str(entry.get("name") or "").strip() or "该角色"
     az = str((picks.get("artstyle") or {}).get("zh") or "").strip().strip("。")
-    if az:
-        zh.insert(0, f"整体画风为{az}")
+    framing_zh = str((picks.get("framing") or {}).get("zh") or "").strip().strip("。")
+    # ① 媒介 + 画风（首句定框架）
+    medium = f"一幅{az or '现代日式动画风格'}的单人角色立绘插画"
+    # ② 主体：角色 + 固有特征逐项点名（尾巴/兽耳/角这些最容易被省略）
+    subj = f"画面主体是{name}"
+    feats = identity_feature_text(entry, "zh")
+    if feats:
+        subj += f"，角色的{feats}清晰可见、不可省略"
+    tags = str(entry.get("tags_en") or "").strip().rstrip(",")
+    if tags:
+        subj += f"，外观参照这些特征：{tags}"
+    # ③ 动作 / 服装 / 表情
+    acts = [str((picks.get(k) or {}).get("zh") or "").strip().strip("。")
+            for k in ("pose", "outfit", "expression", "body")]
+    acts = [s for s in acts if s]
+    if acts:
+        subj += "，" + "；".join(acts)
+    # ④ 构图：视图数 + 取景
+    if _compose_is_multi(picks):
+        comp = "同一张图内并列展示正面、侧面、背面的角色设定稿"
+    else:
+        comp = "单人画面、只保留一个头部" + (f"，{framing_zh}" if framing_zh else "")
+    # ⑤ 背景 ⑥ 光照（单独成句）
+    bg = str((picks.get("background") or {}).get("zh") or "").strip().strip("。")
+    light = "光照自然通透，主光柔和、边缘有一层淡轮廓光，明暗过渡细腻"
+    segs = [medium, subj, comp]
+    if bg:
+        segs.append(bg)
+    segs.append(light)
     extra = str(custom or "").strip().strip("。")
     if extra:
-        zh.append(extra)
-    zh = [s for s in zh if s]
-    tags = str(entry.get("tags_en") or "").strip().rstrip(",")
-    head = ("一幅在同一张图内并列展示正面、侧面、背面多视角的角色设定稿"
-            if _compose_is_multi(picks)
-            else "一幅单人完整竖版角色立绘插画（画面中只有一个人物）")
-    lines = [head + "，构图干净、光影柔和、细节精致"]
-    if zh:
-        lines.append("；".join(zh))
-    if tags:
-        lines.append(f"角色外观特征（英文 tags）：{tags}")
-    return "。".join(lines) + "。"
+        segs.append(extra)
+    segs.append("整体干净利落、细节精致，画面里不出现第二个人物")
+    return "。".join(s.strip("。") for s in segs if str(s).strip()) + "。"
 
 
 # ---------- LLM 通道 ----------
@@ -932,43 +1076,53 @@ _SYSTEM_PROMPT = (
     "编辑由自然语言指令驱动）撰写图生图编辑指令。"
     "写法要点：一句话内「动作+目标+约束」，句尾强调保持人物面部特征、"
     "发型发色与角色辨识度不变；避免一次塞太多改动。"
+    "若给定了「角色固有特征」（尾巴、兽耳、角、翅膀、光环等），必须逐项写明"
+    "「原样保留、清晰可见、不得丢失或改写」——编辑模型最容易把这些非人类"
+    "部件洗掉，笼统的「保持辨识度」不够。"
     "若改动维度里有「画风」，把它写成「把整体画风改为…（人物面部与发型保持可辨认）」，"
     "画风类改动最容易把脸画丢，必须点明保持辨识度。"
+    "若改动维度里有「构图取景」，明确写出裁切范围（半身 / 胸像特写 / 膝上 /"
+    " 全身），不要默认全身；取景与姿势是两件事，分开表述。"
     "画面纪律（必须写进指令）：画面中只允许出现这一个人物、只保留一颗头部；"
     "改动姿势时以新姿势为唯一姿势，绝不能把原姿势与新姿势同时画出来"
     "（两个头/两个身体/分身都是严重错误）。"
     "输出纪律：只输出一条简体中文编辑指令本身——不要解释、不要引号、"
-    "不要 markdown、不要分点，总长不超过 110 字。"
+    "不要 markdown、不要分点，总长不超过 130 字。"
 )
 
 # 文生图（natural 系底模，如 Moss-Image）：MOSS-Image 规范 A 档——英文 caption、
-# 单主体一段描述、约 15~40 词、禁质量词堆砌、身份锚定逐项写明。
+# 单主体一段描述、约 20~60 词、禁质量词堆砌、身份锚定逐项写明。
 _SYSTEM_T2I_NATURAL = (
-    "你为 Moss-Image（自然语言系文生图模型，英文效果最好）撰写单人角色立绘的"
-    "英文提示词。写法：一段连贯的英文描述（caption），覆盖主体外观、服装、"
-    "动作姿势、表情、场景与光照、构图（默认 full body portrait, solo, "
-    "single character——画面中只有这一个人物；多视图要求时用 "
-    "character sheet, multiple views, front view, side view, back view）；角色身份锚定——"
-    "把已给 tags 里的发色/发型/瞳色/标志性特征自然融入描述，点名用"
-    "「规范英文名（作品名）」句式。若维度里给了「画风」，把它翻成对应英文风格词"
-    "（如 watercolor / oil painting / cel shading / ink wash / pixel art）写进描述，"
-    "整段保持同一画风。禁止：8k/highly detailed 之类质量词堆砌"
-    "（最多以 best quality, highres 开头）、markdown、解释性文字。"
-    "输出纪律：只输出提示词本体，一段话，15~50 词，不超过 80 词。"
+    "你为 Qwen-Image-2.1 / Moss-Image 等自然语言系文生图模型撰写单人角色"
+    "立绘的英文提示词。写法：一段连贯英文 caption，按「媒介与画风 → 主体与"
+    "固有特征 → 动作姿势 → 服装 → 构图取景 → 背景与光照 → 材质细节」的顺序展开，"
+    "描述成品画面而不是下指令（不要写 please draw / generate）。"
+    "输出必须是 solo, single character（画面里只有这一个人物）。"
+    "角色身份锚定：把已给 tags 里的发色/发型/瞳色/标志性特征自然融入描述，"
+    "并单独点名「角色固有特征」（tail / animal ears / horns / wings / halo 等）"
+    "必须清晰可见、不可省略——这类部件最容易在重绘时消失。"
+    "构图取景按给定维度写（close-up / portrait / cowboy shot / full body），"
+    "未给定时优先半身或胸像，不要默认 full body。"
+    "画风维度翻成对应英文风格词（modern anime illustration / cel shading / "
+    "cinematic anime / watercolor…），整段保持同一画风。"
+    "禁止：8k/highly detailed 之类质量词堆砌（最多以 best quality, highres 开头）、"
+    "markdown、解释性文字。"
+    "输出纪律：只输出提示词本体，一段话，20~60 词，不超过 90 词。"
 )
 
-# 文生图（Qwen-Image-2.1）：官方格式——一段连贯长描述（本插件精简到 5~10 句），
-# 中文优先（Qwen 原生中文最好），不写比例与画质套话。
+# 文生图（Qwen-Image-2.1）：官方黄金公式——媒介与画风 → 主体 → 动作 → 服装 →
+# 构图取景 → 背景 → 光照 → 材质，一段连贯中文描述，光照单独成句，只描述成品。
 _SYSTEM_T2I_QWEN = (
-    "你为 Qwen-Image-2.1（通义千问图像模型，文生图吃官方格式的连贯长描述）"
-    "撰写单人角色立绘提示词。写法：一段连贯的中文描述（5~10 句），覆盖角色"
-    "外观（把已给 tags 的发色/发型/瞳色/服装特征写成自然语句）、服装、姿势、"
-    "表情、背景环境与光影、构图（默认单人完整竖版立绘，画面中只有一个人物、"
-    "一颗头部；若改动维度要求三/四视图，"
-    "则写成同一张图内并列展示正面、侧面、背面的角色设定稿）；若维度里给了「画风」，"
-    "把它写成一句「整体画风为…」并让全段描述都贴合该画风（上色方式、笔触、"
-    "光影质感跟着变）；不写比例数字、"
-    "不写 best quality 之类画质套话、不用 markdown、不写标签串。"
+    "你为 Qwen-Image-2.1 撰写单人角色立绘的文生图提示词。严格按官方黄金公式"
+    "的顺序写：媒介与画风 → 主体（角色名 + 外观 + 固有特征）→ 动作与姿势 →"
+    "服装 → 构图取景 → 背景环境 → 光照 → 材质与细节；每个属性紧跟它修饰的"
+    "对象，写成一段连贯中文描述（5~10 句），首句先定框架。"
+    "必须遵守：① 角色固有特征（尾巴、兽耳、角、翅膀、光环等，若有）逐项写进"
+    "主体描述，并强调「清晰可见、不可省略」；② 光照单独成句；③ 构图取景按"
+    "给定维度写（半身 / 胸像特写 / 膝上 / 全身），未给定时优先半身或胸像，"
+    "不要默认全身；④ 只描述成品画面，绝不写「请画」「帮我生成」这类指令；"
+    "⑤ 画面中只有这一个人物、只保留一颗头部，不出现第二个人；"
+    "⑥ 不写比例数字、不写 best quality 之类画质套话、不写标签串、不用 markdown。"
     "输出纪律：只输出提示词本体一段话，不要解释、不要引号、不要分点。"
 )
 
@@ -979,10 +1133,14 @@ def build_meta_prompt(entry: dict, picks: dict, custom: str = "") -> str:
     tags = str(entry.get("tags_en") or "").strip() or "无"
     lines = [
         f"角色：{name}（出自 {series}），特征 tags：{tags}。",
+        # v0.25.7：尾巴/兽耳/角/翅膀这类部件必须在指令里逐项点名保留
+        (f"必须保留的固有特征：{identity_feature_text(entry, 'zh')}"
+         "（原样保留、清晰可见，不得丢失或改写）。"
+         if identity_feature_text(entry, "zh") else ""),
         # v0.13.3：源图不再硬编码「单人立绘」——生成源可能是多视图设定稿，
         # 硬编码会让 LLM 写不出「转单图」指令，输出复刻设定稿布局（实测）。
         "参考图是该角色的一条生成源：可能是单张立绘，也可能是多视角拼接的"
-        "角色设定稿；若参考图是多视角设定稿，输出必须收敛为单张全身立绘"
+        "角色设定稿；若参考图是多视角设定稿，输出必须收敛为单张立绘"
         "（保留其中一个视角，通常是正面），不要保留拼接布局。"
         "本轮由抽签决定的改动维度：",
     ]
@@ -994,12 +1152,15 @@ def build_meta_prompt(entry: dict, picks: dict, custom: str = "") -> str:
     extra = str(custom or "").strip()
     if extra:
         lines.append(f"- 用户附加要求：{extra}")
+    framing_zh = str((picks.get("framing") or {}).get("zh") or "").strip()
     goal = ("角色是二次元角色；本轮要求在同一张图内并列展示正面、侧面、背面等"
             "多个视角，输出角色设定稿，不要退化成单张立绘。"
             if _compose_is_multi(picks)
-            else "角色是二次元角色，目标是单人完整竖版立绘；画面中只允许出现"
-                 "一个人物、一颗头部，改动姿势时以新姿势为唯一姿势，"
-                 "不要同时呈现改动前后的两个状态。")
+            else "角色是二次元角色，目标是单张立绘"
+                 + (f"（{framing_zh}）" if framing_zh
+                    else "，构图取景按上面给定的维度")
+                 + "；画面中只允许出现一个人物、一颗头部，改动姿势时以新姿势为"
+                   "唯一姿势，不要同时呈现改动前后的两个状态。")
     lines += [
         "请把以上改动自然融合成一条编辑指令；未列出的维度一律不要改动。",
         goal,
@@ -1094,25 +1255,38 @@ def build_t2i_meta_prompt(entry: dict, picks: dict, style: str,
     series = str(entry.get("series") or "").strip()
     tags = str(entry.get("tags_en") or "").strip() or "无"
     extra = str(custom or "").strip()
+    feat_zh = identity_feature_text(entry, "zh")
+    feat_en = identity_feature_text(entry, "en")
     if style == "qwen":
         head = f"角色：{name}" + (f"（出自 {series}）" if series else "")
         segs = [f"{head}。外观特征 tags（供参考，需转写成自然语句）：{tags}。"]
+        if feat_zh:
+            segs.append(f"必须逐项写进主体描述的固有特征：{feat_zh}"
+                        "（强调清晰可见、不可省略）。")
         segs += [f"{label}：{zh}" for label, zh in variation_zh_list(picks)]
         if extra:
             segs.append(f"用户附加要求：{extra}")
-        segs.append("目标是同一张图内并列展示多视角的角色设定稿，请写成一段连贯中文长描述。"
-                    if _compose_is_multi(picks)
-                    else "目标是单人完整竖版立绘，请写成一段连贯中文长描述。")
-        return "\n".join(segs)
+        segs.append(
+            "目标是同一张图内并列展示多视角的角色设定稿，请按官方公式"
+            "（媒介与画风 → 主体 → 动作 → 服装 → 构图 → 背景 → 光照 → 材质）"
+            "写成一段连贯中文长描述。"
+            if _compose_is_multi(picks)
+            else "目标是单张角色立绘（构图取景以上面的维度为准，不要默认全身），"
+                 "请按官方公式（媒介与画风 → 主体 → 动作 → 服装 → 构图 → 背景 →"
+                 " 光照 → 材质）写成一段连贯中文长描述。")
+        return "\n".join([s for s in segs if s])
     # natural（MOSS 口径）
     head = f"Character: {name}" + (f" ({series})" if series else "")
     segs = [f"{head}. Identity tags (anchor these features verbatim): {tags}."]
+    if feat_en:
+        segs.append(f"Must appear and stay clearly visible: {feat_en}.")
     segs += [f"{label}: {zh}" for label, zh in variation_zh_list(picks)]
     if extra:
         segs.append(f"User extra requirement: {extra}")
-    segs.append("Target: a single-character full-body portrait illustration. "
+    segs.append("Target: one single-character illustration; framing follows the "
+                "given composition dimension (do not default to full body). "
                 "Write ONE connected English caption.")
-    return "\n".join(segs)
+    return "\n".join([s for s in segs if s])
 
 
 def _t2i_local_of(style: str, entry: dict, picks: dict, custom: str = "") -> tuple:

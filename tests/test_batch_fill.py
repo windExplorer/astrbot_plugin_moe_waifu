@@ -142,7 +142,8 @@ def main():
     fake_prompt_gen = types.SimpleNamespace(
         THEMES=real_pg.THEMES,
         build_generation_prompt=async_init(lambda *a, **k: ("p", "local")),
-        describe_variations=lambda *a, **k: [])  # v0.20.0：随档维度（桩不给真值）
+        describe_variations=lambda *a, **k: [],  # v0.20.0：随档维度（桩不给真值）
+        art_theme_weight=lambda t: 2)            # v0.25.7：画风主题加权
     fake_pool = types.SimpleNamespace(
         portrait_seed_int=lambda *a: 1)
 

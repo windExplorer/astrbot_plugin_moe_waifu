@@ -66,6 +66,11 @@ def theme_plan(char_id: str, salt: str, n: int, have: int = 0,
         return []
     content = [t for t in ids if not str(t).startswith("art_")]
     art = [t for t in ids if str(t).startswith("art_")]
+    # v0.25.7：画风主题按现代化程度加权入池（现代系 3~4、中性 2、复古工艺 1），
+    # 洗牌时现代画风被抽中的概率明显高于复古（用户反馈「大部分太复古」）。
+    art_pool: list = []
+    for t in art:
+        art_pool.extend([t] * int(prompt_gen.art_theme_weight(t)))
     base = f"{salt}|batch|{char_id}|{date}|{int(have or 0)}"
 
     def shuffled(lst: list, tag: str) -> list:
@@ -83,7 +88,7 @@ def theme_plan(char_id: str, salt: str, n: int, have: int = 0,
     while len(out) < n and round_no < 64:
         # 第一轮只用没用过的主题；用尽后放宽，保证 n 张凑得齐
         cpool = shuffled(content, f"c{round_no}")
-        apool = shuffled(art, f"a{round_no}")
+        apool = shuffled(art_pool, f"a{round_no}")
         if round_no == 0:
             cpool = [t for t in cpool if t not in used_set]
             apool = [t for t in apool if t not in used_set]
