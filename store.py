@@ -605,7 +605,10 @@ class Store:
             " verified, strategy_json, cover_path, category, tier, quote,"
             " quotes_json, color, created_at) "
             "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
-            "ON CONFLICT(char_id) DO UPDATE SET pack_id=excluded.pack_id,"
+            # 跨卷重复 id：先同步到的卷胜。game 卷按文件名排在 genshin /
+            # wuthering_waves 等遗留卷之前，后到的旧卷不能把角色抢过去，
+            # 否则异环 20 位会挂在遗留卷上、工坊卷筛选错乱（v0.25.1）。
+            "ON CONFLICT(char_id) DO UPDATE SET pack_id=characters.pack_id,"
             " work_id=excluded.work_id, name=excluded.name,"
             " tags_en=excluded.tags_en, verified=excluded.verified,"
             " strategy_json=excluded.strategy_json,"

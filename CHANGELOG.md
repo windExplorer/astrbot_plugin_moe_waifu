@@ -2,6 +2,13 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.25.1 (2026-11-13)
+
+- **修跨卷重复角色的卷归属**：v0.25.0 切读路径后，`migrate_relational` 按文件名顺序逐卷同步（anime → game → genshin → nte → wuthering_waves…），而 `_upsert_character` 的 `ON CONFLICT` 会把 `pack_id` 改成后同步的卷——旧三游戏卷排在 `game` 之后，会把异环 20 位「抢」到 genshin 等遗留卷上，工坊按卷筛选和候选排序都跟着错位。
+  - 改为**先见者胜**：`ON CONFLICT(char_id)` 只更新字段（name / tags / strategy / cover …），**不再改 `pack_id`（归属卷）**。遗留卷同步后自然变空（`packs` 里留空卷，不影响抽卡与候选）。
+  - 增补守卫：同一 `char_id` 同时出现在 game 与遗留卷时，角色仍归 game，遗留卷角色计数为 0。
+  - 验证：18 个自检脚本全绿。
+
 ## v0.25.0 (2026-11-13)
 
 - **关系模型改造 阶段 2：读路径切到 SQLite 新表，抽卡 / 工坊正式收敛到三游戏**。

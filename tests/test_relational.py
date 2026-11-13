@@ -211,6 +211,24 @@ with tempfile.TemporaryDirectory() as td:
               "SELECT 1 FROM characters WHERE char_id='march_7th'").fetchone() is None)
     check("读路径立刻看到改动",
           len([e for p in st.load_packs() for e in p["entries"]]) == 3)
+
+    # 12) 跨卷重复 id：先同步的卷胜，遗留卷不能把角色抢过去
+    dump(pools / "zolddup.json", "zolddup", [
+        {"id": "ganyu", "name": "甘雨旧卷", "series": "原神",
+         "tags_en": "1girl", "verified": False, "category": "game",
+         "strategy": {}},
+    ])
+    st.sync_pack_file(pools / "zolddup.json")
+    row = st._conn.execute(
+        "SELECT pack_id FROM characters WHERE char_id='ganyu'").fetchone()
+    game_pack = st._conn.execute(
+        "SELECT id FROM packs WHERE name='game'").fetchone()
+    check("跨卷重复不抢卷（先见者胜）", row["pack_id"] == game_pack["id"],
+          str(dict(row)))
+    check("遗留卷没有抢到角色",
+          st._conn.execute(
+              "SELECT COUNT(*) AS n FROM characters c JOIN packs p ON p.id=c.pack_id"
+              " WHERE p.name='zolddup'").fetchone()["n"] == 0)
     st.close()
 
 print("test_relational: ALL OK")
