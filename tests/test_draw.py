@@ -204,6 +204,26 @@ check("img2img 无模板图且库空→老链路",
       draw.plan_source("img2img", 0, 5, False, 0, 0) == "generate")
 # 非法 mode 当 mix
 check("非法 mode→mix", draw.plan_source("what", 2, 5, True, 0, 100) == "generate_i2i")
+
+# ---------- explain_decision（v0.19.4：这次为什么这么出图，落库+日志+工坊同一句） ----------
+check("说明-当日复用",
+      "复用当日立绘" in draw.explain_decision("mix", "reuse_today", 3, 5, True))
+_az = draw.explain_decision("img2img", "generate_i2i", 5, 5, True)
+check("说明-img2img 满配额仍现画", "只用图生图模板" in _az and "仍现画" in _az)
+_az2 = draw.explain_decision("img2img", "from_pool", 5, 5, False)
+check("说明-img2img 无出卡源→回退取库",
+      "未指定「出卡图生图源」" in _az2 and "回退" in _az2)
+check("说明-pool 模式", "只用立绘库" in draw.explain_decision("pool", "from_pool", 2, 5, True))
+_full = draw.explain_decision("mix", "from_pool", 5, 5, True, 50, 10)
+check("说明-mix 满配额取库(不浪费算力)", "已满配额" in _full)
+_miss = draw.explain_decision("mix", "from_pool", 2, 5, True, 50, 80)
+check("说明-mix 掷点未命中", "掷点 80" in _miss and "≥" in _miss)
+_noref = draw.explain_decision("mix", "from_pool", 2, 5, False, 50, 10)
+check("说明-mix 命中但没出卡源→回退", "未指定" in _noref)
+_hit = draw.explain_decision("mix", "generate_i2i", 2, 5, True, 50, 10)
+check("说明-mix 掷点命中", "掷点 10" in _hit and "<" in _hit)
+check("说明-库存空老链路", "文生图" in draw.explain_decision("mix", "generate", 0, 5, False))
+check("说明-脏输入不抛异常", isinstance(draw.explain_decision("", "", 0, 0, False), str))
 # 概率钳制
 check("i2i_prob=100 必中", draw.plan_source("mix", 2, 5, True, 99, 100) == "generate_i2i")
 check("i2i_prob=0 不中", draw.plan_source("mix", 2, 5, True, 0, 0) == "from_pool")

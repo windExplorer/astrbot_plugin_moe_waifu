@@ -692,5 +692,58 @@ def plan_source(mode: str, pool_size: int, quota: int, has_ref: bool,
     return "generate_i2i" if has_ref else "generate"
 
 
+def explain_decision(mode: str, decision: str, pool_size: int, quota: int,
+                     has_ref: bool, i2i_prob: int = 50, roll: int = 0) -> str:
+    """把「这次为什么这么出图」翻成一句可读的中文原因（纯函数，可测）。
+
+    v0.19.4：用户实报「配置只用图生图模板却一直取立绘」——只靠最终 decision
+    字段（generate / from_pool / reuse_today）说不出原因，回退链有三条完全不同的
+    岔路（满配额、没指定出卡源、概率没命中）。这里把决策与前提一起写成说明，
+    随签落库（draws.decision_note）并进日志，工坊记录页可直接看。
+
+    不抛异常，任何脏输入都返回一句「—」级别的兜底，绝不阻塞出卡。
+    """
+    try:
+        m = str(mode or "mix")
+        d = str(decision or "")
+        quota = max(1, int(quota or 1))
+        pool_size = max(0, int(pool_size or 0))
+        full = pool_size >= quota
+        stock = f"库存 {pool_size}/{quota}"
+        if d == "reuse_today":
+            return "当天已抽到过同一角色，直接复用当日立绘（一人一天一位）"
+        if m == "img2img":
+            if d == "generate_i2i":
+                return ("出图方式=只用图生图模板 → 按出卡源图生图"
+                        + ("（库存已满，该模式仍现画）" if full else f"（{stock}，未满配额）"))
+            if d == "from_pool":
+                return ("出图方式=只用图生图模板，但该角色未指定「出卡图生图源」"
+                        f" → 回退立绘库取图（{stock}）")
+            return ("出图方式=只用图生图模板，但既没有出卡源、立绘库也为空"
+                    " → 按角色画法生成（文生图/LoRA）")
+        if m == "pool":
+            if d == "from_pool":
+                return f"出图方式=只用立绘库 → 从库存取图（{stock}）"
+            return "出图方式=只用立绘库，但库存为空 → 按角色画法生成（文生图/LoRA）"
+        # mix（含未知 mode 按 mix 处理）
+        roll, prob = int(roll or 0) % 100, max(0, min(100, int(i2i_prob or 0)))
+        if d == "generate_i2i":
+            return (f"出图方式=混合，种子掷点 {roll} < 图生图概率 {prob}%"
+                    f" → 按出卡源图生图（{stock}）")
+        if d == "from_pool":
+            if full:
+                return (f"出图方式=混合，立绘库已满配额（{stock}）"
+                        " → 直接取库存，不再消耗绘图算力")
+            if not has_ref:
+                return (f"出图方式=混合，掷点 {roll} 本可命中图生图（<{prob}%），"
+                        "但该角色未指定「出卡图生图源」 → 回退立绘库取图")
+            return (f"出图方式=混合，种子掷点 {roll} ≥ 图生图概率 {prob}%"
+                    f" → 从立绘库取图（{stock}）")
+        return ("出图方式=混合，立绘库为空且没有出卡源"
+                " → 按角色画法生成（文生图/LoRA）")
+    except Exception:  # pragma: no cover - 说明文字绝不能影响出卡
+        return ""
+
+
 def log_exception(prefix: str) -> str:
     return f"{prefix}\n{traceback.format_exc()}"

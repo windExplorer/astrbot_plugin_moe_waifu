@@ -2408,11 +2408,14 @@ def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
         i2i_prob = int(plugin._cfg("img2img_prob", 50))
     except (TypeError, ValueError):
         i2i_prob = 50
+    has_src = draw.has_draw_source(entry, plugin._data_dir)
+    roll = pool.sub_int(seed, "genmode", 100)
     if decision == "generate":
         # 与真实出卡同口径：只认显式指定的出卡图生图源（v0.10.0）
-        decision = draw.plan_source(gen_mode, pool_size, quota,
-                                    draw.has_draw_source(entry, plugin._data_dir),
-                                    pool.sub_int(seed, "genmode", 100), i2i_prob)
+        decision = draw.plan_source(gen_mode, pool_size, quota, has_src, roll, i2i_prob)
+    # v0.19.4：模拟也给出「为什么这么出图」，与落库的 decision_note 同一句
+    decision_note = draw.explain_decision(gen_mode, decision, pool_size, quota,
+                                          has_src, i2i_prob, roll)
     pick = None
     if decision == "reuse_today":
         pick = {"file": today_row["file"] if today_row else "", "index": None}
@@ -2434,7 +2437,8 @@ def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
             "strategy_type": entry.get("strategy_type") or "base",
             "verified": bool(entry.get("verified")),
         },
-        "decision": decision, "portrait_pool_size": pool_size, "quota": quota,
+        "decision": decision, "decision_note": decision_note,
+        "portrait_pool_size": pool_size, "quota": quota,
         "gen_mode": gen_mode, "i2i_prob": i2i_prob,
         "portrait_pick": pick,
         "current": ({"char_id": current["char_id"],

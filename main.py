@@ -467,15 +467,17 @@ class MoeWaifuPlugin(Star):
         draw_src = draw.draw_source(entry, data_dir)
         # v0.19.3：mode 一并传入——img2img（只用图生图模板）不能被「满配额取库」
         # 短路，否则库满后永远取旧立绘（用户实报）
+        # v0.19.4：roll 提出来复用（决策 + 事后解释同源）
+        roll = pool.sub_int(seed_bytes, "genmode", 100)
         decision = draw.decision_of(char_id, date, today_row, pool_size, quota, mode)
         if decision == "generate":
             decision = draw.plan_source(mode, pool_size, quota,
-                                        bool(draw_src),
-                                        pool.sub_int(seed_bytes, "genmode", 100),
-                                        i2i_prob)
+                                        bool(draw_src), roll, i2i_prob)
         # 二次确认（文件可能在规划后被清理）
+        i2i_degraded = False
         if decision == "generate_i2i" and not draw_src:
             decision = "generate"
+            i2i_degraded = True
         if decision == "generate_i2i":
             # 把指定的出卡源注入 ref：generate_portrait 只认显式 ref，
             # 不退回参考图库随机取图；条目本身是 img2img 也强制用这一张。
@@ -491,6 +493,7 @@ class MoeWaifuPlugin(Star):
 
         src = None
         rel_path = ""
+        pool_missing = False
         if decision == "reuse_today":
             src = self._data_dir / today_row["file"]
             rel_path = str(today_row["file"])
@@ -503,6 +506,7 @@ class MoeWaifuPlugin(Star):
             if not src.is_file():  # 库文件被手动删了：回退为重新生成
                 src = None
                 decision = "generate"  # 记录真实发生的决策，别把它记成「库存复用」
+                pool_missing = True
 
         if src is None:  # generate / generate_i2i
             # v0.15.0：seq 改「历史最大 + 1」——旧实现 seq = 库存数，删过立绘后
@@ -546,6 +550,19 @@ class MoeWaifuPlugin(Star):
         # v0.9.5：种子带重置轮次 epoch；卡片印象语按签从 quotes 池随机选一句
         entry = dict(entry)
         entry["quote"] = pool.pick_quote(entry, seed_bytes)
+        # v0.19.4：决策原因随签落库 + 进日志。用户口径：「每次抽卡用的什么方式、
+        # 为什么、什么原因导致回退」要能事后查到——光有 decision 一个词不够。
+        note = draw.explain_decision(mode, decision, pool_size, quota,
+                                     bool(draw_src), i2i_prob, roll)
+        if pool_missing:
+            note += "；该库存立绘文件已丢失，本次改为重新生成"
+        if i2i_degraded:
+            note += "；出卡源在规划后不可用，降级为按角色画法生成"
+        logger.info(
+            "[" + PLUGIN_NAME + "] 抽卡决策 "
+            + f"{entry.get('name') or char_id}（{char_id}）uid={uid} "
+            + f"date={date} nonce={nonce} → {decision}｜{note}"
+        )
         self._store.upsert_draw(
             uid, date, char_id, nonce, rerolled, nickname, gid, gname, platform,
             seed_hex=seed_bytes.hex(),
@@ -553,6 +570,7 @@ class MoeWaifuPlugin(Star):
             series=str(entry.get("series") or ""),
             portrait_file=rel_path,
             decision=decision,
+            decision_note=note,
         )
         total = self._store.bump_user_char(uid, char_id)
         self._store.bump_char_stats(char_id, date)

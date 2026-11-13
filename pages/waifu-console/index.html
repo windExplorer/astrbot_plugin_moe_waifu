@@ -1113,7 +1113,8 @@
                         <td>{{ d.group_name || "私聊" }}</td>
                         <td>{{ rerollLabel(d.nonce) }}</td>
                         <td>{{ d.platform || "—" }}</td>
-                        <td>{{ decisionLabel(d.decision) }}</td>
+                        <!-- v0.19.4：鼠标悬停看「这次为什么这么出图」（决策原因随签落库） -->
+                        <td :title="d.decision_note || '旧记录没有原因（v0.19.4 之前的签）'">{{ decisionLabel(d.decision) }}</td>
                         <td><a v-if="d.card_path" class="link-btn" @click="openViewer(d.card_path, d.date + ' 卡片')">查看</a><span v-else>—</span></td>
                         <td><n-button size="tiny" @click="openRecDetail(d)">详情</n-button></td>
                       </tr>
@@ -1139,7 +1140,7 @@
                       </n-space>
                     </template>
                     <table class="rec-table" v-if="recEvents.length">
-                      <thead><tr><th>时间</th><th>用户</th><th>类型</th><th>角色</th><th>nonce</th><th>种子</th></tr></thead>
+                      <thead><tr><th>时间</th><th>用户</th><th>类型</th><th>角色</th><th>nonce</th><th>决策</th><th>种子</th></tr></thead>
                       <tbody>
                         <tr v-for="e in recEvents" :key="e.id">
                           <td>{{ fmtTime(e.created_at) }}</td>
@@ -1147,6 +1148,8 @@
                           <td>{{ e.kind === "reroll" ? "重抽" : "首抽" }}</td>
                           <td>{{ e.char_name || e.char_id }}</td>
                           <td>{{ e.nonce }}</td>
+                          <!-- v0.19.4：流水也带决策原因（悬停看为什么） -->
+                          <td :title="e.decision_note || ''">{{ decisionLabel(e.decision) }}</td>
                           <td :title="e.seed_hex">{{ (e.seed_hex || "").slice(0, 10) || "—" }}</td>
                         </tr>
                       </tbody>
@@ -1596,6 +1599,10 @@
                         立绘决策 {{ decisionLabel(simResult.decision) }} ·
                         库存 {{ simResult.portrait_pool_size }}/{{ simResult.quota }}
                       </div>
+                      <!-- v0.19.4：模拟直接给出决策原因（与落库同一句），不用再靠猜 -->
+                      <div class="bind-tip" style="margin-top: 4px;" v-if="simResult.decision_note">
+                        为什么：{{ simResult.decision_note }}
+                      </div>
                       <div class="bind-tip" style="margin-top: 4px;" :title="simResult.seed_hex">
                         种子 {{ simResult.seed_hex.slice(0, 24) }}…
                       </div>
@@ -1716,6 +1723,7 @@
                     <tr><td>nonce / 重抽</td><td>{{ recDetail.draw.nonce }} · {{ rerollLabel(recDetail.draw.nonce) }}</td></tr>
                     <tr><td>抽签种子</td><td :title="recDetail.draw.seed_hex">{{ recDetail.draw.seed_hex || "—" }}</td></tr>
                     <tr><td>立绘来源</td><td>{{ decisionLabel(recDetail.draw.decision) }}</td></tr>
+                    <tr><td>为什么</td><td>{{ recDetail.draw.decision_note || "—（v0.19.4 之前的签没有记录原因）" }}</td></tr>
                     <tr><td>立绘文件</td><td>{{ recDetail.draw.portrait_file || "—" }}</td></tr>
                     <tr><td>卡图</td><td>{{ recDetail.draw.card_path || "—" }}</td></tr>
                     <tr><td>创建 / 更新</td><td>{{ fmtTime(recDetail.draw.created_at) }} · {{ fmtTime(recDetail.draw.updated_at) }}</td></tr>

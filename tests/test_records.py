@@ -137,12 +137,17 @@ def test_events_and_detail(tmp: Path):
     st.upsert_draw("u1", TODAY, "b_char", 1, True, "阿明", "g1", "一群",
                    "aiocqhttp", seed_hex="bb22", char_name="小红",
                    series="测试作品", portrait_file="portraits/b_char/0.png",
-                   decision="from_pool")
+                   decision="from_pool",
+                   decision_note="出图方式=混合，立绘库已满配额（5/5） → 直接取库存")
     st.update_draw_card("u1", TODAY, "/data/cards/u1_r1.png")
     cur = st.get_draw("u1", TODAY)
     check("draws 覆盖为最后一次结果", cur["char_id"] == "b_char" and cur["nonce"] == 1)
+    # v0.19.4：决策原因随签落库（工坊悬停/详情可读，老库靠 ALTER 补列）
+    check("draws 记录决策原因", "已满配额" in (cur.get("decision_note") or ""), str(cur))
     events, total = st.list_events(50, 0, "u1", TODAY)
     check("抽签流水 2 条（首抽 + 重抽）", total == 2 and len(events) == 2)
+    check("流水也带决策原因（换老婆前那条不会丢）",
+          "已满配额" in (events[0].get("decision_note") or ""), str(events[0]))
     check("重抽前的角色仍可追溯",
           {e["char_id"] for e in events} == {"a_char", "b_char"})
     kinds = {e["kind"] for e in events}
@@ -290,6 +295,9 @@ def test_cores(tmp: Path):
     # 这样 matches_current 测的是真一致性，而不是恰好撞上手写的假数据。
     preview = api._debug_simulate_core(plugin, "u1", TODAY, 0, "test-salt", "")
     picked = preview["char"]
+    # v0.19.4：模拟必须给出「为什么这么出图」，否则用户只能盯着 decision 猜
+    check("模拟结果带决策原因",
+          bool((preview.get("decision_note") or "").strip()), str(preview.get("decision_note")))
     st.upsert_draw("u1", TODAY, picked["char_id"], 0, False, "阿明", "g1", "一群",
                    "aiocqhttp", seed_hex=preview["seed_hex"],
                    char_name=picked["char_name"], decision="generate")

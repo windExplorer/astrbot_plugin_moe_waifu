@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS draw_events (
   kind          TEXT NOT NULL DEFAULT 'first',   -- first / reroll
   seed_hex      TEXT NOT NULL DEFAULT '',
   decision      TEXT NOT NULL DEFAULT '',        -- reuse_today / generate / from_pool
+  decision_note TEXT NOT NULL DEFAULT '',        -- v0.19.4：这次为什么这么出图（可读原因）
   portrait_file TEXT NOT NULL DEFAULT '',
   card_path     TEXT NOT NULL DEFAULT '',
   group_id      TEXT NOT NULL DEFAULT '',
@@ -132,6 +133,12 @@ _MIGRATIONS = {
         "series": "TEXT NOT NULL DEFAULT ''",
         "portrait_file": "TEXT NOT NULL DEFAULT ''",
         "decision": "TEXT NOT NULL DEFAULT ''",
+        # v0.19.4：决策原因（draw.explain_decision 产出的中文说明）——
+        # 只有 decision 一个词说明不了「为什么回退取立绘」，工坊记录要能直接看
+        "decision_note": "TEXT NOT NULL DEFAULT ''",
+    },
+    "draw_events": {
+        "decision_note": "TEXT NOT NULL DEFAULT ''",
     },
 }
 
@@ -232,11 +239,14 @@ class Store:
         nickname: str = "", group_id: str = "", group_name: str = "",
         platform: str = "", seed_hex: str = "", char_name: str = "",
         series: str = "", portrait_file: str = "", decision: str = "",
+        decision_note: str = "",
     ) -> None:
         """写当日结果 + 追加一条抽签流水。
 
         v0.9.0 起角色名 / 作品 / 种子 / 立绘来源 / 立绘决策都随签快照落库：
         角色条目日后被删或被改名，历史记录仍读得懂。
+        v0.19.4：`decision_note` 是这次决策的可读原因（draw.explain_decision），
+        同时写进 draws（当前状态）与 draw_events（流水），换老婆前的签也留得住。
         """
         now = _now()
         nonce = int(nonce)
@@ -244,8 +254,9 @@ class Store:
             """
             INSERT INTO draws (user_id, date, char_id, nonce, rerolled, nickname,
                                group_id, group_name, platform, seed_hex, char_name,
-                               series, portrait_file, decision, created_at, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                               series, portrait_file, decision, decision_note,
+                               created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(user_id, date) DO UPDATE SET
               char_id=excluded.char_id, nonce=excluded.nonce,
               rerolled=excluded.rerolled, nickname=excluded.nickname,
@@ -253,22 +264,24 @@ class Store:
               platform=excluded.platform, seed_hex=excluded.seed_hex,
               char_name=excluded.char_name, series=excluded.series,
               portrait_file=excluded.portrait_file, decision=excluded.decision,
+              decision_note=excluded.decision_note,
               updated_at=excluded.updated_at
             """,
             (user_id, date, char_id, nonce, int(bool(rerolled)), nickname,
              group_id, group_name, platform, seed_hex, char_name, series,
-             portrait_file, decision, now, now),
+             portrait_file, decision, decision_note, now, now),
         )
         self._conn.execute(
             """
             INSERT INTO draw_events (user_id, date, char_id, char_name, series,
-                                     nonce, kind, seed_hex, decision, portrait_file,
-                                     group_id, group_name, platform, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                     nonce, kind, seed_hex, decision, decision_note,
+                                     portrait_file, group_id, group_name, platform,
+                                     created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (user_id, date, char_id, char_name, series, nonce,
              "reroll" if nonce > 0 else "first", seed_hex, decision,
-             portrait_file, group_id, group_name, platform, now),
+             decision_note, portrait_file, group_id, group_name, platform, now),
         )
         self._conn.commit()
 
