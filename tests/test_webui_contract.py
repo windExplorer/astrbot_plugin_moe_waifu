@@ -137,7 +137,7 @@ def main():
 
     # 8) 群号：规则统一说明 + 查状态自动带出 + 模拟结果说清实际抽取范围
     check("群号抽取规则在多个页面统一提示",
-          page.count("该群绑定卷") >= 3, f"实际 {page.count('该群绑定卷')} 处")
+          page.count("该群绑定作品") >= 3, f"实际 {page.count('该群绑定作品')} 处")
     check("已绑定群来自配置、可一键填入", '"bound_groups"' in api
           and "cfgBoundGroups" in page and "pickSimGroup" in page)
     check("查状态自动带出群号", "simF.value.group_id = res.draw.group_id" in page)

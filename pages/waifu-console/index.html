@@ -433,6 +433,7 @@
                 <n-radio-button value="list">列表</n-radio-button>
               </n-radio-group>
               <n-button type="primary" size="small" @click="openNew">新增角色</n-button>
+              <n-button size="small" @click="openImport">导入角色</n-button>
               <n-button size="small" @click="openBatchModal">批量补图</n-button>
               <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
               <!-- v0.6.1：每行卡片数快捷调整（写回 ui_grid_cols，免去去配置页） -->
@@ -1119,7 +1120,7 @@
                     <n-button size="small" @click="resetRecFilters">重置</n-button>
                   </n-space>
                   <div class="rec-note">
-                    「群」按签的归属群筛选；实际抽签范围始终<b>只在「该群绑定卷 ∩ verified」里抽</b>，
+                    「群」按签的归属群筛选；实际抽签范围始终<b>只在「该群绑定作品 ∩ verified」里抽</b>，
                     未列出的群 / 私聊用全部启用卷；绑定关系在「分群绑定」页维护。
                   </div>
                 </n-space>
@@ -1656,7 +1657,7 @@
                               @click="simulateNext">nonce +1 再试</n-button>
                   </n-space>
                   <div class="rec-note" style="margin-top: 0;">
-                    抽取范围 = <b>只在「该群绑定卷 ∩ verified」里抽</b>；群号留空 / 私聊 = 全部启用卷。
+                    抽取范围 = <b>只在「该群绑定作品 ∩ verified」里抽</b>；群号留空 / 私聊 = 全部启用卷。
                     查过状态会自动带出该 QQ 今日签的群号，也可点下面的已绑定群一键填入。
                   </div>
                   <n-space size="small" align="center" :wrap="true" v-if="cfgBoundGroups.length">
@@ -1854,20 +1855,20 @@
             <n-card size="small" :bordered="true">
               <div class="stack">
                 <div class="bind-tip" style="margin-top: 0;">
-                  只在「该群绑定卷 ∩ verified」里抽；未列出的群 / 私聊用全部启用卷。
-                  卷名对应 pools/ 下的 pack 字段。保存即时生效（写插件配置）。
+                  只在「该群绑定作品 ∩ verified」里抽；未列出的群 / 私聊用全部启用卷。
+                  作品即角色身上的 series 字段（如 原神/鸣潮/异环），可多选。保存即时生效（写插件配置）。
                 </div>
                 <div v-for="(row, idx) in bindRows" :key="idx"
                      style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                   <n-input :value="row.gid" placeholder="群号（QQ 群 ID）"
                            style="width: 200px;"
                            @update:value="function (v) { setRowGid(idx, v) }"></n-input>
-                  <span class="bind-tip" style="margin-top: 0; flex: none;">绑定卷：</span>
-                  <n-select :value="row.packs" multiple :options="bindPackOpts"
-                            :consistent-menu-width="false"
+                  <span class="bind-tip" style="margin-top: 0; flex: none;">绑定作品：</span>
+                  <n-select :value="row.series" multiple :options="bindSeriesOpts"
+                            :consistent-menu-width="false" filterable
                             style="min-width: 260px; flex: 1;"
-                            placeholder="选择该群参与抽选的卷（可多选）"
-                            @update:value="function (v) { setRowPacks(idx, v) }"></n-select>
+                            placeholder="选择该群可抽的作品（可多选）"
+                            @update:value="function (v) { setRowSeries(idx, v) }"></n-select>
                   <w-icon-btn icon="trash" type="error" tip="移除这一行（未保存前可用「重置」恢复）"
                               @click="removeBindRow(idx)"></w-icon-btn>
                 </div>
@@ -1883,7 +1884,7 @@
                 </n-space>
                 <div v-if="bindRawOpen">
                   <n-input :value="bindText" type="textarea" :rows="6"
-                           placeholder="每行一条：群号=卷名,卷名&#10;例如：123456=anime,game"
+                           placeholder="每行一条：群号=作品,作品&#10;例如：123456=原神,鸣潮"
                            @update:value="onBindRawInput"></n-input>
                   <div class="bind-tip" style="margin-top: 6px;">
                     文本与上方列表是同一份数据（列表就是文本的解析结果），改哪边都行。
@@ -1891,7 +1892,7 @@
                 </div>
                 <n-space size="small" :wrap="true" v-if="parsedBind.length > 0">
                   <n-tag v-for="g in parsedBind" :key="g.gid" size="small" :bordered="false">
-                    {{ g.gid }} ← {{ g.packs.join(", ") }}
+                    {{ g.gid }} ← {{ g.series.join(", ") }}
                   </n-tag>
                 </n-space>
                 <n-space>
@@ -2406,6 +2407,38 @@
         </div>
       </n-drawer-content>
     </n-drawer>
+
+    <!-- ============ 导入角色弹窗（批量：粘贴/上传 JSON 落成一卷） ============ -->
+    <n-modal v-model:show="importOpen" preset="dialog" title="导入角色" style="width: 660px;">
+      <div class="stack">
+        <n-alert type="info" :show-icon="false">
+          粘贴角色 JSON（支持「角色数组」<code>[...]</code> 或「整卷对象」<code>{"pack","entries"}</code>），或选 .json 文件。
+          每条需含 <b>id / name / tags_en</b>。导入即写入 <b>pools/&lt;卷名&gt;.json</b>，
+          更新插件不会被覆盖；同卷按 id 合并，不重复。
+        </n-alert>
+        <n-input v-model:value="importPack" placeholder="卷名（可选；整卷对象的 pack 优先，缺省 imported）"></n-input>
+        <n-input v-model:value="importText" type="textarea" :rows="12"
+                 placeholder='例如：[{"id":"my_char_1","name":"角色A","tags_en":"1girl, long hair","series":"某作","tier":"S"}, {"id":"my_char_2","name":"角色B","tags_en":"1girl","tier":"A"}]'></n-input>
+        <label style="display:inline-block;margin-top:6px;padding:5px 14px;border:1px solid #d0d5dd;border-radius:6px;cursor:pointer;font-size:13px;">
+          选择 .json 文件
+          <input type="file" accept=".json,application/json" style="display:none;" @change="onImportFile">
+        </label>
+        <div v-if="importResult" style="margin-top:8px;">
+          <n-alert :type="importResult.ok ? 'success' : 'error'" :show-icon="false">
+            <template v-if="importResult.ok">
+              卷 <b>{{ importResult.pack }}</b>：新增 {{ importResult.imported }} 条（共合法 {{ importResult.total }} 条）
+              <span v-if="importResult.skipped && importResult.skipped.length">；跳过 {{ importResult.skipped.length }} 条不合法</span>
+            </template>
+            <template v-else>{{ importResult.error || '导入失败' }}</template>
+          </n-alert>
+        </div>
+      </div>
+      <template #action>
+        <n-button @click="importOpen=false">关闭</n-button>
+        <n-button type="primary" :loading="importing" @click="doImport">导入</n-button>
+      </template>
+    </n-modal>
+
   </n-config-provider>
 </div>
 
@@ -3235,6 +3268,13 @@
       var drawerTitle = Vue.ref("");
       var isNew = Vue.ref(false);
       var saving = Vue.ref(false);
+
+      // ---- 导入角色 ----
+      var importOpen = Vue.ref(false);
+      var importText = Vue.ref("");
+      var importPack = Vue.ref("");
+      var importing = Vue.ref(false);
+      var importResult = Vue.ref(null);
       var quoteGenLoading = Vue.ref(false);
       async function doQuoteGen() {
         // AI 补写印象语：调对话模型生成 5 句，追加到表单（人工删改后再保存）
@@ -3329,6 +3369,33 @@
         form.value = emptyForm();
         drawerTitle.value = "新增角色";
         showDrawer.value = true;
+      }
+      function openImport() {
+        importResult.value = null;
+        importOpen.value = true;
+      }
+      function onImportFile(evt) {
+        var f = evt && evt.target && evt.target.files && evt.target.files[0];
+        if (!f) return;
+        var r = new FileReader();
+        r.onload = function () { importText.value = String(r.result || ""); };
+        r.readAsText(f);
+      }
+      async function doImport() {
+        var text = String(importText.value || "").trim();
+        if (!text) { message.error("请粘贴或上传 JSON"); return; }
+        importing.value = true;
+        importResult.value = null;
+        try {
+          var res = await apiPost("pools/import", { text: text, pack: String(importPack.value || "").trim() });
+          importResult.value = res;
+          if (res && res.ok) {
+            message.success("导入成功：" + res.pack + "（新增 " + res.imported + " 条）");
+            await refreshAll();
+          }
+        } catch (e) { /* 已提示 */ } finally {
+          importing.value = false;
+        }
       }
       function openNewForWork(series) {
         // 作品详情「添加角色」：直接新建一个属于该作品的角色（大概率角色库里
@@ -5173,13 +5240,13 @@
       var simF = Vue.ref({ user_id: "", date: "", nonce: 0, salt: "", group_id: "" });
       var simResult = Vue.ref(null);
       var simBusy = Vue.ref(false);
-      // 把「该群绑定卷 ∩ verified」的实际生效范围说清楚，别只丢一个候选数
+      // 把「该群绑定作品 ∩ verified」的实际生效范围说清楚，别只丢一个候选数
       var simScopeText = Vue.computed(function () {
         var r = simResult.value;
         if (!r || !r.ok) { return ""; }
         var s = r.scope || {};
-        var packs = (s.group_packs && s.group_packs.length)
-          ? "绑定卷 " + s.group_packs.join("、")
+        var works = (s.group_series && s.group_series.length)
+          ? "绑定作品 " + s.group_series.join("、")
           : "全部启用卷（" + (s.enabled_packs || []).join("、") + "）";
         return "抽取范围：群 " + (r.group_id || "留空 / 私聊") + " · " + packs +
                " ∩ " + (s.allow_unverified ? "全部角色（含未验证）" : "verified") +
@@ -5222,7 +5289,7 @@
                 dbgChar.value = res.draw.char_id;
                 dbgChar2.value = res.draw.char_id;
               }
-              // 群号决定候选集「该群绑定卷 ∩ verified」，必须跟着状态一起带出，
+              // 群号决定候选集「该群绑定作品 ∩ verified」，必须跟着状态一起带出，
               // 否则模拟抽签会拿「全部启用卷」去算，和真实抽签结果不一致。
               if (res.draw.group_id) { simF.value.group_id = res.draw.group_id; }
             }
@@ -5647,26 +5714,25 @@
           var gid = line.slice(0, idx).trim();
           var packs = line.slice(idx + 1).replace(/，/g, ",").split(",")
             .map(function (s) { return s.trim(); }).filter(Boolean);
-          if (gid) out.push({ gid: gid, packs: packs });
+          if (gid) out.push({ gid: gid, series: packs });
         });
         return out;
       }
       var parsedBind = Vue.computed(function () {
         // 完整行（群号 + 至少一卷）才用于 chips 展示与保存口径
         return bindRows.value.filter(function (r) {
-          return String(r.gid || "").trim() && (r.packs || []).length;
+          return String(r.gid || "").trim() && (r.series || []).length;
         });
       });
-      var bindPackOpts = Vue.computed(function () {
-        return (meta.value.packs || []).map(function (p) {
-          return { label: p.title || p.pack, value: p.pack };
-        });
+      var bindSeriesOpts = Vue.computed(function () {
+        // 复用作品下拉（seriesOpts），去掉「全部作品」哨兵项；支持多选绑定多个作品
+        return seriesOpts.value.filter(function (o) { return o.value !== ""; });
       });
       function syncBindText() {
         bindText.value = bindRows.value
-          .filter(function (r) { return String(r.gid || "").trim() || (r.packs || []).length; })
+          .filter(function (r) { return String(r.gid || "").trim() || (r.series || []).length; })
           .map(function (r) {
-            return String(r.gid || "").trim() + "=" + (r.packs || []).join(",");
+            return String(r.gid || "").trim() + "=" + (r.series || []).join(",");
           }).join("\n");
       }
       function setRowGid(idx, v) {
@@ -5676,14 +5742,14 @@
         bindRows.value = rows;
         syncBindText();
       }
-      function setRowPacks(idx, v) {
+      function setRowSeries(idx, v) {
         var rows = bindRows.value.slice();
         if (!rows[idx]) return;
-        rows[idx] = Object.assign({}, rows[idx], { packs: (v || []).slice() });
+        rows[idx] = Object.assign({}, rows[idx], { series: (v || []).slice() });
         bindRows.value = rows;
         syncBindText();
       }
-      function addBindRow() { bindRows.value = bindRows.value.concat([{ gid: "", packs: [] }]); }
+      function addBindRow() { bindRows.value = bindRows.value.concat([{ gid: "", series: [] }]); }
       function removeBindRow(idx) {
         bindRows.value = bindRows.value.filter(function (_, i) { return i !== idx; });
         syncBindText();
@@ -5709,7 +5775,7 @@
         var complete = parsedBind.value;
         var dropped = bindRows.value.length - complete.length;
         if (dropped > 0) {
-          message.warning("有 " + dropped + " 行不完整（缺群号或没选卷），保存时忽略");
+          message.warning("有 " + dropped + " 行不完整（缺群号或没选作品），保存时忽略");
         }
         if (!complete.length && !armDelete("bind:save")) {
           message.warning("保存空内容会清空全部分群绑定：确认无误请再点一次「保存」");
@@ -5718,7 +5784,7 @@
         bindSaving.value = true;
         try {
           var text = complete.map(function (r) {
-            return String(r.gid || "").trim() + "=" + (r.packs || []).join(",");
+            return String(r.gid || "").trim() + "=" + (r.series || []).join(",");
           }).join("\n");
           await apiPost("group_pools", { text: text });
           bindText.value = text;
@@ -5810,6 +5876,9 @@
         drawerRefs: drawerRefs, drawerRefsLoading: drawerRefsLoading,
         onDrawerPanelFiles: onDrawerPanelFiles,
         designateRef: designateRef, unbindDrawerRef: unbindDrawerRef,
+        importOpen: importOpen, importText: importText, importPack: importPack,
+        importing: importing, importResult: importResult,
+        openImport: openImport, onImportFile: onImportFile, doImport: doImport,
         catLabel: catLabel, stratLabel: stratLabel, portraitCount: portraitCount, delArm: delArm,
         tryCharId: tryCharId, charOpts: charOpts, tryEntry: tryEntry,
         tryRunning: tryRunning, tryError: tryError, tryPreview: tryPreview, tryOk: tryOk,
@@ -5946,9 +6015,9 @@
         openDiscover: openDiscover, doDiscover: doDiscover,
         doDiscoverAdd: doDiscoverAdd,
         bindText: bindText, parsedBind: parsedBind, bindSaving: bindSaving,
-        bindRows: bindRows, bindPackOpts: bindPackOpts, bindRawOpen: bindRawOpen,
+        bindRows: bindRows, bindSeriesOpts: bindSeriesOpts, bindRawOpen: bindRawOpen,
         bindLoading: bindLoading, loadBindPools: loadBindPools, onBindRawInput: onBindRawInput,
-        addBindRow: addBindRow, setRowGid: setRowGid, setRowPacks: setRowPacks,
+        addBindRow: addBindRow, setRowGid: setRowGid, setRowSeries: setRowSeries,
         removeBindRow: removeBindRow,
         doSaveBind: doSaveBind,
         configSections: configSections, configModel: configModel, configSaving: configSaving,

@@ -6,8 +6,8 @@
   包内只带 seed_pool.json（种子卷），首启复制缺失卷，绝不覆盖已有文件。
 - 抽取是种子决定论：seed = SHA-256(f"{date}|{user_id}|{salt}|{nonce}")，
   全部维度由种子派生（hashlib，禁全局 random），同一天同一人同一 nonce 结果恒定。
-- 群过滤：group_pools 配置每行「群号=卷名,卷名」，抽卡只在
-  「该群绑定卷 ∩ verified（或 allow_unverified）」的并集里抽。
+- 群过滤：group_pools 配置每行「群号=作品,作品」（作品即角色的 series，如
+  原神/鸣潮/异环），抽卡只在该群绑定作品 ∩ verified（或 allow_unverified）里抽。
 - 候选按 (pack, id) 排序后再用种子取模——卷文件增删条目会改变全体排名，
   这是决定论与可编辑库的固有折衷（换库不追溯，当日已落库的签照旧）。
 """
@@ -87,7 +87,7 @@ def pool_index(char_id: str, date_str: str, pool_size: int, salt: str) -> int:
 # ---------- 群绑定 ----------
 
 def parse_group_pools(text: str) -> dict:
-    """解析「群号=卷名,卷名」多行文本 → {群号: [卷名...]}。
+    """解析「群号=作品,作品」多行文本 → {群号: [作品...]}。
 
     同一群号出现多行时合并去重（保序）；空行与坏行跳过。
     """
@@ -108,12 +108,12 @@ def parse_group_pools(text: str) -> dict:
     return result
 
 
-def pack_names_for_group(bound: dict, group_id: str) -> list | None:
-    """群绑定卷名列表；未绑定（或私聊传空）返回 None = 全部启用卷。"""
+def series_for_group(bound: dict, group_id: str) -> set | None:
+    """群绑定的作品集合（角色 series 维度）；未绑定（或私聊传空）返回 None = 全部启用卷。"""
     if not group_id:
         return None
     names = bound.get(str(group_id))
-    return list(names) if names else None
+    return set(names) if names else None
 
 
 # ---------- 库装载 ----------
@@ -290,17 +290,16 @@ def candidates_for(
     group_pools_text: str = "",
     allow_unverified: bool = False,
 ) -> list:
-    """某群当前可抽的候选：启用卷（+ 群绑定过滤）∩ verified（可放宽）→ 排序。
+    """某群当前可抽的候选：启用卷（+ 群绑定作品过滤）∩ verified（可放宽）→ 排序。
 
-    排序键 (pack, id)：同一天内库不变则结果恒定；条目增删会全体重排（见模块注释）。
+    群绑定按「作品（series）」维度：绑定了作品的群只抽到对应 series 的角色，
+    未绑定的群 / 私聊用全部启用卷。排序键 (pack, id)：同一天内库不变则结果恒定。
     """
     bound = parse_group_pools(group_pools_text)
-    want = pack_names_for_group(bound, group_id)
+    want = series_for_group(bound, group_id)  # 作品集合或 None
     out: list = []
     seen_ids: set = set()
     for pack in packs:
-        if want is not None and pack["pack"] not in want:
-            continue
         if not pack["enabled"]:
             continue
         for raw in pack["entries"]:
@@ -308,6 +307,8 @@ def candidates_for(
             if entry is None:
                 continue
             if not allow_unverified and not entry["verified"]:
+                continue
+            if want is not None and (entry.get("series") or "") not in want:
                 continue
             if entry["id"] in seen_ids:  # 跨卷重复 id：先见者胜
                 continue

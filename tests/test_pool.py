@@ -52,9 +52,9 @@ check("pool_index 空库安全", pool.pool_index("miku", "d", 0, "salt") == 0)
 # 群绑定解析
 bound = pool.parse_group_pools("123=a,b\n\n坏行\n456= c ， d \n456=a")
 check("parse_group_pools 同群多行合并去重", bound == {"123": ["a", "b"], "456": ["c", "d", "a"]})
-check("未绑定群返回 None", pool.pack_names_for_group(bound, "999") is None)
-check("绑定群返回列表", pool.pack_names_for_group(bound, "123") == ["a", "b"])
-check("私聊(空gid)返回 None", pool.pack_names_for_group(bound, "") is None)
+check("未绑定群返回 None", pool.series_for_group(bound, "999") is None)
+check("绑定群返回作品集合", pool.series_for_group(bound, "123") == {"a", "b"})
+check("私聊(空gid)返回 None", pool.series_for_group(bound, "") is None)
 
 # 条目归一化
 good = {"id": "x", "name": "名", "tags_en": "t", "strategy": {"type": "LORA"}, "category": "xxx"}
@@ -68,23 +68,23 @@ check("缺 id 拒收", pool.normalize_entry({"name": "名", "tags_en": "t"}, "p"
 # 候选过滤：verified / 群绑定 / 去重 / 排序
 packs = [
     {"pack": "p1", "title": "卷一", "enabled": True, "entries": [
-        {"id": "b", "name": "乙", "tags_en": "y", "verified": True},
-        {"id": "a", "name": "甲", "tags_en": "x", "verified": False},
+        {"id": "b", "name": "乙", "tags_en": "y", "verified": True, "series": "s1"},
+        {"id": "a", "name": "甲", "tags_en": "x", "verified": False, "series": "s1"},
     ]},
     {"pack": "p2", "title": "卷二", "enabled": True, "entries": [
-        {"id": "c", "name": "丙", "tags_en": "z", "verified": True},
-        {"id": "b", "name": "乙2", "tags_en": "y2", "verified": True},  # 跨卷重复 id
+        {"id": "c", "name": "丙", "tags_en": "z", "verified": True, "series": "s2"},
+        {"id": "b", "name": "乙2", "tags_en": "y2", "verified": True, "series": "s2"},  # 跨卷重复 id
     ]},
     {"pack": "p3", "title": "停用卷", "enabled": False, "entries": [
-        {"id": "d", "name": "丁", "tags_en": "w", "verified": True},
+        {"id": "d", "name": "丁", "tags_en": "w", "verified": True, "series": "s3"},
     ]},
 ]
 all_c = pool.candidates_for(packs, "", "", False)
 check("verified 过滤+去重+排序", [e["id"] for e in all_c] == ["b", "c"])
 check("allow_unverified 放宽", len(pool.candidates_for(packs, "", "", True)) == 3)
-bound_c = pool.candidates_for(packs, "123", "123=p2", False)
-check("群绑定过滤（p2 含重复 id 也照常出）", [e["id"] for e in bound_c] == ["b", "c"])
-check("未绑定群=全卷", pool.candidates_for(packs, "999", "123=p2", False) == all_c)
+bound_c = pool.candidates_for(packs, "123", "123=s2", False)
+check("群绑定过滤（按作品 s2，含重复 id 也照常出）", [e["id"] for e in bound_c] == ["b", "c"])
+check("未绑定群=全卷", pool.candidates_for(packs, "999", "123=s2", False) == all_c)
 
 # 查找
 found = pool.find_entry(packs, "c")

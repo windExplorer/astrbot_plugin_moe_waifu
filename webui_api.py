@@ -366,6 +366,88 @@ async def h_save_entry(plugin) -> dict:
     return ok({"replaced": replaced, "entry": normalized})
 
 
+async def h_import_pack(plugin) -> dict:
+    """批量导入角色：把粘贴/上传的 JSON 落成一卷（新建或按 id 合并进已有卷）。
+
+    接受两种 JSON 形态：
+      - 整卷对象：{"pack": "卷名", "title": "...", "entries": [ {...}, ... ]}
+      - 纯数组：[{...}, ...]  → 用请求里的 pack 字段（或默认 "imported"）当卷名
+    每条需含 id / name / tags_en（走 normalize_entry 校验，不合格整条跳过）。
+    写入 data/plugin_data/.../pools/<卷名>.json，插件更新也不会被覆盖
+    （种子卷只按 id 合并、永不覆盖用户卷）。
+    """
+    body = await _body()
+    text = str(body.get("text") or "").strip()
+    pack_override = str(body.get("pack") or "").strip()
+    if not text:
+        return err("请粘贴或上传 JSON 文本")
+    try:
+        obj = json.loads(text)
+    except Exception as exc:
+        return err("JSON 解析失败：" + str(exc)[:120])
+    if isinstance(obj, dict):
+        pack_name = pack_override or str(obj.get("pack") or "").strip()
+        title = str(obj.get("title") or pack_name or "导入卷")
+        entries = obj.get("entries")
+    elif isinstance(obj, list):
+        pack_name = pack_override or "imported"
+        title = pack_override or "导入卷"
+        entries = obj
+    else:
+        return err("JSON 需为「角色数组」或「{pack, entries}」对象")
+    if not pack_name:
+        return err("缺少卷名：请在 JSON 里给 pack 字段，或填写卷名输入框")
+    if not isinstance(entries, list) or not entries:
+        return err("entries 为空或非数组")
+    good, skipped = [], []
+    for raw in entries:
+        e = pool.normalize_entry(raw, pack_name)
+        if e:
+            good.append(e)
+        else:
+            skipped.append(str((raw or {}).get("id") or (raw or {}).get("name") or "?"))
+    if not good:
+        return err("没有合法条目（每条需 id / name / tags_en）")
+    pools_dir = _pools_dir(plugin)
+    pools_dir.mkdir(parents=True, exist_ok=True)
+    path = pools_dir / f"{pack_name}.json"
+    if path.exists():
+        try:
+            cur = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            cur = {"pack": pack_name, "title": title, "enabled": True, "entries": []}
+        if not isinstance(cur.get("entries"), list):
+            cur["entries"] = []
+        have = set()
+        for r in cur["entries"]:
+            ne = pool.normalize_entry(r, pack_name)
+            if ne:
+                have.add(ne["id"])
+        added = 0
+        for e in good:
+            if e["id"] not in have:
+                cur["entries"].append(e)
+                have.add(e["id"])
+                added += 1
+        cur["pack"] = pack_name
+        cur["title"] = cur.get("title") or title
+        cur["enabled"] = bool(cur.get("enabled", True))
+        data = cur
+        created = False
+    else:
+        data = {"pack": pack_name, "title": title, "enabled": True, "entries": good}
+        added = len(good)
+        created = True
+    _json_save(path, data)
+    return ok({
+        "pack": pack_name,
+        "created": created,
+        "imported": added,
+        "total": len(good),
+        "skipped": skipped,
+    })
+
+
 async def h_delete_entry(plugin) -> dict:
     body = await _body()
     pack_name = str(body.get("pack") or "").strip()
@@ -2559,14 +2641,15 @@ def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
     group_pools = str(plugin._cfg("group_pools", "") or "")
     allow_unverified = bool(plugin._cfg("allow_unverified", False))
     candidates = pool.candidates_for(packs, group_id, group_pools, allow_unverified)
-    # 把「该群绑定卷 ∩ verified」这条规则的实际生效范围一并返回，
+    # 把「该群绑定作品 ∩ verified」这条规则的实际生效范围一并返回，
     # 前端才说得清为什么候选是 N 位（群号留空时 = 全部启用卷）。
     bound = pool.parse_group_pools(group_pools)
-    want = pool.pack_names_for_group(bound, group_id)
+    want = pool.series_for_group(bound, group_id)  # 作品集合或 None
     scope = {
-        "group_packs": want,  # None = 未绑定（含私聊）→ 全部启用卷
+        "group_series": list(want) if want is not None else None,  # None = 未绑定（含私聊）→ 全部启用卷
         "enabled_packs": [p["pack"] for p in packs
-                          if p["enabled"] and (want is None or p["pack"] in want)],
+                          if p["enabled"] and (want is None or any(
+                              (e.get("series") or "") in want for e in p.get("entries", [])))],
         "allow_unverified": allow_unverified,
     }
     if not candidates:
@@ -2948,6 +3031,7 @@ def register(plugin) -> None:
         ("/batch/status", h_batch_status, ["GET", "POST"]),
         ("/batch/stop", h_batch_stop, ["POST"]),
         ("/pools/save_entry", h_save_entry, ["POST"]),
+        ("/pools/import", h_import_pack, ["POST"]),
         ("/pools/delete_entry", h_delete_entry, ["POST"]),
         ("/pools/set_pack", h_set_pack, ["POST"]),
         ("/pools/set_verified", h_set_verified, ["POST"]),
