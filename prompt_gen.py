@@ -374,7 +374,10 @@ ARTSTYLES = [
      "en": "shoujo manga, pastel colors, sparkles, delicate lineart"},
     {"w": 4, "zh": "3D 渲染动画风",
      "en": "3d render, cgi, smooth shading, subsurface scattering, ambient occlusion"},
-    {"w": 3, "zh": "黏土手办质感",
+    # v0.26.4：用户反馈「黏土手办风格有点丑」——权重归零，退出随机池。
+    # w=0 的项 _weighted_pick 抽不到，但仍在池里：面板可以手动锁定它，
+    # art_clay 主题（artstyle_kw 精确筛「黏土」）也仍然可用。
+    {"w": 0, "zh": "黏土手办质感",
      "en": "clay render, figurine, plastic model, studio lighting"},
     {"w": 3, "zh": "像素艺术",
      "en": "pixel art, 16-bit, dithering"},
@@ -487,7 +490,9 @@ _ART_THEME_W = {
     "art_retro": 1, "art_oil": 1, "art_ink": 1, "art_ukiyoe": 1,
     "art_gothic": 1, "art_retroprint": 1, "art_pigment": 1, "art_etching": 1,
     "art_stainglass": 1, "art_riso": 1, "art_glitch": 1, "art_y2k": 1,
-    "art_manga": 1, "art_clay": 1, "art_pixel": 1,
+    "art_manga": 1, "art_pixel": 1,
+    # v0.26.4：黏土手办反馈丑 —— 批量轮换也不再选它（仍可在主题面板手动选）
+    "art_clay": 0,
 }
 
 

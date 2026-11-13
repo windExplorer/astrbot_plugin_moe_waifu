@@ -652,4 +652,14 @@ for s in range(160):
                   str(p["expression"].get("zh")))
 check("睡姿样本存在且全部锁定", _sleep_hit > 0, str(_sleep_hit))
 
+# ---------- v0.26.4：黏土手办退出随机池（用户反馈丑） ----------
+_clay = next(it for it in prompt_gen.ARTSTYLES if "黏土" in str(it["zh"]))
+check("黏土手办权重归零", int(_clay["w"]) == 0, str(_clay["w"]))
+check("黏土主题不进批量轮换", prompt_gen.art_theme_weight("art_clay") == 0)
+check("随机抽样 1000 次不命中黏土",
+      all("黏土" not in str(prompt_gen.pick_variations(s)["artstyle"].get("zh") or "")
+          for s in range(1000)))
+check("黏土仍保留在池里供手动锁定",
+      any("黏土" in str(it["zh"]) for it in prompt_gen.ARTSTYLES))
+
 print("test_prompt_gen: ALL OK")
