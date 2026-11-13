@@ -60,7 +60,7 @@ dedupeSelectedCount dedupeDupCount openDedupe loadDuplicates doDedupe
 relStatus relBusy loadRelStatus
 batchSeriesOpts batchBtnText
 galBulk galSel galSelCount toggleGalBulk toggleGalSel galSelAllVisible
-doBulkPortrait
+doBulkPortrait bulkBusy bulkOffText bulkOnText
 """.split()
 
 ROUTES = """
@@ -191,6 +191,10 @@ def main():
           "batchSeriesOpts" in page
           and "return !!o.value" in page
           and ':options="batchSeriesOpts"' in page)
+    # v0.26.2：批量停用/启用的两段确认必须看得见（旧版首次点击静默 return）
+    check("批量立绘确认态有可见文案与提示",
+          "bulkOffText" in page and "确认停用 " in page
+          and "再点一次" in page and "bulkBusy" in page)
     # v0.25.6：批量补图是后端常驻队列，关掉弹窗也要能看见进度
     check("补图进度跟到工具栏按钮（不依赖弹窗打开）",
           "batchBtnText" in page

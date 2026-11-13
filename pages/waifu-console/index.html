@@ -27,9 +27,14 @@
     transition: transform .15s ease, box-shadow .15s ease; }
   .gal-item:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(120,80,120,.14); }
   /* v0.26.1：立绘批量停用 / 启用的操作条与选择遮罩 */
-  .gal-bulk-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-    margin: 6px 0 8px; padding: 6px 10px; border-radius: 8px;
-    background: rgba(128,128,128,.10); }
+  /* v0.26.2：操作条改实心高亮面板（旧版灰底 + tiny 按钮太弱，用户找不到） */
+  .gal-bulk-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin: 8px 0 10px; padding: 10px 14px; border-radius: 10px;
+    border: 1px solid rgba(64,158,255,.38);
+    background: rgba(64,158,255,.10); }
+  .gal-bulk-count { font-size: 13px; }
+  .gal-bulk-count b { color: #2080f0; font-size: 15px; margin: 0 2px; }
+  .gal-bulk-tip { font-size: 12px; opacity: .62; margin-left: auto; }
   .gal-pick { position: absolute; inset: 0; z-index: 3; display: flex;
     align-items: center; justify-content: center; cursor: pointer;
     font-size: 12px; color: #fff; background: rgba(0,0,0,.30); }
@@ -929,17 +934,20 @@
                                       { label: '编号正序', value: 'seq' }]"
                           style="width: 100px; margin-left: 8px;"></n-select>
                 <!-- v0.26.1：批量停用 / 启用 -->
-                <n-button size="tiny" style="margin-left: 8px;"
-                          @click="toggleGalBulk">{{ galBulk ? "退出批量" : "批量停用/启用" }}</n-button>
+                <!-- v0.26.2：入口改浅色主色 + 常规尺寸，旧版 tiny 灰按钮找不到 -->
+                <n-button size="small" style="margin-left: 8px;"
+                          :type="galBulk ? 'default' : 'primary'"
+                          :secondary="!galBulk"
+                          @click="toggleGalBulk">{{ galBulk ? "退出批量" : "批量停用 / 启用" }}</n-button>
               </div>
               <div v-if="galBulk" class="gal-bulk-bar">
-                <span class="bind-tip" style="margin-top: 0;">已选 {{ galSelCount }} 张</span>
-                <n-button size="tiny" @click="galSelAllVisible">全选 / 反选</n-button>
-                <n-button size="tiny" :disabled="!galSelCount"
-                          @click="doBulkPortrait(false)">停用选中</n-button>
-                <n-button size="tiny" :disabled="!galSelCount"
-                          @click="doBulkPortrait(true)">启用选中</n-button>
-                <span class="bind-tip" style="margin-top: 0;">停用只是不参与抽卡与配额，图片和记录都保留，可随时恢复</span>
+                <span class="gal-bulk-count">已选 <b>{{ galSelCount }}</b> 张</span>
+                <n-button size="small" @click="galSelAllVisible">全选 / 反选</n-button>
+                <n-button size="small" type="warning" :loading="bulkBusy"
+                          :disabled="!galSelCount" @click="doBulkPortrait(false)">{{ bulkOffText }}</n-button>
+                <n-button size="small" type="primary" :loading="bulkBusy"
+                          :disabled="!galSelCount" @click="doBulkPortrait(true)">{{ bulkOnText }}</n-button>
+                <span class="gal-bulk-tip">停用不参与抽卡与配额，图片和记录保留，可随时恢复</span>
               </div>
               <!-- v0.18.2：切换角色先立载入态（骨架 + 文字），不再拿上一位的立绘凑数 -->
               <div v-if="galSwitching">
@@ -4441,20 +4449,43 @@
           && (galSel.value || []).length >= files.length;
         galSel.value = allPicked ? [] : files;
       }
+      // v0.26.2：两段确认必须看得见——第一次点击把按钮文案改成「确认停用 N 张？」，
+      // 同时弹一条提示。旧版这里静默 return，用户以为按钮坏了。
+      var bulkBusy = Vue.ref(false);
+      var bulkOffArmed = Vue.computed(function () {
+        return delArm.value === ("bulk:off:" + galSelCount.value);
+      });
+      var bulkOnArmed = Vue.computed(function () {
+        return delArm.value === ("bulk:on:" + galSelCount.value);
+      });
+      var bulkOffText = Vue.computed(function () {
+        return bulkOffArmed.value
+          ? ("确认停用 " + galSelCount.value + " 张？") : "停用选中";
+      });
+      var bulkOnText = Vue.computed(function () {
+        return bulkOnArmed.value
+          ? ("确认启用 " + galSelCount.value + " 张？") : "启用选中";
+      });
       async function doBulkPortrait(active) {
         var files = (galSel.value || []).slice();
-        if (!files.length) { message.warning("先选择要处理的立绘"); return; }
-        // 与单张停用同款两段确认（再点一次才真正执行）
-        if (!armDelete("bulk:" + (active ? "on" : "off") + ":" + files.length)) return;
+        if (!files.length) { message.warning("先勾选要处理的立绘"); return; }
+        if (!armDelete("bulk:" + (active ? "on" : "off") + ":" + files.length)) {
+          message.info("再点一次「确认" + (active ? "启用" : "停用") + " "
+            + files.length + " 张」执行（3 秒内有效）");
+          return;
+        }
+        bulkBusy.value = true;
         try {
           var res = await apiPost("portraits/set_active",
             { files: files, active: !!active });
+          delArm.value = "";
           message.success((active ? "已启用 " : "已停用 ") + (res.changed || 0) + " 张"
             + (res.skipped_count ? "，跳过 " + res.skipped_count + " 张" : ""));
-          delArm.value = "";
           galSel.value = [];
           await refreshAll();
-        } catch (e) { /* 已提示 */ }
+        } catch (e) { /* 已提示 */ } finally {
+          bulkBusy.value = false;
+        }
       }
       var galItemsView = Vue.computed(function () {
         var arr = (galItems.value || []).filter(function (it) {
@@ -6254,6 +6285,7 @@
         galBulk: galBulk, galSel: galSel, galSelCount: galSelCount,
         toggleGalBulk: toggleGalBulk, toggleGalSel: toggleGalSel,
         galSelAllVisible: galSelAllVisible, doBulkPortrait: doBulkPortrait,
+        bulkBusy: bulkBusy, bulkOffText: bulkOffText, bulkOnText: bulkOnText,
         doRestorePortrait: doRestorePortrait, doDeletePortraitHard: doDeletePortraitHard,
         // v0.18.2：切换角色的载入态（骨架 + 文案）
         galSwitching: galSwitching, galSwitchTip: galSwitchTip,
