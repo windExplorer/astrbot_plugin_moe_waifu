@@ -491,6 +491,31 @@ def get_theme(theme_id: str) -> dict | None:
     return next((t for t in THEMES if t["id"] == tid), None)
 
 
+def content_theme_ids() -> list:
+    """内容主题 id（排除 random 与 tpl_ 模板；batch_fill 轮换池同口径）。"""
+    return [str(t["id"]) for t in THEMES
+            if str(t.get("id") or "") != "random"
+            and not str(t.get("id") or "").startswith("tpl_")]
+
+
+def resolve_theme(theme_id: str, seed_int: int) -> tuple[dict | None, str]:
+    """解析主题 id → (theme, 实际生效 id)。
+
+    v0.20.0 起「random」不再是「不套主题」：按种子从内容主题池等权摇一个
+    （决定论，同种子恒定；试画台预览与实际生成各自调用本函数，结果一致，
+    摇中的主题 id 可随档记录、详情弹窗能看到「随机到底摇出了什么主题」）。
+    空串/未知 id 维持不套主题（抽卡主链路现状：维度纯随机）。
+    """
+    tid = str(theme_id or "").strip()
+    if tid != "random":
+        return get_theme(tid), tid
+    ids = content_theme_ids()
+    if not ids:
+        return None, tid
+    rid = ids[_sub(seed_int, "theme_roll", 2 ** 30) % len(ids)]
+    return get_theme(rid), rid
+
+
 def apply_theme(picks: dict, seed_int: int, theme: dict | None) -> dict:
     """主题约束：带维度关键词的主题在对应维度池子集内重摇（其余维度保持种子随机）。
 
@@ -745,6 +770,23 @@ def variation_zh_list(picks: dict) -> list:
         if zh:
             out.append((label, zh))
     return out
+
+
+def describe_variations(seed_int: int, theme_id: str = "", outfit: str = "",
+                        dim_state: dict | None = None,
+                        force_single: bool = False) -> list:
+    """复算本轮变化维度（与 build_generation_prompt 同种子同口径），随档记录用。
+
+    返回 [(维度中文标签, 中文短语)]，只含非空项。图生图链路传 force_single=True
+    （compose 强制单图后不参与变化短语，与提示词文本一致）。纯函数。
+    """
+    theme, _ = resolve_theme(theme_id, seed_int)
+    picks = pick_variations(seed_int, theme, outfit)
+    if force_single and not (theme and theme.get("compose_kw")):
+        picks = force_single_view(picks)
+    if dim_state:
+        picks = apply_dim_state(picks, seed_int, dim_state, theme)
+    return variation_zh_list(picks)
 
 
 # ---------- 本地模板（无 LLM 兜底） ----------
@@ -1082,13 +1124,14 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
     img2img（qwen image 2.1 编辑）走自然语言编辑指令；base/lora（文生图）按
     工作流底模风格分派：danbooru=tag 拼装、natural=英文 caption、qwen=中文
     长描述（风格探测失败一律回落 danbooru tag 拼装）。
-    theme_id：主题预设（试画台预览用；random/空 = 纯种子随机）。
+    theme_id：主题预设（random = 从内容主题池按种子摇一个，v0.20.0 起；
+    空串 = 抽卡主链路现状：不套主题、维度纯随机）。
     custom：用户自填的附加要求（融入指令/描述）。
     outfit：用户指定穿搭（预览面板「穿搭」框，空 = 按种子/主题随机）。
     dim_state：预览面板维度级控制（v0.14.0，见 apply_dim_state；抽卡主链路
     不传 = 纯种子决定论不变）。
     """
-    theme = get_theme(theme_id)
+    theme, _theme_rec = resolve_theme(theme_id, seed_int)
     try:
         stype = str(entry.get("strategy_type") or "base")
         if stype != "img2img":

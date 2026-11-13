@@ -90,6 +90,25 @@ def test_move_to_ref(root: Path):
     st.close()
 
 
+def test_move_to_ref_carries_meta(root: Path):
+    """v0.20.0：立绘转参考图时把 prompt/theme/seed/尺寸带进 ref_meta。"""
+    plugin, st = make_plugin(root)
+    rel = "portraits/c1/a.png"
+    put_portrait(root, st, rel, b"CCC")
+    st._conn.execute(
+        "UPDATE portraits SET prompt=?, theme=?, width=?, height=? WHERE file=?",
+        ("立绘提示词", "campus", 700, 1200, rel))
+    st._conn.commit()
+    res = api._move_portrait_to_ref(plugin, rel, "c1")
+    meta = st.get_ref_meta([res["to"]]).get(res["to"])
+    check("转参考图带走生成信息",
+          meta is not None and meta.get("prompt") == "立绘提示词"
+          and meta.get("theme") == "campus" and int(meta.get("width") or 0) == 700,
+          str(meta))
+    check("来源标记为立绘转入", meta is not None and meta.get("source") == "moved")
+    st.close()
+
+
 def test_roundtrip(root: Path):
     plugin, st = make_plugin(root)
     rel = "portraits/c1/a.png"
@@ -357,7 +376,9 @@ def test_orphan_delete(root: Path):
 
 
 def main():
-    jobs = [("move_to_ref", test_move_to_ref), ("roundtrip", test_roundtrip),
+    jobs = [("move_to_ref", test_move_to_ref),
+            ("move_to_ref_meta", test_move_to_ref_carries_meta),
+            ("roundtrip", test_roundtrip),
             ("delete_legacy", test_delete_legacy_dirty_data),
             ("delete_clean", test_delete_clean_portrait),
             ("shared_ref", test_shared_ref_not_deleted),

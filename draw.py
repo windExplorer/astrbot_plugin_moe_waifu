@@ -626,6 +626,19 @@ def archive_portrait(src: str, data_dir: Path, char_id: str, date_str: str,
     return f"portraits/{char_id}/{name}"
 
 
+def image_size(path) -> tuple:
+    """读图片尺寸 (width, height)；任何失败返回 (0, 0)（详情弹窗显示「未知」）。
+
+    Pillow 只在此处延迟导入：读不到 / 不是图 / PIL 缺失都不该阻塞归档主链路。
+    """
+    try:
+        from PIL import Image
+        with Image.open(str(path)) as im:
+            return int(im.width), int(im.height)
+    except Exception:
+        return (0, 0)
+
+
 def resolve_portrait_rel(data_dir: Path, rel: str) -> Path:
     return Path(data_dir) / rel
 

@@ -17,6 +17,7 @@ import asyncio
 import base64
 import hashlib
 import io
+import json
 import re
 import shutil
 import time
@@ -490,6 +491,10 @@ async def h_portraits_list(plugin) -> dict:
             "prompt": row["prompt"],
             "theme": row["theme"],
             "strategy": row["strategy"],
+            # v0.20.0：变化维度（JSON 串，旧行为空）与图片尺寸（未知为 0）
+            "dims": row.get("dims") or "",
+            "width": int(row.get("width") or 0),
+            "height": int(row.get("height") or 0),
         })
     return ok({"char_id": cid, "items": items})
 
@@ -652,6 +657,20 @@ def _move_portrait_to_ref(plugin, rel: str, cid: str = "") -> dict:
     # 历史脏数据：同一个立绘路径可能早被老版「加入参考图库」绑进 refs，
     # 先统一改到新路径，再去重追加，避免出现两条引用同一张图。
     rewritten = _rewrite_path_refs(plugin, rel, new_rel)
+    # v0.20.0：立绘行的生成信息（提示词/主题/种子/尺寸）随文件带走
+    if plugin._store:
+        try:
+            prow = plugin._store.portrait_by_file(rel)
+            if prow:
+                plugin._store.set_ref_meta(
+                    new_rel, prompt=prow.get("prompt"),
+                    theme=str(prow.get("theme") or ""), seed=prow.get("seed"),
+                    source="moved",
+                    width=int(prow.get("width") or 0),
+                    height=int(prow.get("height") or 0))
+        except Exception:
+            logger.warning(f"[{PLUGIN_NAME}] 参考图生成信息记录失败（不影响转移）\n"
+                           f"{traceback.format_exc()}")
 
     def bind(_e, raw):
         st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
@@ -873,12 +892,15 @@ async def _run_job(plugin, job_id: str, entry: dict, kind: str,
     seq = plugin._store.next_portrait_seq(char_id)
     seed_int = pool.portrait_seed_int(char_id, date, seq, salt)
     draw_cfg = plugin._draw_cfg()
+    # v0.20.0：「random」= 从内容主题池按种子实摇（预览与生成同口径），
+    # 实摇中的主题 id 随档记录——详情弹窗能看到「随机到底摇出了什么主题」
+    theme_res, theme_rec = prompt_gen.resolve_theme(theme_id, seed_int)
     if prompt_override:
         # 试画台「确认提示词」直通（v0.5.9）：预览面板确认的文本按原文出图
         prompt_text, prompt_src = prompt_override, "manual"
     else:
         prompt_text, prompt_src = await prompt_gen.build_generation_prompt(
-            plugin.context, draw_cfg, entry, seed_int, theme_id
+            plugin.context, draw_cfg, entry, seed_int, theme_res or ""
         )
     logger.info(f"[{PLUGIN_NAME}] 立绘提示词（{prompt_src}）：{prompt_text[:80]}")
     t0 = time.monotonic()
@@ -887,17 +909,25 @@ async def _run_job(plugin, job_id: str, entry: dict, kind: str,
         prompt=prompt_text,
     )
     duration = int((time.monotonic() - t0) * 1000)
-    # v0.15.0：主题 id 随 job 记录（归档时写进立绘行，详情弹窗展示）
-    theme_rec = str(theme_id or "").strip()
+    # v0.20.0：变化维度 / 图片尺寸随档记录（手动提示词直通时维度不适用）
+    dims_json = ""
+    if prompt_src != "manual":
+        dims_json = json.dumps(prompt_gen.describe_variations(
+            seed_int, theme_rec,
+            force_single=(str(entry.get("strategy_type") or "") == "img2img")),
+            ensure_ascii=False)
+    img_w, img_h = draw.image_size(src) if src else (0, 0)
     plugin._store.log_job(char_id, date, "try" if kind == "try" else "refill", status,
                           "workshop", entry["strategy_type"], seed_int, error, duration, src or "")
     job.update({"status": status, "error": error, "duration_ms": duration,
                 "seed": seed_int, "src_path": src or "", "char_id": char_id,
-                "prompt": prompt_text[:500], "prompt_src": prompt_src, "theme": theme_rec})
+                "prompt": prompt_text[:500], "prompt_src": prompt_src, "theme": theme_rec,
+                "dims": dims_json, "width": img_w, "height": img_h})
     if src and kind == "refill" and not no_archive:
         rel = draw.archive_portrait(src, plugin._data_dir, char_id, date, seq, seed_int)
         plugin._store.add_portrait(char_id, rel, seed_int, date, seq,
-                                   entry["strategy_type"], prompt=prompt_text, theme=theme_rec)
+                                   entry["strategy_type"], prompt=prompt_text, theme=theme_rec,
+                                   dims=dims_json, width=img_w, height=img_h)
         job["archived"] = rel
     if src:
         # 试画缓存（v0.5.9）：萌绘产物在其自己的数据目录里，/image/data 只认本插件
@@ -944,7 +974,10 @@ async def h_job_archive(plugin) -> dict:
                                 int(job.get("seed") or 0))
     plugin._store.add_portrait(cid, rel, int(job.get("seed") or 0), date, seq, "try",
                                prompt=str(job.get("prompt") or "") or None,
-                               theme=str(job.get("theme") or ""))
+                               theme=str(job.get("theme") or ""),
+                               dims=str(job.get("dims") or ""),
+                               width=int(job.get("width") or 0),
+                               height=int(job.get("height") or 0))
     job["archived"] = rel
     return ok({"archived": rel})
 
@@ -987,6 +1020,18 @@ async def h_job_to_ref(plugin) -> dict:
     pack_name = _set_entry_field(plugin, cid, mutate)
     if pack_name is None:
         return err(f"角色库里找不到 {cid}")
+    # v0.20.0：生成信息随参考图记录（详情弹窗查看；同一文件重复转存时覆盖）
+    if plugin._store:
+        try:
+            plugin._store.set_ref_meta(
+                rel, prompt=str(job.get("prompt") or "") or None,
+                theme=str(job.get("theme") or ""),
+                seed=(int(job.get("seed")) if job.get("seed") else None),
+                source="try",
+                width=int(job.get("width") or 0), height=int(job.get("height") or 0))
+        except Exception:
+            logger.warning(f"[{PLUGIN_NAME}] 参考图生成信息记录失败（不影响绑定）\n"
+                           f"{traceback.format_exc()}")
     return ok({"rel": rel, "path": str(Path(plugin._data_dir) / rel)})
 
 
@@ -1126,6 +1171,16 @@ async def h_refs_list(plugin) -> dict:
             "path": p, "exists": fp is not None,
             "thumb": _thumb_cached(fp, 420) if fp is not None else None,
         })
+    # v0.20.0：生成信息随图返回（试画转入 / 立绘转入时有，手动上传为 null）
+    metas = {}
+    if plugin._store and items:
+        try:
+            metas = plugin._store.get_ref_meta([it["path"] for it in items])
+        except Exception:
+            metas = {}
+    for it in items:
+        m = metas.get(it["path"])
+        it["meta"] = dict(m) if m else None
     # draw_ref 存的是归一后的相对路径；立绘卡用绝对路径比较，所以再给一份
     # 绝对路径（v0.12.0：否则「设为出卡源」的立绘卡片不会高亮）。
     draw_raw = str(st.get("draw_ref") or "")
@@ -1428,8 +1483,9 @@ async def h_prompt_preview(plugin) -> dict:
         plugin.context, cfg, entry, seed_int, theme_id, custom, outfit, dim_state
     )
     # dims 展示与提示词文本必须同源同序：镜像 build_generation_prompt 内部的
-    # picks 计算链（全池→主题子集→图生图强制单图→维度级控制），两处改动要同步
-    theme = prompt_gen.get_theme(theme_id)
+    # picks 计算链（全池→主题子集→图生图强制单图→维度级控制），两处改动要同步。
+    # v0.20.0：random 在预览与生成两侧都按同一种子实摇（resolve_theme 决定论）
+    theme, _theme_rec = prompt_gen.resolve_theme(theme_id, seed_int)
     picks = prompt_gen.pick_variations(seed_int, theme, outfit)
     if str(entry.get("strategy_type") or "base") == "img2img" \
             and not (theme and theme.get("compose_kw")):

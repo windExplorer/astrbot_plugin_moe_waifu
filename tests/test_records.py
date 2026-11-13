@@ -393,6 +393,40 @@ def test_trash_files(tmp: Path):
     st.close()
 
 
+def test_ref_meta_and_dims(tmp: Path):
+    """v0.20.0：立绘行 dims/width/height 随档 + ref_meta 参考图生成信息。"""
+    st, plugin = fresh(tmp)
+    st.add_portrait("a_char", "portraits/a_char/1.png", 42, TODAY, 1, "base",
+                    prompt="测试提示词", theme="campus",
+                    dims=json.dumps([["服装", "JK 制服"], ["背景", "教室"]],
+                                    ensure_ascii=False),
+                    width=700, height=1200)
+    row = st.list_portraits("a_char")[0]
+    check("dims 随档落库", "JK 制服" in str(row.get("dims") or ""))
+    check("尺寸随档落库",
+          int(row.get("width") or 0) == 700 and int(row.get("height") or 0) == 1200)
+    check("portrait_by_file 命中",
+          (st.portrait_by_file("portraits/a_char/1.png") or {}).get("seed") == 42)
+    check("portrait_by_file 未命中返回 None",
+          st.portrait_by_file("portraits/x/y.png") is None)
+    # ref_meta：写入 / 批量取 / 覆盖
+    st.set_ref_meta("refs/a.png", prompt="参考提示词", theme="home", seed=7,
+                    source="try", width=512, height=512)
+    st.set_ref_meta("refs/b.png", source="moved")
+    metas = st.get_ref_meta(["refs/a.png", "refs/b.png", "refs/none.png"])
+    check("ref_meta 批量取命中两条",
+          set(metas.keys()) == {"refs/a.png", "refs/b.png"})
+    check("ref_meta 字段齐全",
+          metas["refs/a.png"]["prompt"] == "参考提示词"
+          and metas["refs/a.png"]["source"] == "try"
+          and int(metas["refs/a.png"]["width"] or 0) == 512)
+    st.set_ref_meta("refs/a.png", prompt="覆盖后的提示词", source="try")
+    metas2 = st.get_ref_meta(["refs/a.png"])
+    check("ref_meta 同路径覆盖", metas2["refs/a.png"]["prompt"] == "覆盖后的提示词")
+    check("ref_meta 空清单安全", st.get_ref_meta([]) == {})
+    st.close()
+
+
 def main():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
@@ -407,6 +441,7 @@ def main():
                      ("portraits_seq_meta", test_portraits_seq_and_meta),
                      ("discover_add", test_discover_add_core),
                      ("trash_files", test_trash_files),
+                     ("ref_meta", test_ref_meta_and_dims),
                      ("cores", test_cores)):
         with tempfile.TemporaryDirectory() as td:
             print(f"--- {name} ---")

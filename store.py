@@ -58,6 +58,17 @@ CREATE TABLE IF NOT EXISTS portraits (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_portraits_char ON portraits(char_id, seq);
+-- v0.20.0：参考图生成信息（转存/转入参考图时随文件记录；手动上传的图没有）
+CREATE TABLE IF NOT EXISTS ref_meta (
+  file       TEXT PRIMARY KEY,            -- refs/ 相对路径（与 strategy.refs 同口径）
+  prompt     TEXT,
+  theme      TEXT NOT NULL DEFAULT '',
+  seed       INTEGER,
+  source     TEXT NOT NULL DEFAULT '',    -- try（试画转入）/ moved（立绘转入）
+  width      INTEGER NOT NULL DEFAULT 0,
+  height     INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS draw_jobs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   char_id     TEXT NOT NULL,
@@ -126,6 +137,11 @@ _MIGRATIONS = {
         # prompt 可空（参考图转立绘的行没有提示词）
         "prompt": "TEXT",
         "theme": "TEXT NOT NULL DEFAULT ''",
+        # v0.20.0：变化维度（JSON 数组字符串 "[[label, zh], ...]"，空 = 旧行未记录）
+        # + 图片尺寸（归档时读文件；读不到 = 0）
+        "dims": "TEXT",
+        "width": "INTEGER NOT NULL DEFAULT 0",
+        "height": "INTEGER NOT NULL DEFAULT 0",
     },
     "draws": {
         "seed_hex": "TEXT NOT NULL DEFAULT ''",
@@ -340,15 +356,55 @@ class Store:
 
     def add_portrait(self, char_id: str, file: str, seed: int, date: str,
                      seq: int, strategy: str,
-                     prompt: str | None = None, theme: str = "") -> None:
+                     prompt: str | None = None, theme: str = "",
+                     dims: str = "", width: int = 0, height: int = 0) -> None:
         # v0.15.0：prompt/theme 随档记录（立绘详情弹窗展示）；prompt 可空。
+        # v0.20.0：dims（变化维度 JSON）/ 图片尺寸随档记录。
         self._conn.execute(
             "INSERT INTO portraits (char_id, file, seed, date, seq, strategy, created_at,"
-            " prompt, theme) VALUES (?,?,?,?,?,?,?,?,?)",
+            " prompt, theme, dims, width, height) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (char_id, file, int(seed), date, int(seq), strategy, _now(),
-             prompt, str(theme or "")),
+             prompt, str(theme or ""), str(dims or ""),
+             int(width or 0), int(height or 0)),
         )
         self._conn.commit()
+
+    def portrait_by_file(self, file: str) -> dict | None:
+        """按相对路径取立绘行（转参考图时把 prompt/theme/seed 带走）。"""
+        row = self._conn.execute(
+            "SELECT * FROM portraits WHERE file=?", (str(file or ""),),
+        ).fetchone()
+        return dict(row) if row else None
+
+    # ---------- ref_meta（v0.20.0：参考图的生成信息） ----------
+
+    def set_ref_meta(self, file: str, prompt: str | None = None, theme: str = "",
+                     seed: int | None = None, source: str = "",
+                     width: int = 0, height: int = 0) -> None:
+        """随文件记录参考图的生成信息；同路径重复转入时覆盖（内容寻址同文件）。"""
+        self._conn.execute(
+            "INSERT INTO ref_meta (file, prompt, theme, seed, source, width, height,"
+            " created_at) VALUES (?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(file) DO UPDATE SET prompt=excluded.prompt,"
+            " theme=excluded.theme, seed=excluded.seed, source=excluded.source,"
+            " width=excluded.width, height=excluded.height",
+            (str(file or ""), prompt, str(theme or ""),
+             None if seed is None else int(seed), str(source or ""),
+             int(width or 0), int(height or 0), _now()),
+        )
+        self._conn.commit()
+
+    def get_ref_meta(self, files) -> dict:
+        """批量取 ref_meta：{file: 行 dict}；不在表里的路径不出现在结果中。"""
+        fs = [str(f) for f in (files or []) if str(f or "").strip()]
+        out: dict = {}
+        for i in range(0, len(fs), 200):
+            chunk = fs[i:i + 200]
+            q = ",".join("?" * len(chunk))
+            rows = self._conn.execute(
+                f"SELECT * FROM ref_meta WHERE file IN ({q})", chunk).fetchall()
+            out.update({r["file"]: dict(r) for r in rows})
+        return out
 
     def next_portrait_seq(self, char_id: str) -> int:
         """该角色的下一个立绘序号 = 历史最大 seq + 1（v0.15.0 修重复编号）。

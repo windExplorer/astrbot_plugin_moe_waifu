@@ -95,10 +95,12 @@ def main():
     real_draw, real_pg, real_pool = bf.draw, bf.prompt_gen, bf.pool
     fake_draw = types.SimpleNamespace(
         generate_portrait=async_init(lambda *a, **k: ("/tmp/x.png", "ok", "", 1)),
-        archive_portrait=lambda *a: "portraits/x/1.png")
+        archive_portrait=lambda *a: "portraits/x/1.png",
+        image_size=lambda *a: (0, 0))  # v0.20.0：随档尺寸（桩不给真值）
     fake_prompt_gen = types.SimpleNamespace(
         THEMES=real_pg.THEMES,
-        build_generation_prompt=async_init(lambda *a, **k: ("p", "local")))
+        build_generation_prompt=async_init(lambda *a, **k: ("p", "local")),
+        describe_variations=lambda *a, **k: [])  # v0.20.0：随档维度（桩不给真值）
     fake_pool = types.SimpleNamespace(
         portrait_seed_int=lambda *a: 1)
 

@@ -2,6 +2,38 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.20.0 (2026-11-13)
+
+立绘信息增强：random 主题实摇随档 + 参考图生成信息 + 立绘详情弹窗丰富（版本 v0.19.10 -> v0.20.0）。
+
+- **需求（用户三条）**：① 主题选「随机」时随机出来的没有主题吗；② 参考图里有些图
+  也是生成的，也应该能看到提示词等信息；③ 立绘详情缺生成时间、维度、尺寸的查看，
+  详情弹窗应该更丰富。
+- **① random 主题实摇（行为变更）**：旧实现里「随机」= `get_theme("random") → None`
+  ——**根本不套主题**，只有变化维度纯随机，详情弹窗「随机（未指定主题）」让用户误以为
+  摇了主题没记。v0.20.0 起选「随机」会**从内容主题池（排除 random/tpl_）按种子等权
+  摇一个真主题**（`resolve_theme`，决定论：预览与实际生成各自调用同种子结果一致），
+  实摇中的主题 id 随档写进 `portraits.theme`——详情弹窗能看到「随机到底摇出了什么」。
+  抽卡主链路（不传主题）维持不套主题、维度纯随机不变；试画台预览（`h_prompt_preview`）
+  与工坊生成（`_run_job`）两侧同口径。
+- **② 参考图生成信息（新表 `ref_meta`）**：参考图文件本体在 `data/refs/`、绑定在
+  角色包 strategy JSON 里，生成信息此前随「立绘转参考图 / 试画转参考图」直接丢失。
+  新增 store 表 `ref_meta`（file 主键：prompt/theme/seed/source/width/height/created_at）：
+  - `h_job_to_ref`（试画转参考图）：写入 job 的提示词/主题/seed/尺寸，source=try；
+  - `_move_portrait_to_ref`（立绘转参考图）：读立绘行带走 prompt/theme/seed/尺寸，
+    source=moved（新增 `store.portrait_by_file`）；
+  - `refs/list` 合并 meta 随 items 返回；手动上传的图无记录，前端如实提示。
+- **③ 立绘详情弹窗丰富**：生成时间（fmtTime）+ 尺寸 tag（新列 `width`/`height`，
+  归档时 `draw.image_size` 读文件，旧图/读不到显示「尺寸未知」）+ **本轮变化维度**
+  chips（新列 `dims`，JSON 数组随档；抽卡链 `describe_variations` 复算，与提示词文本
+  同种子同口径；旧行为空不渲染）+ 主题文案改为「抽卡链未套主题（变化维度纯随机）」。
+  参考图卡新增 info 按钮 → 参考图详情弹窗（来源/尺寸/主题/seed/入库时间/提示词）。
+- **随档链路全覆盖**：抽卡链（main.py）/ 工坊试画·补图（webui_api `_run_job`、
+  `h_job_archive`）/ 批量补图（batch_fill）三条生成立绘的路径都写 dims/width/height。
+- **守卫**：`test_records` 新增 ref_meta/dims 落库与覆盖段；`test_refs_move` 新增
+  「转移带走生成信息」用例；`test_prompt_gen` 新增 random 实摇决定论/分布/
+  内容主题池边界 + describe_variations 同源断言。
+
 ## v0.19.10 (2026-11-13)
 
 防双头/双人 + 体型维度重做：默认跟随参考图体型（90%），补少女/萝莉两档（版本 v0.19.9 -> v0.19.10）。

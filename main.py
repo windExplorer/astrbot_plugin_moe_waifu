@@ -7,6 +7,7 @@
 """
 import asyncio
 import importlib
+import json
 import random
 import re
 import sys
@@ -540,9 +541,16 @@ class MoeWaifuPlugin(Star):
                 await self._send_plain(event, self._draw_error_text(status, err))
                 return None
             rel_path = draw.archive_portrait(raw_src, self._data_dir, char_id, date, seq, seed_int)
-            # v0.15.0：随档记录提示词（主题在抽卡链恒为随机，无主题 id）
-            self._store.add_portrait(char_id, rel_path, seed_int, date, seq,
-                                     entry["strategy_type"], prompt=prompt_text, theme="")
+            # v0.15.0：随档记录提示词；抽卡主链路不套主题（维度纯随机），theme 恒空
+            # v0.20.0：变化维度 / 图片尺寸随档记录（详情弹窗查看）
+            _w, _h = draw.image_size(self._data_dir / rel_path)
+            self._store.add_portrait(
+                char_id, rel_path, seed_int, date, seq,
+                entry["strategy_type"], prompt=prompt_text, theme="",
+                dims=json.dumps(prompt_gen.describe_variations(
+                    seed_int, force_single=(entry["strategy_type"] == "img2img")),
+                    ensure_ascii=False),
+                width=_w, height=_h)
             src = self._data_dir / rel_path
 
         # 落库与计数（先 upsert 再查同款，含自己）

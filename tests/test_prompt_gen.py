@@ -515,4 +515,22 @@ check("natural 系统提示带 solo 约束",
       "solo" in prompt_gen._SYSTEM_T2I_NATURAL
       and "single character" in prompt_gen._SYSTEM_T2I_NATURAL)
 
+# ---------- v0.20.0：random 主题实摇 + describe_variations 复算 ----------
+_t1, _t1id = prompt_gen.resolve_theme("random", 42)
+_t2, _t2id = prompt_gen.resolve_theme("random", 42)
+check("random 主题实摇决定论", _t1id == _t2id and _t1 is not None)
+check("random 实摇结果在内容主题池", _t1id in prompt_gen.content_theme_ids())
+check("random 实摇分布非退化（200 种子 >= 8 种）",
+      len({prompt_gen.resolve_theme("random", s)[1] for s in range(200)}) >= 8)
+check("具体主题 id 原样透传", prompt_gen.resolve_theme("campus", 42)[1] == "campus")
+check("空串仍不套主题", prompt_gen.resolve_theme("", 42) == (None, ""))
+check("tpl_ 模板可透传（batch_fill 不受影响）",
+      prompt_gen.resolve_theme("tpl_3view", 42)[1] == "tpl_3view")
+_dv = prompt_gen.describe_variations(777)
+check("describe_variations 与 variation_zh_list 同源",
+      _dv == prompt_gen.variation_zh_list(prompt_gen.pick_variations(777)))
+_dv_i2i = prompt_gen.describe_variations(777, force_single=True)
+check("describe_variations force_single 不含三/四视图",
+      all("视图" not in zh for _, zh in _dv_i2i))
+
 print("test_prompt_gen: ALL OK")

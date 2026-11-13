@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 
 try:  # AstrBot 运行期
     from astrbot.api import logger
@@ -190,10 +191,18 @@ class BatchRunner:
                         rel = draw.archive_portrait(src, plugin._data_dir,
                                                     cid, date, seq, seed_int)
                         if plugin._store:
+                            # v0.20.0：变化维度 / 图片尺寸随档记录
+                            _w, _h = draw.image_size(plugin._data_dir / rel)
                             plugin._store.add_portrait(
                                 cid, rel, seed_int, date, seq,
                                 entry.get("strategy_type") or "base",
-                                prompt=prompt_text, theme=theme_id)
+                                prompt=prompt_text, theme=theme_id,
+                                dims=json.dumps(prompt_gen.describe_variations(
+                                    seed_int, theme_id,
+                                    force_single=(str(entry.get("strategy_type") or "")
+                                                  == "img2img")),
+                                    ensure_ascii=False),
+                                width=_w, height=_h)
                         item["status"] = "ok"
                         item["error"] = ""
                         item["file"] = rel
