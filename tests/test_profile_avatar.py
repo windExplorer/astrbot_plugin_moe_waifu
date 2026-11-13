@@ -220,6 +220,24 @@ def test_backfill_duration():
         st.close()
 
 
+def test_backfill_ref_duration():
+    """v0.33.2：已生成参考图的耗时回填——ref_meta.seed 匹配 draw_jobs。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        st = store.Store(Path(tmp) / "waifu.db")
+        st.set_ref_meta("refs/gen_1.png", seed=777, source="try")     # duration 0
+        st.set_ref_meta("refs/gen_2.png", seed=888, source="try")
+        st.log_job("a", "2026-11-01", "try", "ok", "workshop", "base",
+                   777, "", 41000, "")
+        st._conn.commit()
+        st._backfill_ref_durations()
+        metas = st.get_ref_meta(["refs/gen_1.png", "refs/gen_2.png"])
+        check("参考图回填：seed 匹配到任务耗时",
+              metas["refs/gen_1.png"]["duration_ms"] == 41000)
+        check("参考图回填：无匹配任务的行保持 0",
+              metas["refs/gen_2.png"]["duration_ms"] == 0)
+        st.close()
+
+
 def main():
     test_normalize_and_merge()
     test_sanitize_profile()
@@ -228,6 +246,7 @@ def main():
     test_avatar_prompt()
     test_store_summary_and_trend()
     test_backfill_duration()
+    test_backfill_ref_duration()
     if FAILURES:
         print(f"\ntest_profile_avatar: {len(FAILURES)} FAILED")
         sys.exit(1)

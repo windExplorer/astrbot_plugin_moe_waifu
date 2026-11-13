@@ -1294,7 +1294,7 @@
                                   @click.stop="unbindGalRef(r)"></w-icon-btn>
                     </div>
                     <div class="gal-meta">
-                      {{ galMainRef === r.path ? "主参考" : "备选" }}{{ galDrawRef === r.path ? " · 出卡源" : "" }}
+                      {{ galMainRef === r.path ? "主参考" : "备选" }}{{ galDrawRef === r.path ? " · 出卡源" : "" }}{{ r.meta && r.meta.duration_ms > 0 ? " · 耗时 " + fmtDur(r.meta.duration_ms) : "" }}
                     </div>
                   </div>
                 </n-gi>
@@ -1331,6 +1331,9 @@
                                       :tip="delArm === 'orphan:' + o.path
                                             ? '再点一次确认物理删除文件' : '物理删除这个文件'"
                                       @click.stop="deleteOrphan(o)"></w-icon-btn>
+                        </div>
+                        <div class="gal-meta" v-if="o.duration_ms > 0">
+                          生成转入 · 耗时 {{ fmtDur(o.duration_ms) }}
                         </div>
                       </div>
                     </n-gi>
@@ -2482,6 +2485,9 @@
           <template v-if="refDetail.meta">
             <n-tag size="small" :bordered="false" v-if="refDetail.meta.width > 0">
               {{ refDetail.meta.width }} × {{ refDetail.meta.height }}
+            </n-tag>
+            <n-tag size="small" :bordered="false" v-if="refDetail.meta.duration_ms > 0">
+              耗时 {{ fmtDur(refDetail.meta.duration_ms) }}
             </n-tag>
             <n-tag size="small" :bordered="false" type="info" v-if="refDetail.meta.theme">
               主题：{{ themeLabel(refDetail.meta.theme) }}

@@ -229,6 +229,11 @@ _MIGRATIONS = {
     "draw_events": {
         "decision_note": "TEXT NOT NULL DEFAULT ''",
     },
+    # v0.33.2：参考图的生成耗时（毫秒，试画转入 / 立绘转入时随 meta 记录；
+    # 手动上传的图没有 meta 行 = 不显示）
+    "ref_meta": {
+        "duration_ms": "INTEGER NOT NULL DEFAULT 0",
+    },
 }
 
 
@@ -319,6 +324,26 @@ class Store:
 
         # v0.33.1：为 v0.30.0 之前生成的历史立绘回填耗时（幂等，见方法 docstring）
         self._backfill_portrait_durations()
+        # v0.33.2：为历史已生成的参考图回填耗时（ref_meta 有 seed 的行）
+        self._backfill_ref_durations()
+
+    def _backfill_ref_durations(self) -> None:
+        """为已生成的参考图回填耗时（幂等）。
+
+        ref_meta 里 source=try/moved 的行带 seed，与 draw_jobs 的成功任务按
+        seed 匹配（ref_meta 无 char_id，31 位种子跨角色撞键概率可忽略；同键
+        多条取最小值）。手动上传的图没有 meta 行、自然不参与。只回填
+        duration_ms = 0 的行，幂等。
+        """
+        self._conn.execute(
+            "UPDATE ref_meta SET duration_ms = ("
+            "  SELECT MIN(j.duration_ms) FROM draw_jobs j"
+            "  WHERE j.seed = ref_meta.seed"
+            "    AND j.status = 'ok' AND j.duration_ms > 0)"
+            " WHERE duration_ms = 0 AND seed IS NOT NULL AND EXISTS ("
+            "  SELECT 1 FROM draw_jobs j2"
+            "  WHERE j2.seed = ref_meta.seed"
+            "    AND j2.status = 'ok' AND j2.duration_ms > 0)")
 
     def _backfill_portrait_durations(self) -> None:
         """为 v0.30.0 之前生成的历史立绘回填耗时。
@@ -772,17 +797,24 @@ class Store:
 
     def set_ref_meta(self, file: str, prompt: str | None = None, theme: str = "",
                      seed: int | None = None, source: str = "",
-                     width: int = 0, height: int = 0) -> None:
-        """随文件记录参考图的生成信息；同路径重复转入时覆盖（内容寻址同文件）。"""
+                     width: int = 0, height: int = 0,
+                     duration_ms: int = 0) -> None:
+        """随文件记录参考图的生成信息；同路径重复转入时覆盖（内容寻址同文件）。
+
+        v0.33.2：duration_ms 一并记录（试画转入取 job 耗时、立绘转入取立绘行
+        耗时）；手动上传不写 meta，无耗时显示。
+        """
         self._conn.execute(
             "INSERT INTO ref_meta (file, prompt, theme, seed, source, width, height,"
-            " created_at) VALUES (?,?,?,?,?,?,?,?)"
+            " duration_ms, created_at) VALUES (?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(file) DO UPDATE SET prompt=excluded.prompt,"
             " theme=excluded.theme, seed=excluded.seed, source=excluded.source,"
-            " width=excluded.width, height=excluded.height",
+            " width=excluded.width, height=excluded.height,"
+            " duration_ms=excluded.duration_ms",
             (str(file or ""), prompt, str(theme or ""),
              None if seed is None else int(seed), str(source or ""),
-             int(width or 0), int(height or 0), _now()),
+             int(width or 0), int(height or 0), max(0, int(duration_ms or 0)),
+             _now()),
         )
         self._conn.commit()
 

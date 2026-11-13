@@ -91,19 +91,26 @@ def test_move_to_ref(root: Path):
 
 
 def test_move_to_ref_carries_meta(root: Path):
-    """v0.20.0：立绘转参考图时把 prompt/theme/seed/尺寸带进 ref_meta。"""
+    """v0.20.0：立绘转参考图时把 prompt/theme/seed/尺寸带进 ref_meta。
+
+    v0.33.2：生成耗时（duration_ms）一并带走。
+    """
     plugin, st = make_plugin(root)
     rel = "portraits/c1/a.png"
     put_portrait(root, st, rel, b"CCC")
     st._conn.execute(
-        "UPDATE portraits SET prompt=?, theme=?, width=?, height=? WHERE file=?",
-        ("立绘提示词", "campus", 700, 1200, rel))
+        "UPDATE portraits SET prompt=?, theme=?, width=?, height=?, duration_ms=?"
+        " WHERE file=?",
+        ("立绘提示词", "campus", 700, 1200, 45000, rel))
     st._conn.commit()
     res = api._move_portrait_to_ref(plugin, rel, "c1")
     meta = st.get_ref_meta([res["to"]]).get(res["to"])
     check("转参考图带走生成信息",
           meta is not None and meta.get("prompt") == "立绘提示词"
           and meta.get("theme") == "campus" and int(meta.get("width") or 0) == 700,
+          str(meta))
+    check("转参考图带走生成耗时",
+          meta is not None and int(meta.get("duration_ms") or 0) == 45000,
           str(meta))
     check("来源标记为立绘转入", meta is not None and meta.get("source") == "moved")
     st.close()

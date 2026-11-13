@@ -983,7 +983,8 @@ def _move_portrait_to_ref(plugin, rel: str, cid: str = "") -> dict:
                     theme=str(prow.get("theme") or ""), seed=prow.get("seed"),
                     source="moved",
                     width=int(prow.get("width") or 0),
-                    height=int(prow.get("height") or 0))
+                    height=int(prow.get("height") or 0),
+                    duration_ms=int(prow.get("duration_ms") or 0))
         except Exception:
             logger.warning(f"[{PLUGIN_NAME}] 参考图生成信息记录失败（不影响转移）\n"
                            f"{traceback.format_exc()}")
@@ -1445,7 +1446,8 @@ async def h_job_to_ref(plugin) -> dict:
                 theme=str(job.get("theme") or ""),
                 seed=(int(job.get("seed")) if job.get("seed") else None),
                 source="try",
-                width=int(job.get("width") or 0), height=int(job.get("height") or 0))
+                width=int(job.get("width") or 0), height=int(job.get("height") or 0),
+                duration_ms=int(job.get("duration_ms") or 0))
         except Exception:
             logger.warning(f"[{PLUGIN_NAME}] 参考图生成信息记录失败（不影响绑定）\n"
                            f"{traceback.format_exc()}")
@@ -1685,6 +1687,16 @@ def _orphan_items(plugin) -> list:
                           "size": f.stat().st_size})
         except Exception:
             items.append({"path": rel, "thumb": None, "size": 0})
+    # v0.33.2：历史生成的孤儿图带出耗时（ref_meta 有记录的才有；手动上传无）
+    if items and plugin._store:
+        try:
+            metas = plugin._store.get_ref_meta([it["path"] for it in items])
+            for it in items:
+                m = metas.get(it["path"]) or {}
+                it["duration_ms"] = int(m.get("duration_ms") or 0)
+        except Exception:
+            for it in items:
+                it["duration_ms"] = 0
     return items
 
 
