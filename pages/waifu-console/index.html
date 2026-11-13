@@ -2210,9 +2210,11 @@
           </n-radio-group>
           <n-select v-if="batchMode === 'packs'" v-model:value="batchPacks" multiple
                     :options="packOpts" size="small" style="width: 240px;" clearable></n-select>
+          <!-- v0.25.3：作品多选不能复用带「全部作品」哨兵的 seriesOpts—— -->
+          <!-- 哨兵 value="" 会被当成真实 series 发给后端，过滤后 0 命中。 -->
           <n-select v-if="batchMode === 'series'" v-model:value="batchSeries" multiple
-                    :options="seriesOpts" size="small" style="width: 240px;" clearable
-                    filterable></n-select>
+                    :options="batchSeriesOpts" size="small" style="width: 240px;"
+                    clearable filterable placeholder="留空 = 全部作品"></n-select>
           <n-select v-if="batchMode === 'chars'" v-model:value="batchChars" multiple
                     :options="batchCharOpts" size="small" style="width: 240px;" clearable
                     filterable></n-select>
@@ -4459,13 +4461,24 @@
                    value: e.id };
         });
       });
+      // v0.25.3：批量补图的作品多选要排除「全部作品」哨兵（value=""）。
+      // 哨兵被当成真实 series 发给后端时，过滤条件变成 series ∈ {""}，
+      // 所有角色都被排除 → 「将补 0 个角色」。全部作品用留空表达。
+      var batchSeriesOpts = Vue.computed(function () {
+        return (seriesOpts.value || []).filter(function (o) { return !!o.value; });
+      });
       function batchPayload() {
         // v0.18.1：数组一律 slice 出新数组——ref([]).value 是响应式代理，
         // 直接进 body 会让桥的 postMessage 结构化克隆失败（见 apiPost 处注释）
+        // v0.25.3：顺手过滤空串——历史值可能残留哨兵 ""，发过去会让后端
+        // 按 series ∈ {""} 过滤、0 命中
+        function ids(arr) {
+          return (arr || []).filter(function (v) { return !!String(v || "").trim(); });
+        }
         return { mode: batchMode.value,
-                 packs: (batchPacks.value || []).slice(),
-                 series: (batchSeries.value || []).slice(),
-                 chars: (batchChars.value || []).slice() };
+                 packs: ids(batchPacks.value),
+                 series: ids(batchSeries.value),
+                 chars: ids(batchChars.value) };
       }
       function openBatchModal() {
         batchOpen.value = true;
@@ -6132,7 +6145,8 @@
         openRefDetail: openRefDetail, refSourceLabel: refSourceLabel,
         // v0.16.0：批量补图队列
         batchOpen: batchOpen, batchMode: batchMode, batchPacks: batchPacks,
-        batchSeries: batchSeries, batchChars: batchChars,
+        batchSeries: batchSeries, batchSeriesOpts: batchSeriesOpts,
+        batchChars: batchChars,
         batchPreview: batchPreview, batchPreviewLoading: batchPreviewLoading,
         batchStarting: batchStarting, batchProg: batchProg,
         batchQuota: batchQuota, batchRunning: batchRunning, batchPct: batchPct,

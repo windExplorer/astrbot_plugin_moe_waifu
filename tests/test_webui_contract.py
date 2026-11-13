@@ -58,6 +58,7 @@ galWidth galHeight
 importOverwrite dedupeOpen dedupeGroups dedupeSelected dedupeBusy dedupeResult
 dedupeSelectedCount dedupeDupCount openDedupe loadDuplicates doDedupe
 relStatus relBusy loadRelStatus
+batchSeriesOpts
 """.split()
 
 ROUTES = """
@@ -181,6 +182,12 @@ def main():
     check("作品库有筛选 / 排序 / 添加角色（新建）/ 启停",
           all(k in page for k in ("filteredWorks", "workSort", "openNewForWork",
                                   "toggleWorkChar")))
+    # v0.25.3：批量补图的作品多选不能带「全部作品」哨兵（value="" 会被当成
+    # 真实 series 发给后端，过滤后 0 命中）
+    check("批量补图作品下拉排除空值哨兵",
+          "batchSeriesOpts" in page
+          and "return !!o.value" in page
+          and ':options="batchSeriesOpts"' in page)
 
     # 11) 渲染健壮性（v0.13.5）：库里 seed 是 INTEGER，模板对数字直接 .slice
     #     会抛 TypeError → 整个立绘墙渲染中断（真机「只有标题没图片」事故）

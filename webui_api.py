@@ -2104,9 +2104,14 @@ def _batch_scope_entries(plugin, body) -> list:
     """范围筛选：启用卷 ∩ verified，再按 mode=all/packs/series/chars 过滤。"""
     packs = pool.load_packs(_pools_dir(plugin), logger)
     mode = str(body.get("mode") or "all").strip()
-    sel_packs = {str(x) for x in (body.get("packs") or [])}
-    sel_series = {str(x) for x in (body.get("series") or [])}
-    sel_chars = {str(x) for x in (body.get("chars") or [])}
+    # v0.25.3：空串 / 占位项一律忽略。「全部作品」由**空列表**表达——旧前端
+    # 把哨兵 value="" 当成真实 series 发过来，过滤后 0 命中（用户截图）。
+    def _ids(key: str) -> set:
+        return {str(x).strip() for x in (body.get(key) or []) if str(x).strip()}
+
+    sel_packs = _ids("packs")
+    sel_series = _ids("series")
+    sel_chars = _ids("chars")
     out = []
     for p in packs:
         if not p.get("enabled", True):
