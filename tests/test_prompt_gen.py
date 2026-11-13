@@ -37,9 +37,9 @@ ENTRY = {"id": "miku", "name": "初音未来", "series": "Vocaloid",
 p1 = prompt_gen.pick_variations(12345)
 p2 = prompt_gen.pick_variations(12345)
 check("同种子同选择", p1 == p2)
-check("八个维度齐全（v0.25.7 加取景）",
-      set(p1.keys()) == {"compose", "framing", "artstyle", "outfit", "background",
-                         "pose", "expression", "body"})
+check("九个维度齐全（v0.25.7 加取景，v0.32.0 加鞋袜）",
+      set(p1.keys()) == {"compose", "framing", "artstyle", "outfit", "footwear",
+                         "background", "pose", "expression", "body"})
 check("维度取自池内", p1["background"] in prompt_gen.BACKGROUNDS
       and p1["body"] in prompt_gen.BODY
       and p1["compose"] in prompt_gen.COMPOSE
@@ -284,7 +284,7 @@ tpl_s = prompt_gen.get_theme("tpl_standing")
 tpl_single_t = prompt_gen.get_theme("tpl_single")
 check("四套立绘模板主题存在",
       all(t is not None for t in (tpl3, tpl4, tpl_s, tpl_single_t)))
-_TPL_PLAIN = ("outfit", "artstyle", "body", "framing")
+_TPL_PLAIN = ("outfit", "footwear", "artstyle", "body", "framing")
 check("模板主题置空服装/画风/体型/取景（固定底稿口径）",
       all(all(d in (t.get("plain_dims") or []) for d in _TPL_PLAIN)
           for t in (tpl3, tpl4, tpl_s, tpl_single_t)))
@@ -498,6 +498,79 @@ check("模板指令逐位确定（两次调用完全一致）", t1 == t2)
 check("模板指令带并列设定稿与参考图对齐条款",
       "并列展示上述各个视角" in t1 and "输出角色设定稿" in t1
       and "确保各视角是同一个角色、同一套服装" in t1)
+
+# ---------- v0.32.0：鞋袜维度——跟随穿搭家族（legwear + footwear） ----------
+# 用户实测：全身照的鞋/裤袜永远跟参考图（泳装配乐福鞋、婚纱配运动鞋）——
+# 维度池只有服装、从不提鞋袜。新增 footwear 维度：按「穿搭家族」派生，
+# 该光腿光腿、该丝袜丝袜；模板底稿与空穿搭不提及（跟随角色原本）。
+check("鞋袜进维度表与展示序",
+      "footwear" in prompt_gen.DIMS
+      and any(t == "footwear" for _l, t in prompt_gen.DIM_ORDER))
+check("穿搭家族全覆盖（74 条穿搭无一漏到泛用兜底）",
+      all(prompt_gen.feet_candidates(str(it.get("zh") or ""))
+          is not prompt_gen._FEET_GENERIC for it in prompt_gen.OUTFITS))
+_feet_inv_bad = []
+for tid in prompt_gen.content_theme_ids() + ["tpl_3view", "tpl_single",
+                                             "tpl_standing"]:
+    _ft = prompt_gen.get_theme(tid)
+    for _fs in range(60):
+        _fp = prompt_gen.pick_variations(_fs, _ft)
+        _oz = str(_fp["outfit"]["zh"] or "").strip()
+        _fz = str(_fp["footwear"]["zh"] or "").strip()
+        _cand = {it["zh"] for it in prompt_gen.feet_candidates(_oz)}
+        if (_oz and _fz not in _cand) or (not _oz and _fz):
+            _feet_inv_bad.append((tid, _fs, _oz, _fz))
+check("鞋袜跟随实际穿搭的家族（全部主题+模板各 60 种子零违例）",
+      not _feet_inv_bad, str(_feet_inv_bad[:3]))
+_feet_var = {prompt_gen.pick_variations(s)["footwear"]["zh"] for s in range(400)}
+check("鞋袜分布非退化（400 种子 >= 12 种：光腿/丝袜/裤袜/各式鞋）",
+      len(_feet_var) >= 12)
+check("泳装主题 60 种子必出光脚/凉鞋/光腿（不再配乐福鞋）",
+      all(prompt_gen.pick_variations(s, prompt_gen.get_theme("swimsuit"))
+          ["footwear"]["zh"] in {"光脚", "凉鞋", "光腿"} for s in range(60)))
+check("模板底稿鞋袜置空（跟随角色原本）",
+      prompt_gen.pick_variations(42, tpl3)["footwear"]["zh"] == "")
+check("鞋袜可单独重摇且非空",
+      prompt_gen.apply_dim_state(prompt_gen.pick_variations(42), 42,
+                                 {"attempts": {"footwear": 1}},
+                                 None)["footwear"]["zh"].strip() != "")
+check("鞋袜可锁定（en 池内反查）",
+      prompt_gen.apply_dim_state(prompt_gen.pick_variations(42), 42,
+                                 {"fixed": {"footwear": "黑色裤袜"}},
+                                 None)["footwear"]["en"] == "black pantyhose")
+_ft_campus = prompt_gen.get_theme("campus")
+_ft_rer = prompt_gen.apply_dim_state(
+    prompt_gen.pick_variations(42, _ft_campus), 42,
+    {"attempts": {"outfit": 1}}, _ft_campus)
+_ft_oz = str(_ft_rer["outfit"]["zh"] or "")
+check("重摇穿搭后鞋袜跟随新穿搭的家族",
+      _ft_rer["footwear"]["zh"]
+      in {it["zh"] for it in prompt_gen.feet_candidates(_ft_oz)})
+_ft_fx = prompt_gen.apply_dim_state(
+    prompt_gen.pick_variations(42), 42, {"fixed": {"outfit": "旗袍"}}, None)
+check("锁定旗袍 → 鞋袜落在高跟鞋族",
+      _ft_fx["footwear"]["zh"]
+      in {it["zh"] for it in prompt_gen._F_HEELS})
+_ft_dis = prompt_gen.apply_dim_state(
+    prompt_gen.pick_variations(42, _ft_campus), 42,
+    {"disabled": ["outfit"]}, _ft_campus)
+check("移除穿搭 → 鞋袜一并置空（不与未提及的穿搭脱节）",
+      _ft_dis["footwear"]["zh"] == "")
+_ft_pf = prompt_gen.pick_variations(42, prompt_gen.get_theme("campus"))
+check("编辑指令含鞋袜条款",
+      "把鞋袜改为" in prompt_gen.build_local_instruction(
+          ENTRY, _ft_pf, ref_mode="none"))
+check("danbooru tags 含鞋袜 en",
+      any(x in prompt_gen.build_t2i_prompt(ENTRY, _ft_pf)
+          for x in ("kneehighs", "loafers", "socks", "thighhighs",
+                    "bare legs")))
+check("qwen 中文描述含鞋袜",
+      any(x in prompt_gen.build_t2i_qwen_local(ENTRY, _ft_pf)
+          for x in ("及膝", "乐福", "短袜", "过膝", "光腿")))
+check("自填穿搭命中家族（女仆装 → 玛丽珍）",
+      "玛丽珍" in prompt_gen.pick_variations(
+          42, None, outfit_override="女仆装")["footwear"]["zh"])
+
 
 _orig_detect = prompt_gen.detect_t2i_style
 prompt_gen.detect_t2i_style = lambda ctx, wf: "qwen"

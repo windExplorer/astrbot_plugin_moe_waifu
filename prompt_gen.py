@@ -437,11 +437,132 @@ ARTSTYLES = [
      "en": "low poly, voxel art, isometric view, flat shading, geometric facets"},
 ]
 
+# ---------- 鞋袜维度（v0.32.0）：跟随穿搭的 legwear + footwear ----------
+# 此前只换服装、从不提鞋袜——全身照的鞋与裤袜永远跟参考图（泳装配乐福鞋、
+# 婚纱配运动鞋就是这么来的）。danbooru 把这两族分得很细（kneehighs /
+# thighhighs / pantyhose / bare legs / loafers / mary janes…），必须逐项点名。
+# 机制：按「穿搭家族」给候选（_FEET_FAMILIES 关键词 → 候选列表），种子决定论
+# 内摇（该光腿光腿、该丝袜丝袜）；穿搭为空项（跟随角色原本 / 模板底稿）时鞋袜
+# 同样不提及；FOOTWEAR 池供面板 chip 锁定 / 重摇 / 启用（全池非空项）。
+_F_JK = (
+    {"w": 4, "zh": "黑色及膝袜与乐福鞋", "en": "black kneehighs, loafers"},
+    {"w": 3, "zh": "白色短袜与乐福鞋", "en": "white socks, loafers"},
+    {"w": 2, "zh": "黑色过膝袜与乐福鞋（绝对领域）",
+     "en": "black thighhighs, loafers, zettai ryouiki"},
+    {"w": 1, "zh": "光腿配乐福鞋", "en": "bare legs, loafers"},
+)
+_F_SPORT = (
+    {"w": 4, "zh": "运动鞋与白色短袜", "en": "sneakers, white socks"},
+    {"w": 2, "zh": "运动鞋（光腿）", "en": "sneakers, bare legs"},
+)
+_F_SWIM = (
+    {"w": 5, "zh": "光脚", "en": "barefoot"},
+    {"w": 2, "zh": "凉鞋", "en": "sandals"},
+    {"w": 2, "zh": "光腿", "en": "bare legs"},
+)
+_F_KIMONO = (
+    {"w": 4, "zh": "足袋与草履", "en": "tabi, zori"},
+    {"w": 3, "zh": "光脚配木屐", "en": "geta, barefoot"},
+)
+_F_MAID = (
+    {"w": 4, "zh": "黑色玛丽珍鞋与白色短袜", "en": "mary janes, white socks"},
+    {"w": 3, "zh": "黑色玛丽珍鞋与黑色裤袜", "en": "mary janes, black pantyhose"},
+)
+_F_GOTHIC = (
+    {"w": 3, "zh": "黑色过膝靴", "en": "black boots, thighhighs"},
+    {"w": 2, "zh": "黑色裤袜配玛丽珍鞋", "en": "black pantyhose, mary janes"},
+    {"w": 2, "zh": "黑色长靴", "en": "black boots"},
+)
+_F_HOME = (
+    {"w": 6, "zh": "光脚", "en": "barefoot"},
+    {"w": 2, "zh": "毛绒拖鞋", "en": "slippers"},
+)
+_F_IDOL = (
+    {"w": 4, "zh": "黑色高筒靴", "en": "black knee boots"},
+    {"w": 2, "zh": "短靴", "en": "ankle boots"},
+    {"w": 2, "zh": "黑色高跟鞋", "en": "black high heels"},
+)
+_F_OFFICE = (
+    {"w": 4, "zh": "黑色高跟鞋", "en": "black high heels"},
+    {"w": 3, "zh": "黑色裤袜配高跟鞋", "en": "black pantyhose, high heels"},
+    {"w": 2, "zh": "短靴", "en": "ankle boots"},
+    {"w": 2, "zh": "光腿配高跟鞋", "en": "bare legs, high heels"},
+)
+_F_WINTER = (
+    {"w": 4, "zh": "黑色长靴", "en": "black boots"},
+    {"w": 2, "zh": "棕色长靴", "en": "brown boots"},
+    {"w": 2, "zh": "褐色裤袜配短靴", "en": "brown pantyhose, ankle boots"},
+)
+_F_HEELS = (
+    {"w": 3, "zh": "白色高跟鞋", "en": "white high heels"},
+    {"w": 3, "zh": "黑色高跟鞋", "en": "black high heels"},
+    {"w": 2, "zh": "凉鞋", "en": "sandals"},
+    {"w": 2, "zh": "光腿配高跟鞋", "en": "bare legs, high heels"},
+    {"w": 1, "zh": "白色裤袜", "en": "white pantyhose"},
+)
+_FEET_GENERIC = (
+    {"w": 3, "zh": "黑色裤袜", "en": "black pantyhose"},
+    {"w": 2, "zh": "运动鞋与白色短袜", "en": "sneakers, white socks"},
+    {"w": 2, "zh": "凉鞋", "en": "sandals"},
+    {"w": 2, "zh": "光腿", "en": "bare legs"},
+    {"w": 2, "zh": "黑色长靴", "en": "black boots"},
+)
+
+# 穿搭家族映射：按 outfit zh 子串命中（顺序即优先级——「运动系比基尼」必须先
+# 命中泳装族再轮到运动族，故 SWIM 在 SPORT 之前；「花嫁和服」先命中和风族）。
+_FEET_FAMILIES = (
+    (("JK", "水手", "校服", "背带", "学院"), _F_JK),
+    (("泳装", "泳衣", "比基尼", "纱笼", "防晒泳"), _F_SWIM),
+    (("体操服", "运动", "拉拉队"), _F_SPORT),
+    (("浴衣", "和服", "振袖", "访问着", "巫女", "袴"), _F_KIMONO),
+    (("女仆", "围裙"), _F_MAID),
+    (("哥特", "女巫", "吸血鬼", "魔法学院", "朋克"), _F_GOTHIC),
+    (("睡衣", "睡袍", "睡裙", "居家", "家居服", "T恤", "卫衣"), _F_HOME),
+    (("偶像", "打歌服", "舞台", "演出服"), _F_IDOL),
+    (("大衣", "冬", "毛衣"), _F_WINTER),
+    (("西装", "通勤", "铅笔裙", "航空", "职业", "衬衫"), _F_OFFICE),
+    (("婚纱", "礼服", "秀禾", "白无垢", "旗袍", "连衣裙"), _F_HEELS),
+)
+
+
+def feet_candidates(outfit_zh: str):
+    """穿搭 zh → 鞋袜候选列表（纯函数，可直测）。
+
+    空穿搭返回空元组（鞋袜跟随角色原本，不提及）；无家族命中的穿搭回落
+    泛用候选（_FEET_GENERIC）。
+    """
+    z = str(outfit_zh or "")
+    if not z.strip():
+        return ()
+    for keys, cands in _FEET_FAMILIES:
+        if any(k in z for k in keys):
+            return cands
+    return _FEET_GENERIC
+
+
+def _dedupe_by_zh(items) -> tuple:
+    seen = set()
+    out = []
+    for it in items:
+        z = str(it.get("zh") or "")
+        if z in seen:
+            continue
+        seen.add(z)
+        out.append(it)
+    return tuple(out)
+
+
+FOOTWEAR = _dedupe_by_zh([
+    *_F_JK, *_F_SPORT, *_F_SWIM, *_F_KIMONO, *_F_MAID, *_F_GOTHIC,
+    *_F_HOME, *_F_IDOL, *_F_OFFICE, *_F_WINTER, *_F_HEELS, *_FEET_GENERIC,
+])
+
 DIMS = {
     "compose": COMPOSE,
     "framing": FRAMING,
     "artstyle": ARTSTYLES,
     "outfit": OUTFITS,
+    "footwear": FOOTWEAR,
     "background": BACKGROUNDS,
     "pose": POSES,
     "expression": EXPRESSIONS,
@@ -526,7 +647,8 @@ def art_theme_weight(theme_id: str) -> int:
 # 历史沿革：v0.7.2 曾置空变装，v0.7.4 按当时反馈改回随机穿搭；v0.29.3 用户明确
 # 「模板是固定提示词，不能充满随机性」——随机感全部收回。想给模板换装 / 换画风，
 # 用预览面板显式指定（outfit_override 与维度 chip / fixed 锁定不受 plain 影响）。
-_TPL_PLAIN = ["outfit", "artstyle", "body", "framing"]
+# v0.32.0：鞋袜一并置空（character sheet 惯例：鞋袜跟随角色原始设定）。
+_TPL_PLAIN = ["outfit", "footwear", "artstyle", "body", "framing"]
 THEMES = (
     {"id": "random", "label": "随机（按种子变化）", "outfit_kw": [], "bg_kw": []},
     {"id": "tpl_standing", "label": "【模板】纯色背景 · 正常站姿",
@@ -823,8 +945,12 @@ def pick_variations(seed_int: int, theme: dict | None = None,
     整体覆盖 outfit 维度（zh/en 同文——任意自定义服装没有池内英文对照，
     LLM 通道与文生图 caption 都能吃中文，danbooru tag 串为次优兜底）。
     空串 = 不干预（主题子集重摇或全池随机）。
+    v0.32.0：鞋袜维度不参与独立随机——先定穿搭，再按「穿搭家族」派生鞋袜
+    （见 feet_candidates）；穿搭空项（跟随角色原本 / 模板底稿 plain_dims）时
+    鞋袜同样不提及。
     """
-    picks = {tag: _pick_dim(tag, seed_int, theme) for tag in DIMS}
+    picks = {tag: _pick_dim(tag, seed_int, theme) for tag in DIMS
+             if tag != "footwear"}
     # plain_dims：列出的维度直接置空（机制保留，当前无主题使用）
     for dim in ((theme or {}).get("plain_dims") or []):
         if str(dim) in DIMS:
@@ -836,6 +962,15 @@ def pick_variations(seed_int: int, theme: dict | None = None,
     text = str(outfit_override or "").strip().strip("。，,")[:80]
     if text:
         picks["outfit"] = {"w": 0, "zh": text, "en": text}
+    # v0.32.0：鞋袜跟随穿搭——穿搭 zh 非空才派生（家族候选内按种子摇）；
+    # 空穿搭（含模板 plain_dims）置空 = 鞋袜跟随角色原本设定。
+    _plain = {str(d) for d in ((theme or {}).get("plain_dims") or [])}
+    out_zh = str((picks.get("outfit") or {}).get("zh") or "").strip()
+    if "footwear" in _plain or not out_zh:
+        picks["footwear"] = {"w": 0, "zh": "", "en": ""}
+    else:
+        picks["footwear"] = _weighted_pick(
+            feet_candidates(out_zh), _sub(seed_int, f"feet|{out_zh}", 2 ** 30))
     # v0.26.3：纯画风主题（art_*）只锁画风、不约束表情，实测会出现「婚纱 +
     # 困倦惺忪」这类违和。给一个通用立绘表情池（排除需要特定情境的困倦 /
     # 惊讶 / 疑惑），让纯画风主题下的表情也落在自然范围。
@@ -918,20 +1053,47 @@ def apply_dim_state(picks: dict, seed_int: int, dim_state: dict | None,
             color = _weighted_pick(
                 OUTFIT_COLORS, _sub(sub_seed, "outfit_color", 2 ** 30))
             _apply_outfit_color(out, color)
+            # v0.32.0：重摇穿搭后鞋袜跟着新穿搭的家族候选重摇（鞋袜被锁定 /
+            # 禁用时不动——用户显式操作优先）
+            if "footwear" not in fixed and "footwear" not in disabled:
+                new_zh = str((out.get("outfit") or {}).get("zh") or "").strip()
+                out["footwear"] = (
+                    _weighted_pick(feet_candidates(new_zh),
+                                   _sub(sub_seed, f"feet|{new_zh}", 2 ** 30))
+                    if new_zh else {"w": 0, "zh": "", "en": ""})
     for dim in enabled:
         dim = str(dim)
         if dim not in DIMS or dim in fixed:
             continue
         if not str((out.get(dim) or {}).get("zh") or "").strip():
-            out[dim] = _pick_dim(dim, seed_int, theme, non_empty_only=True)
+            if dim == "footwear":
+                # v0.32.0：鞋袜重新启用 = 跟随当前穿搭的家族候选（不是全池乱摇）
+                z = str((out.get("outfit") or {}).get("zh") or "").strip()
+                out["footwear"] = (
+                    _weighted_pick(feet_candidates(z),
+                                   _sub(seed_int, f"feet|{z}", 2 ** 30))
+                    if z else {"w": 0, "zh": "", "en": ""})
+            else:
+                out[dim] = _pick_dim(dim, seed_int, theme, non_empty_only=True)
     for dim, zh in fixed.items():
         dim = str(dim)
         if dim in DIMS:
             out[dim] = _fixed_item(dim, zh)
+            if dim == "outfit" and "footwear" not in fixed:
+                # v0.32.0：锁定穿搭后鞋袜跟随锁定的穿搭家族重派生
+                z = str((out.get("outfit") or {}).get("zh") or "").strip()
+                out["footwear"] = (
+                    _weighted_pick(feet_candidates(z),
+                                   _sub(seed_int, f"feet|{z}", 2 ** 30))
+                    if z else {"w": 0, "zh": "", "en": ""})
     for dim in disabled:
         dim = str(dim)
         if dim in DIMS:
             out[dim] = {"w": 0, "zh": "", "en": ""}
+        if dim == "outfit" and "footwear" not in fixed \
+                and "footwear" not in disabled:
+            # v0.32.0：本轮不提穿搭 → 鞋袜也不提（否则鞋袜与未提及的穿搭脱节）
+            out["footwear"] = {"w": 0, "zh": "", "en": ""}
     return out
 
 
@@ -1007,8 +1169,10 @@ def _ref_clause_single_view(mode: str) -> str:
 
 # 维度展示顺序（预览面板 chip 与变化短语列表共用；v0.14.0 提取为常量单一来源）
 # v0.19.0：新增「画风」维度，排在构图之后（先定风格，再定穿什么/在哪）
+# v0.32.0：新增「鞋袜」维度，紧跟服装（鞋袜跟随穿搭家族派生）
 DIM_ORDER = (("构图视图", "compose"), ("构图取景", "framing"),
              ("画风", "artstyle"), ("服装", "outfit"),
+             ("鞋袜", "footwear"),
              ("背景与光照", "background"), ("姿势动作", "pose"),
              ("表情", "expression"), ("体型", "body"))
 
@@ -1067,6 +1231,9 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "",
             parts.append(f"把整体画风改为{zh}（人物面部与发型保持可辨认）")
         elif label == "服装":
             parts.append(f"把角色的服装换成{zh}")
+        elif label == "鞋袜":
+            # v0.32.0：鞋袜跟随穿搭（danbooru legwear/footwear 两族逐项点名）
+            parts.append(f"把鞋袜改为{zh}")
         elif label == "背景与光照":
             parts.append(f"把背景改为{zh}")
         elif label == "姿势动作":
@@ -1139,7 +1306,8 @@ def build_t2i_prompt(entry: dict, picks: dict) -> str:
     framing_en = str((picks.get("framing") or {}).get("en") or "").strip().strip(",")
     if framing_en:
         extra.append(framing_en)
-    for tag in ("artstyle", "compose", "outfit", "background", "pose", "expression", "body"):
+    for tag in ("artstyle", "compose", "outfit", "footwear", "background",
+                "pose", "expression", "body"):
         en = str((picks.get(tag) or {}).get("en") or "").strip().strip(",")
         if tag == "pose" and en and framing_en and "full body" not in framing_en:
             en = re.sub(r",\s*,", ",", en.replace("full body", "")).strip(", ")
@@ -1171,7 +1339,8 @@ def build_t2i_natural_local(entry: dict, picks: dict, custom: str = "") -> str:
     tags = str(entry.get("tags_en") or "").strip().rstrip(",")
     if tags:
         segs.append(tags)
-    for tag in ("compose", "outfit", "background", "pose", "expression", "body"):
+    for tag in ("compose", "outfit", "footwear", "background", "pose",
+                "expression", "body"):
         en = str((picks.get(tag) or {}).get("en") or "").strip().strip(",")
         if tag == "pose" and en and framing_en and "full body" not in framing_en:
             en = re.sub(r",\s*,", ",", en.replace("full body", "")).strip(", ")
@@ -1206,9 +1375,9 @@ def build_t2i_qwen_local(entry: dict, picks: dict, custom: str = "") -> str:
     tags = str(entry.get("tags_en") or "").strip().rstrip(",")
     if tags:
         subj += f"，外观参照这些特征：{tags}"
-    # ③ 动作 / 服装 / 表情
+    # ③ 动作 / 服装 / 鞋袜 / 表情
     acts = [str((picks.get(k) or {}).get("zh") or "").strip().strip("。")
-            for k in ("pose", "outfit", "expression", "body")]
+            for k in ("pose", "outfit", "footwear", "expression", "body")]
     acts = [s for s in acts if s]
     if acts:
         subj += "，" + "；".join(acts)
