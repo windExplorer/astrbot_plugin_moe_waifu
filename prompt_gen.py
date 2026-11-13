@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """萌萌今日老婆 · 立绘提示词生成（变化维度池 + 可选 LLM 通道）。
 
 背景（v0.5.6）：图生图主用 Qwen-Image-2.1（通义千问图像模型，文生图与图像
@@ -1390,27 +1390,48 @@ async def _resolve_provider(context, provider_id: str):
     return None
 
 
+def effective_workflow(entry: dict, cfg: dict) -> str:
+    """本次出图**实际会用的**文生图工作流名：条目 strategy.workflow > 全局。
+
+    与 draw.generate_portrait / _base_kwargs 的解析顺序保持一致——风格探测
+    必须跟着真正出图的工作流走，否则「试画台/补一张选了 Qwen 工作流、
+    提示词却按全局（另一个底模）拼成 tags」这种错位就会发生（v0.29.7 实测）。
+    """
+    st = entry.get("strategy") or {}
+    wf = str(st.get("workflow") or "").strip() if isinstance(st, dict) else ""
+    return wf or str(cfg.get("draw_workflow") or "").strip()
+
+
 def detect_t2i_style(context, workflow_name: str) -> str:
     """探测文生图工作流底模的提示词风格（danbooru / natural / qwen）。
 
     链路：萌绘 star_cls.config["workflows"] 找 workflow_name 条目 → base_id →
     workflow_store.get(base_id)["roles"]["model_file"] → basemodel_store.
-    match_model(model_file)["prompt_style"]。任一环节失败（萌绘未装 / 工作流
-    未绑基础库 / 查询异常）→ 回落 "danbooru"（本插件历史上一直按 tag 拼，
-    对 tag 兼容底模最安全）。
+    match_model(model_file)["prompt_style"]。
+    v0.29.7：① 底模库没建档 / 没填风格时，退而按模型文件名直接猜
+    （含 qwen → qwen、含 moss → natural），不再一律砸回 danbooru——用户
+    「主力 Qwen Image 2.1」却满屏标签串就是这么来的；② 每次探测留 info 日志
+    （工作流 → 底模 → 风格），「为什么变标签串」从此有据可查。
     """
+    wf_name = str(workflow_name or "").strip()
     try:
-        meta = context.get_registered_star("astrbot_plugin_comfyui_anima")
+        getter = getattr(context, "get_registered_star", None)
+        if getter is None:   # 无 astrbot 环境（测试桩等），静默回落
+            return "danbooru"
+        meta = getter("astrbot_plugin_comfyui_anima")
         anima = getattr(meta, "star_cls", None)
         if anima is None:
+            logger.info("[moe_waifu] 提示词风格：未安装萌绘，按 danbooru tags")
             return "danbooru"
         cfg = getattr(anima, "config", None)
         raw = cfg.get("workflows") if isinstance(cfg, dict) else None
         wf = next((e for e in (raw or [])
                    if isinstance(e, dict)
-                   and str(e.get("name") or "") == str(workflow_name or "").strip()
+                   and str(e.get("name") or "") == wf_name
                    and str(e.get("base_id") or "").strip()), None)
         if wf is None:
+            logger.info("[moe_waifu] 提示词风格：工作流「" + wf_name
+                        + "」未绑基础工作流库（旧版模式），按 danbooru tags")
             return "danbooru"
         store = getattr(anima, "workflow_store", None)
         roles = ((store.get(int(wf["base_id"])) or {}).get("roles") or {}) \
@@ -1419,8 +1440,25 @@ def detect_t2i_style(context, workflow_name: str) -> str:
         bs = getattr(anima, "basemodel_store", None)
         rec = bs.match_model(model_file) if bs is not None and model_file else None
         style = str((rec or {}).get("prompt_style") or "").strip().lower()
-        return style if style in ("danbooru", "natural", "qwen") else "danbooru"
-    except Exception:
+        if style in ("danbooru", "natural", "qwen"):
+            logger.info("[moe_waifu] 提示词风格：工作流「" + wf_name
+                        + "」→ 底模「" + (model_file or "?") + "」→ " + style)
+            return style
+        # 底模库没建档 / 没填风格：按模型文件名猜一版，别一律砸回 tags
+        mf = model_file.lower()
+        if "qwen" in mf:
+            style = "qwen"
+        elif "moss" in mf:
+            style = "natural"
+        else:
+            style = "danbooru"
+        logger.info("[moe_waifu] 提示词风格：底模「" + (model_file or "?")
+                    + "」未在萌绘底模库标注风格，按文件名猜为 " + style
+                    + "（要精确请在萌绘底模库里给该底模设提示词风格）")
+        return style
+    except Exception as exc:
+        logger.warning("[moe_waifu] 提示词风格探测异常（" + wf_name
+                       + "）：" + repr(exc) + "，按 danbooru tags")
         return "danbooru"
 
 
@@ -1508,7 +1546,9 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
             if not (theme and theme.get("compose_kw")):
                 picks = force_single_view(picks)
             picks = apply_dim_state(picks, seed_int, dim_state, theme)
-            style = detect_t2i_style(context, cfg.get("draw_workflow", ""))
+            # v0.29.7：按「实际会用的」工作流探测（条目/本次覆盖 > 全局），
+            # 修「选了 Qwen 工作流却按全局底模拼 tags」的错位
+            style = detect_t2i_style(context, effective_workflow(entry, cfg))
             if not bool(cfg.get("prompt_llm_enabled", True)) or style == "danbooru":
                 return _t2i_local_of(style, entry, picks, custom)
             provider = await _resolve_provider(

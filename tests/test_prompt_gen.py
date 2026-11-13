@@ -748,4 +748,85 @@ check("无参考图三视图模板走 t2i tag 串（character sheet 在）",
       and "grey background" in _t2i_3v
       and "twintails" in _t2i_3v)
 
+# ---------- v0.29.7：风格探测跟随实际工作流 + 底模库缺档案时按文件名猜 ----------
+check("effective_workflow：条目覆盖优先于全局",
+      prompt_gen.effective_workflow({"strategy": {"workflow": "qwen动画"}},
+                                   {"draw_workflow": "全局工作流"}) == "qwen动画"
+      and prompt_gen.effective_workflow({"strategy": {}},
+                                        {"draw_workflow": "全局工作流"}) == "全局工作流"
+      and prompt_gen.effective_workflow({}, {}) == "")
+
+
+class _FakeStarMeta:
+    def __init__(self, anima):
+        self.star_cls = anima
+
+
+class _FakeCtx:
+    """带 get_registered_star 的 context 桩（返回 _FakeStarMeta 或 None）。"""
+
+    def __init__(self, meta):
+        self._meta = meta
+
+    def get_registered_star(self, name):
+        return self._meta
+
+
+class _FakeBS:
+    def __init__(self, rec):
+        self._rec = rec
+
+    def match_model(self, model_file="", class_type=""):
+        return self._rec
+
+
+class _FakeWS:
+    def __init__(self, rec):
+        self._rec = rec
+
+    def get(self, wf_id, with_json=False):
+        return self._rec
+
+
+def _fake_ctx(wf_entry, wf_rec, bs_rec):
+    class A:
+        pass
+    a = A()
+    a.config = {"workflows": [wf_entry]}
+    a.workflow_store = _FakeWS(wf_rec)
+    a.basemodel_store = _FakeBS(bs_rec)
+    return _FakeCtx(_FakeStarMeta(a))
+
+
+_QWEN_WF = {"name": "qwen动画", "base_id": "3"}
+_QWEN_REC = {"roles": {"model_file": "qwen_image_2.1_int8_convrot.safetensors"}}
+
+check("探测：底模档案标了 qwen → qwen",
+      prompt_gen.detect_t2i_style(
+          _fake_ctx(_QWEN_WF, _QWEN_REC, {"prompt_style": "qwen"}),
+          "qwen动画") == "qwen")
+check("探测：底模库没标风格，模型文件名含 qwen → 猜 qwen",
+      prompt_gen.detect_t2i_style(
+          _fake_ctx(_QWEN_WF, _QWEN_REC, {"prompt_style": ""}),
+          "qwen动画") == "qwen")
+check("探测：底模库完全没建档，文件名含 qwen → 猜 qwen",
+      prompt_gen.detect_t2i_style(
+          _fake_ctx(_QWEN_WF, _QWEN_REC, None), "qwen动画") == "qwen")
+check("探测：文件名含 moss → 猜 natural",
+      prompt_gen.detect_t2i_style(
+          _fake_ctx({"name": "moss", "base_id": "3"},
+                    {"roles": {"model_file": "MOSS-T2I-v2.safetensors"}},
+                    {"prompt_style": ""}), "moss") == "natural")
+check("探测：认不出的底模 → danbooru",
+      prompt_gen.detect_t2i_style(
+          _fake_ctx({"name": "某工作流", "base_id": "3"},
+                    {"roles": {"model_file": "whatever_v1.safetensors"}},
+                    None), "某工作流") == "danbooru")
+check("探测：工作流未绑基础库 → danbooru",
+      prompt_gen.detect_t2i_style(
+          _fake_ctx({"name": "旧版工作流", "base_id": ""}, None, None),
+          "旧版工作流") == "danbooru")
+check("探测：萌绘未装 → danbooru",
+      prompt_gen.detect_t2i_style(_FakeCtx(None), "x") == "danbooru")
+
 print("test_prompt_gen: ALL OK")

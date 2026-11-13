@@ -1900,7 +1900,9 @@ async def h_prompt_preview(plugin) -> dict:
     body_zh = str((picks.get("body") or {}).get("zh") or "").strip()
     style = ""
     if str(entry.get("strategy_type") or "base") != "img2img":
-        style = prompt_gen.detect_t2i_style(plugin.context, cfg.get("draw_workflow", ""))
+        # v0.29.7：与生成侧同口径——按条目/本次覆盖的实际工作流探测底模风格
+        style = prompt_gen.detect_t2i_style(
+            plugin.context, prompt_gen.effective_workflow(entry, cfg))
     # v0.14.0：全量维度状态（生成立绘弹窗 chip 渲染 + 增删维度菜单用）
     fixed_map = dim_state.get("fixed") if isinstance(dim_state.get("fixed"), dict) else {}
     disabled = set(dim_state.get("disabled") or [])

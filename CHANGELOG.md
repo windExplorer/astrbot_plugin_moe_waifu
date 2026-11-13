@@ -2,6 +2,16 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.29.7 (2026-11-14)
+
+- **修「提示词全变成标签串：风格探测没跟着所选工作流走」**——用户主力 Qwen Image 2.1，出图却满屏 danbooru tags。两层原因：
+  - **探测看错了工作流（主因）**：出图时实际工作流的解析顺序是「条目 `strategy.workflow`（试画台/补一张下拉、条目级覆盖）> 全局 `draw_workflow`」，但 `build_generation_prompt` 里的风格探测只传了全局 `draw_workflow`——用户本次选的 Qwen 工作流根本没参与探测，按全局（没配/绑了别的底模）一路回落 danbooru。
+    - 新增 `prompt_gen.effective_workflow(entry, cfg)`：与 `draw._base_kwargs` 同序解析「实际会用的工作流名」；生成链路（`build_generation_prompt`）与试画台预览（`/preview` 的 style 字段）都改按它探测。预览面板显示的风格从此 = 实际出图的风格。
+  - **底模库没标注就砸回 tags**：工作流绑了基础库、也查到了 `model_file`，但萌绘底模库里该底模没建档/没填提示词风格时，旧逻辑一律回落 danbooru。
+    - 现在退而**按模型文件名猜**：含 `qwen` → qwen（中文长描述），含 `moss` → natural，其余才 danbooru；日志会提示「要精确请在萌绘底模库里给该底模设提示词风格」。
+  - **可观测**：每次探测留一条 info 日志（`工作流「X」→ 底模「Y」→ 风格`，或回落原因），「为什么变标签串」从此直接看萌绘/本插件日志即可。
+  - 配套：风格探测对没有 `get_registered_star` 的环境（无 astrbot 测试桩）静默回落；`test_prompt_gen.py` 新增 8 项——`effective_workflow` 优先级、底模档案命中 / 未标注猜文件名 / 未建档猜文件名 / moss / 认不出 / 未绑基础库 / 萌绘未装。
+
 ## v0.29.6 (2026-11-14)
 
 - **修「已停用的立绘出现在图生图生成源里」**——角色详情的「生成源」条（`genSources`）直接遍历原始立绘列表，没带 `active` 过滤；立绘墙有「停用默认隐藏」开关，生成源条没有，于是停用（软删除）的立绘混进候选、还能被点选喂进图生图工作流。
