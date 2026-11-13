@@ -29,7 +29,9 @@ class _BrokenContext:
 
 
 ENTRY = {"id": "miku", "name": "初音未来", "series": "Vocaloid",
-         "tags_en": "hatsune miku, twintails", "strategy_type": "img2img"}
+         "tags_en": "hatsune miku, twintails", "strategy_type": "img2img",
+         # v0.29.4：默认样例带 1 张显式参考图（历史用例的「单图源」口径）
+         "strategy": {"ref": "refs/main.png"}}
 
 # ---------- pick_variations：决定论 ----------
 p1 = prompt_gen.pick_variations(12345)
@@ -675,5 +677,63 @@ check("随机抽样 1000 次不命中黏土",
           for s in range(1000)))
 check("黏土仍保留在池里供手动锁定",
       any("黏土" in str(it["zh"]) for it in prompt_gen.ARTSTYLES))
+
+# ---------- v0.29.4：指令按参考图形态分流（无图 / 单图 / 多图） ----------
+_e_none = dict(ENTRY, strategy={})
+_e_multi = dict(ENTRY, strategy={"gen_refs": ["refs/front.png", "refs/side.png",
+                                              "refs/back.png"]})
+check("参考图形态判定（none/single/multi）",
+      prompt_gen.template_ref_mode(ENTRY) == "single"
+      and prompt_gen.template_ref_mode(_e_none) == "none"
+      and prompt_gen.template_ref_mode(_e_multi) == "multi"
+      and prompt_gen.template_ref_mode(dict(ENTRY, strategy_type="base")) == "none")
+# 多视图模板：单图源 = 扩展推演；多图源 = 视角对齐参考图
+_p3t = prompt_gen.pick_variations(42, tpl3)
+_i3_single = prompt_gen.build_local_instruction(ENTRY, _p3t)
+check("三视图模板 + 单参考图：以单图为基准补全其余视角",
+      "补全其余视角" in _i3_single and "同一个角色" in _i3_single,
+      _i3_single[-150:])
+_i3_multi = prompt_gen.build_local_instruction(_e_multi, _p3t)
+check("三视图模板 + 多参考图：各视角与对应参考图一致",
+      "对应的参考图" in _i3_multi, _i3_multi[-150:])
+# 元提示词同步分流；三视图模板不再自相矛盾地带「收敛为单张立绘」
+_m3_single = prompt_gen.build_meta_prompt(ENTRY, _p3t)
+check("三视图模板元提示词（单图源）不再带收敛单图条款",
+      "收敛为单张立绘" not in _m3_single and "补全其余视角" in _m3_single)
+_m3_multi = prompt_gen.build_meta_prompt(_e_multi, _p3t)
+check("三视图模板元提示词（多图源）要求视角对齐参考图",
+      "对应的参考图" in _m3_multi and "收敛为单张立绘" not in _m3_multi)
+# 单图输出 + 多图源：以正面全身为主
+_m1_multi = prompt_gen.build_meta_prompt(_e_multi, prompt_gen.pick_variations(42, tpl_single))
+check("单图模板 + 多参考图：以正面全身那张为主",
+      "正面全身那张为主" in _m1_multi, _m1_multi[:200])
+# 单图输出 + 单图源：保留「多视角源收敛为单图」条款（防复刻拼接布局）
+check("单图模板 + 单参考图：保留收敛条款",
+      "只保留其中一个视角" in prompt_gen.build_local_instruction(
+          ENTRY, prompt_gen.pick_variations(42, tpl_single)))
+# 无参考图：不提「根据参考图」、不带多视角源收敛条款
+_i_none = prompt_gen.build_local_instruction(_e_none, prompt_gen.pick_variations(42))
+check("无参考图指令不提参考图", "参考图" not in _i_none, _i_none[:120])
+_i_none0 = prompt_gen.build_local_instruction(
+    _e_none, {k: {"zh": "", "en": ""} for k in prompt_gen.DIMS})
+check("无参考图且无变化的兜底指令改为直接生成",
+      "参考图" not in _i_none0 and "直接生成" in _i_none0)
+# img2img 缺源：生成链路与 draw.generate_portrait 同步降级文生图
+async def _run_i2i_noref(seed):
+    return await prompt_gen.build_generation_prompt(
+        _BrokenContext(),
+        {"prompt_llm_enabled": True, "prompt_llm_provider": "",
+         "variations_enabled": True},
+        dict(ENTRY, strategy={}), seed)
+
+_nr_text, _nr_src = asyncio.run(_run_i2i_noref(7))
+check("img2img 缺源降级文生图（不再发编辑指令）",
+      _nr_src in ("local", "static") and "参考图" not in _nr_text, _nr_text[:80])
+# 无参考图 + 三视图模板（t2i 链路）：tag 串带 character sheet 固定构图
+_t2i_3v = prompt_gen.build_t2i_prompt(dict(ENTRY, strategy_type="base"), _p3t)
+check("无参考图三视图模板走 t2i tag 串（character sheet 在）",
+      "character sheet, three views" in _t2i_3v
+      and "grey background" in _t2i_3v
+      and "twintails" in _t2i_3v)
 
 print("test_prompt_gen: ALL OK")

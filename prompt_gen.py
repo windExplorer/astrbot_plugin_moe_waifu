@@ -926,6 +926,56 @@ def force_single_view(picks: dict) -> dict:
     return out
 
 
+# ---------- 参考图形态（v0.29.4）：指令按「无图 / 单图 / 多图」分流 ----------
+
+def template_ref_mode(entry: dict) -> str:
+    """本次图生图参考图形态：none（无参考图）/ single（1 张）/ multi（多张）。
+
+    口径与 draw.generate_portrait 完全一致：只认 strategy 里**显式**的图生图源
+    （gen_refs 多图 + 主参考 ref，去重、ref 在前），不碰资料库 refs（参考图墙
+    只是资料库，不是生成源）。img2img 缺源时 draw 侧会降级文生图，提示词这边
+    必须同步按 none 走——否则「指令说改参考图、实际按 tags 文生图」两边打架。
+    纯函数。
+    """
+    if str((entry or {}).get("strategy_type") or "base") != "img2img":
+        return "none"
+    st = entry.get("strategy") or {}
+    if not isinstance(st, dict):
+        return "none"
+    raw = st.get("gen_refs")
+    refs = ([str(x).strip() for x in raw if str(x or "").strip()]
+            if isinstance(raw, list) else [])
+    ref = str(st.get("ref") or "").strip()
+    if ref and ref not in refs:
+        refs.insert(0, ref)
+    if not refs:
+        return "none"
+    return "multi" if len(refs) > 1 else "single"
+
+
+def _ref_clause_multi_view(mode: str) -> str:
+    """多视图模板（三/四视图）按参考图形态给的分句（含句首分号）。"""
+    if mode == "single":
+        return ("；参考图只有一张（通常是正面）：以参考图中的角色形象与服装为"
+                "基准补全其余视角，参考图未给出的视角按该角色的设定合理推演，"
+                "确保各视角是同一个角色、同一套服装")
+    if mode == "multi":
+        return ("；参考图是同一角色的多张分视角图：各视角的形象与服装与其对应的"
+                "参考图保持一致，参考图未覆盖的视角按该角色的设定合理推演补全")
+    return ""
+
+
+def _ref_clause_single_view(mode: str) -> str:
+    """单图输出（模板单图 / 普通编辑）按参考图形态给的分句。"""
+    if mode == "multi":
+        return ("；参考图是多张同一角色的图：以正面全身那张为主输出单张立绘，"
+                "其余参考仅用于核对服装与配色细节")
+    if mode == "single":
+        return ("；若参考图是多视角拼接的角色设定稿，"
+                "只保留其中一个视角（通常是正面），去掉其余视角的拼接")
+    return ""
+
+
 # 维度展示顺序（预览面板 chip 与变化短语列表共用；v0.14.0 提取为常量单一来源）
 # v0.19.0：新增「画风」维度，排在构图之后（先定风格，再定穿什么/在哪）
 DIM_ORDER = (("构图视图", "compose"), ("构图取景", "framing"),
@@ -965,11 +1015,15 @@ def describe_variations(seed_int: int, theme_id: str = "", outfit: str = "",
 
 # ---------- 本地模板（无 LLM 兜底） ----------
 
-def build_local_instruction(entry: dict, picks: dict, custom: str = "") -> str:
+def build_local_instruction(entry: dict, picks: dict, custom: str = "",
+                            ref_mode: str = "") -> str:
     """img2img 用：本地拼一条 Qwen-Image-2.1 风格的自然语言编辑指令。
 
     结构遵循官方指南「动作 + 目标 + 约束」：先列改动，句尾统一强调保持不变。
     custom 为用户在预览面板自填的附加要求，作为一条改动子句并入。
+    ref_mode：参考图形态 none/single/multi（v0.29.4）；空串 = 按 entry 自动判定。
+    无参考图时不写「根据参考图」、不带多视角源收敛条款；多张参考图时写明
+    「各视角与对应参考图一致 / 以正面全身那张为主」。
     """
     parts = []
     for label, zh in variation_zh_list(picks):
@@ -1017,21 +1071,28 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "") -> str:
     pose_zh = str((picks.get("pose") or {}).get("zh") or "").strip()
     if pose_zh and not multi_view:
         tail += f"姿势以「{pose_zh}」为唯一姿势，不要保留原姿势；"
-    # v0.25.7：不再一律「完整竖版立绘」——取景由 framing 维度决定
+    # v0.29.4：参考图形态分流——多视图模板按「单图源=扩展推演 / 多图源=视角
+    # 对齐参考图」给不同的约束；单图输出按「多图源=以正面全身为主 / 单图源=
+    # 保留多视角源收敛条款 / 无图=不提参考图」。
+    mode = ref_mode or template_ref_mode(entry)
     tail += ("在同一张图内并列展示上述各个视角，输出角色设定稿"
+             + _ref_clause_multi_view(mode)
              if multi_view
              else "画面中只出现这一个人物、只保留一颗头部，输出单人竖版立绘"
                   + (f"（{framing_zh}）" if framing_zh else "")
-                  + "；若参考图是多视角拼接的角色设定稿，"
-                    "只保留其中一个视角（通常是正面），去掉其余视角的拼接")
+                  + _ref_clause_single_view(mode))
     if not parts:
         keep = ("，保持人物的面部特征、发型发色与角色辨识度不变"
                 + (f"，角色固有的「{feat_zh}」必须原样保留" if feat_zh else ""))
+        if mode == "none":
+            return ("直接生成该角色的单人竖版立绘"
+                    + (f"（{framing_zh}）" if framing_zh else "")
+                    + "（画面中只出现这一个人物）" + keep)
         return ("根据参考图重新绘制该角色的单人竖版立绘"
                 + (f"（{framing_zh}）" if framing_zh else "")
-                + "（画面中只出现这一个人物；若参考图是多视角拼接的角色设定稿，"
-                  "只保留其中一个视角、通常是正面，去掉其余视角的拼接）"
-                + keep)
+                + "（画面中只出现这一个人物"
+                + _ref_clause_single_view(mode)
+                + "）" + keep)
     return "，".join(parts) + tail
 
 
@@ -1199,22 +1260,50 @@ _SYSTEM_T2I_QWEN = (
 )
 
 
-def build_meta_prompt(entry: dict, picks: dict, custom: str = "") -> str:
+def build_meta_prompt(entry: dict, picks: dict, custom: str = "",
+                      ref_mode: str = "") -> str:
     name = str(entry.get("name") or "").strip() or "该角色"
     series = str(entry.get("series") or "").strip() or "未知作品"
     tags = str(entry.get("tags_en") or "").strip() or "无"
+    # v0.29.4：参考图形态分流（none/single/multi）。旧版对所有情况都说
+    # 「若参考图是多视角设定稿必须收敛为单张立绘」——三/四视图模板撞上这句
+    # 就是自相矛盾（前面要求并列多视角、后面要求收敛单图）；无参考图时更是
+    # 凭空谈论不存在的参考图。按形态给准确的话：
+    #   多视图模板 + 单图源 → 以单图为基准扩展推演其余视角；
+    #   多视图模板 + 多图源 → 各视角与对应参考图一致；
+    #   单图输出   + 多图源 → 以正面全身那张为主，其余仅核对细节；
+    #   单图输出   + 单图源 → 保留「多视角源收敛为单图」条款（防复刻拼接布局）；
+    #   无参考图           → 不提参考图。
+    mode = ref_mode or template_ref_mode(entry)
+    if _compose_is_multi(picks):
+        ref_para = ("参考图只有一张（通常是正面）：以参考图中的角色形象与服装为"
+                    "基准，在同一张图内并列补全其余视角；参考图未给出的视角按"
+                    "该角色的设定合理推演，确保各视角是同一个角色、同一套服装。"
+                    if mode == "single" else
+                    "参考图是同一角色的多张分视角图：各视角的形象与服装与其对应的"
+                    "参考图保持一致；参考图未覆盖的视角按该角色的设定合理推演补全。"
+                    if mode == "multi" else
+                    "本轮没有参考图：直接按角色 tags 与设定生成并列多视角的"
+                    "角色设定稿。")
+    elif mode == "multi":
+        ref_para = ("参考图是同一角色的多张图：以正面全身那张为主输出单张立绘，"
+                    "其余参考仅用于核对服装与配色细节；若某张参考图本身是多视角"
+                    "拼接的角色设定稿，只取其中一个视角（通常是正面）。")
+    elif mode == "single":
+        # v0.13.3：源图不再硬编码「单人立绘」——生成源可能是多视图设定稿，
+        # 硬编码会让 LLM 写不出「转单图」指令，输出复刻设定稿布局（实测）。
+        ref_para = ("参考图是该角色的一条生成源：可能是单张立绘，也可能是多视角"
+                    "拼接的角色设定稿；若参考图是多视角设定稿，输出必须收敛为"
+                    "单张立绘（保留其中一个视角，通常是正面），不要保留拼接布局。")
+    else:
+        ref_para = "本轮没有参考图：直接按角色 tags 与设定生成。"
     lines = [
         f"角色：{name}（出自 {series}），特征 tags：{tags}。",
         # v0.25.7：尾巴/兽耳/角/翅膀这类部件必须在指令里逐项点名保留
         (f"必须保留的固有特征：{identity_feature_text(entry, 'zh')}"
          "（原样保留、清晰可见，不得丢失或改写）。"
          if identity_feature_text(entry, "zh") else ""),
-        # v0.13.3：源图不再硬编码「单人立绘」——生成源可能是多视图设定稿，
-        # 硬编码会让 LLM 写不出「转单图」指令，输出复刻设定稿布局（实测）。
-        "参考图是该角色的一条生成源：可能是单张立绘，也可能是多视角拼接的"
-        "角色设定稿；若参考图是多视角设定稿，输出必须收敛为单张立绘"
-        "（保留其中一个视角，通常是正面），不要保留拼接布局。"
-        "本轮由抽签决定的改动维度：",
+        ref_para + "本轮由抽签决定的改动维度：",
     ]
     zh_list = variation_zh_list(picks)
     if zh_list:
@@ -1390,6 +1479,11 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
     theme, _theme_rec = resolve_theme(theme_id, seed_int)
     try:
         stype = str(entry.get("strategy_type") or "base")
+        if stype == "img2img" and template_ref_mode(entry) == "none":
+            # v0.29.4：与 draw.generate_portrait 的降级口径一致——img2img 却
+            # 没有显式参考图时按 tags 文生图；提示词侧若仍发「把构图改为…」的
+            # 编辑指令，就是「指令说改图、实际无图可改」两边打架。
+            stype = "base"
         if stype != "img2img":
             if not bool(cfg.get("variations_enabled", True)):
                 return build_prompt_tags(entry), "static"
