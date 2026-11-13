@@ -2,6 +2,16 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.29.9 (2026-11-14)
+
+- **修「图生图预览提示词是文生图口径：选了参考图却不提参考图；维度点『随机』画面不动」**——用户实测两案：① 明明在生成源墙上选了参考图，预览出来的提示词却是「一幅XX风格的单人立绘插画」这类文生图描述，只字不提参考图；② 画风维度下拉点「🎲 单独随机一项」，提示词文本在变、出的图却不动。追根因是同一个：
+  - **根因（前端预览 override 缺生成源）**：`galPreviewOverride()` 只传 `strategy_type` / `img2img_workflow` / `denoise`，从不传 `ref` / `refs`——注释还停留在 v0.29.4 之前的口径（「ref 不参与提示词生成」）。而 v0.29.4 起提示词按 `template_ref_mode(entry)` 的 none / single / multi 三态分流：override 不带图生图源，`effective_entry` 建出的 img2img 条目就没有 `gen_refs` → 判 none → `build_generation_prompt` 按设计降级成文生图口径（danbooru tags / qwen 中文长描述）。v0.29.4 的条目写过「试画台预览自动跟随：/preview 传了 override.refs 时预览就是多图源版本」——**后端一直支持，是前端从来没传**。
+  - **加重因素（过期预览不重算）**：`openPromptModal` 只在提示词文本为空时才自动预览——「先开过面板（没选图）→ 后选生成源 → 再开面板」，看到的还是无图口径的旧文本；在主面板换主题同理（外面那个主题下拉只置 `confirmed=false`，不重算）。
+  - **为什么案②也是它**：确认过的提示词经 `jobs/start` 的 `prompt` 字段直通出图（manual），出图侧按 override 的 refs 正常走 `comfyui_img2img`——于是 Qwen-Image-Edit 拿到的是一段「描述成品」而非「改图指令」，模型只能照参考图复刻：维度重摇改的只是文本，画面纹丝不动。
+  - **修复（前端）**：① `galPreviewOverride()` 与 `doDetailGenerate` 的出图 override 同源——`galRefsSel` 选了图就带 `ov.ref = 第一张`、`ov.refs = 全部`，没选图时不带（条目自带 ref 照常参与形态判定），预览口径 = 实际出图口径；② 新增预览指纹 `galPromptKey`（画法 + 生成源 + 主题），`genPromptPreview` 成功后记录，`openPromptModal` 发现指纹变了就重算——手改过文本、输入没变时不重算，手改内容不丢。
+  - **后端可观测**：`build_generation_prompt` 的 img2img 缺源降级分支补一条 info 日志（此前静默，「为什么提示词像文生图」无据可查）。
+  - 守卫：`test_html_integrity` 新增 2 项——预览 override 必须带 `ov.ref` / `ov.refs`（断言用赋值形态，与 `doDetailGenerate` 的字面量形态互不误判）、开面板时指纹不一致必须重算；`test_inline_js` / `test_template_compile` / `test_webui_contract` / `test_prompt_gen` 全过。
+
 ## v0.29.8 (2026-11-14)
 
 - **修「非兽耳娘被画出兽耳尾巴：LLM 按系统提示词例词清单虚构特征」**——莉莉（鸣潮）的 `tags_en` 为 `lily (wuthering waves), wuthering waves, 1girl, solo, full body, long hair, S-rank`，不含任何固有特征关键词，`build_meta_prompt` 据此**不输出**「必须保留的固有特征」字段；但文生图的两套 LLM 系统提示词里无条件列举了例词：

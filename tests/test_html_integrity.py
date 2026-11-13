@@ -62,6 +62,16 @@ def main():
     check("apiPost 出站参数经 plain()",
           "bridge.apiPost(path, plain(body, {}))" in main_body)
 
+    # v0.29.9：图生图预览必须把已选生成源带进 override（ov.ref/ov.refs）——
+    # 缺了它 template_ref_mode 判 none、预览提示词降级成文生图口径；确认直通
+    # 后编辑模型拿到「描述成品」而非「改图指令」，维度重摇画面不动（两案同根因）。
+    # 断言用赋值形态（doDetailGenerate 的出图 override 是字面量形态，互不误判）
+    check("预览 override 带图生图源（ov.ref/ov.refs）",
+          "ov.ref = String(galRefsSel.value[0])" in main_body
+          and "ov.refs = galRefsSel.value.slice()" in main_body)
+    check("开面板时生成源/画法/主题变更会重算预览（galPromptKey 指纹）",
+          "galPromptKey !== galPromptKeyNow()" in main_body)
+
     print("test_html_integrity: ALL OK")
 
 

@@ -4771,6 +4771,11 @@
       var galPromptLoading = Vue.ref(false);
       var galPromptOpen = Vue.ref(false);
       var galPromptConfirmed = Vue.ref(false);
+      // v0.29.9：上次预览成功时的「画法+生成源+主题」指纹。这些输入在面板外
+      // 改了（选图/换模式/换主题）提示词口径就变了，开面板时指纹对不上就重算，
+      // 防止把无参考图口径的旧文本确认直通给图生图（面板内改动本来就各自
+      // 触发预览，不在此列）
+      var galPromptKey = "";
       // v0.15.0：立绘排序（默认最新在前）+ 详情弹窗
       var galSort = Vue.ref("newest");
       // v0.21.0：停用的立绘默认隐藏（查看开关在立绘区标题行）
@@ -5235,14 +5240,29 @@
         } catch (e) { galPools.value = null; /* 下次打开重试；下拉仍有随机项 */ }
       }
       function galPreviewOverride() {
-        // 预览用 override：ref 不参与提示词生成（文本层面只看画法/工作流/强度）
+        // 预览用 override：v0.29.4 起提示词按「参考图形态 none/single/multi」
+        // 分流——选定的图生图源必须随 override 带给 /prompt/preview。缺了它，
+        // effective_entry 建出的 img2img 条目没有 gen_refs，template_ref_mode
+        // 判 none、预览提示词降级成文生图口径（只字不提参考图）；确认后这份
+        // 文本直通出图，编辑模型拿到的是「描述成品」而非「改图指令」，维度
+        // （画风/服装/姿势…）怎么摇画面都不动（v0.29.9 实测两案同根因）。
+        // 与 doDetailGenerate 的出图 override 同源（galRefsSel）：预览口径 =
+        // 实际出图口径。没选图时不带 ref（条目自带 ref 照常参与判定）。
         if (galMode.value !== "img2img") return null;
         var ov = { strategy_type: "img2img" };
+        if (galRefsSel.value.length) {
+          ov.ref = String(galRefsSel.value[0]);
+          ov.refs = galRefsSel.value.slice();
+        }
         if (galWf.value) { ov.img2img_workflow = galWf.value; }
         if (galDenoise.value !== null && galDenoise.value !== undefined) {
           ov.denoise = galDenoise.value;
         }
         return ov;
+      }
+      function galPromptKeyNow() {
+        return galMode.value + "|" + (galRefsSel.value || []).join(">")
+             + "|" + String(galTheme.value || "");
       }
       async function genPromptPreview() {
         if (!galCharId.value) return;
@@ -5258,6 +5278,7 @@
           galDims.value = dc ? (dc.dims || []) : ((res && res.dims) || []);
           galPrompt.value = (res && res.prompt) || "";
           galPromptSource.value = (res && res.source) || "";
+          galPromptKey = galPromptKeyNow();   // v0.29.9：预览成功才记指纹
         } catch (e) { /* 已提示；prompt 留空禁止确认 */ } finally {
           galPromptLoading.value = false;
         }
@@ -5268,7 +5289,11 @@
         galDimOpen.value = "";   // v0.19.7：自绘下拉，开弹窗先收起残留的展开态
         resetGalDimCtl();
         if (!galPools.value) { loadGalPools(); }
-        if (!String(galPrompt.value || "").trim()) { genPromptPreview(); }  // 首开自动出一版
+        // v0.29.9：首开、或生成源/画法/主题与上次预览不一致时都重算——旧版只在
+        // 文本为空时才预览，「先开面板、后选参考图、再开」看到的还是无图口径的
+        // 旧提示词，确认直通就把文生图文本喂给了图生图（v0.29.9 实测）
+        if (!String(galPrompt.value || "").trim()
+            || galPromptKey !== galPromptKeyNow()) { genPromptPreview(); }
       }
       function generateFromModal() {
         // v0.7.0：用户口径——面板主按钮只开面板，这里按「开始生成」才出图

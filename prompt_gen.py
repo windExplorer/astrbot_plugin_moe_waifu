@@ -1539,6 +1539,11 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
             # v0.29.4：与 draw.generate_portrait 的降级口径一致——img2img 却
             # 没有显式参考图时按 tags 文生图；提示词侧若仍发「把构图改为…」的
             # 编辑指令，就是「指令说改图、实际无图可改」两边打架。
+            # v0.29.9：降级留痕——此前静默，「为什么提示词像文生图、不提参考图」
+            # 无据可查（实报案例即前端预览没把已选生成源传进 override）。
+            logger.info("[moe_waifu] img2img 条目没有显式参考图源，"
+                        "提示词按文生图口径生成（要在指令里改参考图，"
+                        "请先选定生成源再画）")
             stype = "base"
         if stype != "img2img":
             if not bool(cfg.get("variations_enabled", True)):
