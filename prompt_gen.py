@@ -208,8 +208,11 @@ POSES = [
     {"w": 4, "zh": "单腿站立、另一条腿屈膝抬起", "en": "standing on one leg, leg raised, balancing, full body"},
     {"w": 4, "zh": "原地轻跳、双脚离地", "en": "jumping, feet off ground, full body"},
     {"w": 4, "zh": "迈步走路、裙摆飘动", "en": "walking, full body, dynamic pose"},
-    {"w": 4, "zh": "趴在桌上打瞌睡", "en": "sleeping on desk, dozing off, full body"},
-    {"w": 4, "zh": "抱着枕头蜷缩打瞌睡", "en": "sleeping, hugging pillow, curled up, full body"},
+    # v0.19.10：趴桌/蜷缩睡这两条去掉 "full body"——趴在桌上不可能同时呈现
+    # 「全身站立像」，en tag 自相矛盾正是双头事故的推手之一（模型把睡着的头
+    # 画在桌上、又把原姿势的全身人画了一遍）。
+    {"w": 4, "zh": "趴在桌上打瞌睡", "en": "sleeping on desk, dozing off"},
+    {"w": 4, "zh": "抱着枕头蜷缩打瞌睡", "en": "sleeping, hugging pillow, curled up"},
     {"w": 4, "zh": "弯腰凑近镜头做搞怪鬼脸", "en": "bending forward, playful pose, funny face"},
     {"w": 3, "zh": "伸展双臂伸懒腰", "en": "stretching, arms up, full body"},
     {"w": 3, "zh": "背对镜头回眸", "en": "from behind, looking back at viewer, full body"},
@@ -258,15 +261,19 @@ EXPRESSIONS = [
     {"w": 3, "zh": "得意地挺起胸膛", "en": "proud, confident smile"},
 ]
 
-# body：大权重保持原样（体型变化对图生图一致性冲击最大），小概率触发用户要的
-# 身高/体型/胸部变化。zh 为空串 = 指令与 tag 都不提及。
+# body：v0.19.10 按用户口径重做——默认（90%）不提及体型 = 跟随参考图/角色原本
+# 体型；变化合计压到 ~10% 且不再让「高挑成熟」一家独大（旧池 66/34 的变化概率、
+# 高挑占变化里的 8/34，用户反馈「经常变成成熟高挑」）。补齐少女/萝莉两档。
+# 手动选择：WebUI 生成立绘弹窗点「体型」chip 即可从本池（非空项按权重降序）选定。
 BODY = [
-    {"w": 66, "zh": "", "en": ""},
-    {"w": 8, "zh": "身材高挑的成熟体型（成年女性比例）", "en": "tall female, mature female"},
-    {"w": 8, "zh": "娇小圆润的体型（幼态比例）", "en": "petite"},
-    {"w": 7, "zh": "胸部更丰满一些", "en": "large breasts"},
-    {"w": 7, "zh": "胸部更纤细一些", "en": "small breasts"},
-    {"w": 4, "zh": "健身后的紧致身材", "en": "toned, athletic"},
+    {"w": 90, "zh": "", "en": ""},
+    {"w": 2, "zh": "身材高挑的成熟体型（成年女性比例）", "en": "tall female, mature female"},
+    {"w": 2, "zh": "少女体型（年轻轻盈的女性比例）", "en": "young female, slim"},
+    {"w": 2, "zh": "娇小体型（个子小、幼态比例）", "en": "petite"},
+    {"w": 1, "zh": "萝莉体型（孩童般的比例）", "en": "child, petite"},
+    {"w": 1, "zh": "胸部更丰满一些", "en": "large breasts"},
+    {"w": 1, "zh": "胸部更纤细一些", "en": "small breasts"},
+    {"w": 1, "zh": "健身后的紧致身材", "en": "toned, athletic"},
 ]
 
 # 画风维度（v0.19.0）：用户反馈「主题里应该要加上画风，现在画风太单一」。
@@ -777,14 +784,21 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "") -> str:
     # v0.13.3：非多视图指令必须显式处理「源是多视图设定稿」的情况——
     # 编辑类模型（Qwen 2.1 Edit）会强烈复刻输入图布局，只说「输出单人
     # 完整竖版立绘」拉不回单图，必须写明「只保留一个视角、去掉拼接」。
+    # v0.19.10：防「双头/双人」（用户实测：趴桌打瞌睡 + 全身立绘 → 桌上一颗
+    # 睡着的头 + 原姿势的完整人又画了一遍）。姿势类改动必须写明「新姿势是
+    # 唯一姿势」；所有单图指令都强调画面里只有这一个人物。
+    pose_zh = str((picks.get("pose") or {}).get("zh") or "").strip()
+    if pose_zh and not multi_view:
+        tail += f"姿势以「{pose_zh}」为唯一姿势，不要保留原姿势；"
     tail += ("在同一张图内并列展示上述各个视角，输出角色设定稿"
              if multi_view
-             else "输出单人完整竖版立绘；若参考图是多视角拼接的角色设定稿，"
+             else "画面中只出现这一个人物、只保留一颗头部，"
+                  "输出单人完整竖版立绘；若参考图是多视角拼接的角色设定稿，"
                   "只保留其中一个视角（通常是正面），去掉其余视角的拼接")
     if not parts:
         return ("根据参考图重新绘制该角色的单人完整竖版立绘"
-                "（若参考图是多视角拼接的角色设定稿，只保留其中一个视角、"
-                "通常是正面，去掉其余视角的拼接）"
+                "（画面中只出现这一个人物；若参考图是多视角拼接的角色设定稿，"
+                "只保留其中一个视角、通常是正面，去掉其余视角的拼接）"
                 "，保持人物的面部特征、发型发色与角色辨识度不变")
     return "，".join(parts) + tail
 
@@ -850,7 +864,7 @@ def build_t2i_qwen_local(entry: dict, picks: dict, custom: str = "") -> str:
     tags = str(entry.get("tags_en") or "").strip().rstrip(",")
     head = ("一幅在同一张图内并列展示正面、侧面、背面多视角的角色设定稿"
             if _compose_is_multi(picks)
-            else "一幅单人完整竖版角色立绘插画")
+            else "一幅单人完整竖版角色立绘插画（画面中只有一个人物）")
     lines = [head + "，构图干净、光影柔和、细节精致"]
     if zh:
         lines.append("；".join(zh))
@@ -868,6 +882,9 @@ _SYSTEM_PROMPT = (
     "发型发色与角色辨识度不变；避免一次塞太多改动。"
     "若改动维度里有「画风」，把它写成「把整体画风改为…（人物面部与发型保持可辨认）」，"
     "画风类改动最容易把脸画丢，必须点明保持辨识度。"
+    "画面纪律（必须写进指令）：画面中只允许出现这一个人物、只保留一颗头部；"
+    "改动姿势时以新姿势为唯一姿势，绝不能把原姿势与新姿势同时画出来"
+    "（两个头/两个身体/分身都是严重错误）。"
     "输出纪律：只输出一条简体中文编辑指令本身——不要解释、不要引号、"
     "不要 markdown、不要分点，总长不超过 110 字。"
 )
@@ -877,7 +894,8 @@ _SYSTEM_PROMPT = (
 _SYSTEM_T2I_NATURAL = (
     "你为 Moss-Image（自然语言系文生图模型，英文效果最好）撰写单人角色立绘的"
     "英文提示词。写法：一段连贯的英文描述（caption），覆盖主体外观、服装、"
-    "动作姿势、表情、场景与光照、构图（默认 full body portrait；多视图要求时用 "
+    "动作姿势、表情、场景与光照、构图（默认 full body portrait, solo, "
+    "single character——画面中只有这一个人物；多视图要求时用 "
     "character sheet, multiple views, front view, side view, back view）；角色身份锚定——"
     "把已给 tags 里的发色/发型/瞳色/标志性特征自然融入描述，点名用"
     "「规范英文名（作品名）」句式。若维度里给了「画风」，把它翻成对应英文风格词"
@@ -893,7 +911,8 @@ _SYSTEM_T2I_QWEN = (
     "你为 Qwen-Image-2.1（通义千问图像模型，文生图吃官方格式的连贯长描述）"
     "撰写单人角色立绘提示词。写法：一段连贯的中文描述（5~10 句），覆盖角色"
     "外观（把已给 tags 的发色/发型/瞳色/服装特征写成自然语句）、服装、姿势、"
-    "表情、背景环境与光影、构图（默认单人完整竖版立绘；若改动维度要求三/四视图，"
+    "表情、背景环境与光影、构图（默认单人完整竖版立绘，画面中只有一个人物、"
+    "一颗头部；若改动维度要求三/四视图，"
     "则写成同一张图内并列展示正面、侧面、背面的角色设定稿）；若维度里给了「画风」，"
     "把它写成一句「整体画风为…」并让全段描述都贴合该画风（上色方式、笔触、"
     "光影质感跟着变）；不写比例数字、"
@@ -926,7 +945,9 @@ def build_meta_prompt(entry: dict, picks: dict, custom: str = "") -> str:
     goal = ("角色是二次元角色；本轮要求在同一张图内并列展示正面、侧面、背面等"
             "多个视角，输出角色设定稿，不要退化成单张立绘。"
             if _compose_is_multi(picks)
-            else "角色是二次元角色，目标是单人完整竖版立绘。")
+            else "角色是二次元角色，目标是单人完整竖版立绘；画面中只允许出现"
+                 "一个人物、一颗头部，改动姿势时以新姿势为唯一姿势，"
+                 "不要同时呈现改动前后的两个状态。")
     lines += [
         "请把以上改动自然融合成一条编辑指令；未列出的维度一律不要改动。",
         goal,

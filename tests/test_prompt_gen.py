@@ -50,11 +50,11 @@ for seed in range(1000):
     seen.add(id(prompt_gen.pick_variations(seed)["outfit"]))
 check("服装维度分布非退化", len(seen) >= 8)
 
-# body 大权重保持：BODY[0] 权重 66/100 ≈ 2/3
+# body 大权重保持：v0.19.10 起空项权重 90/100——默认跟随参考图/角色原本体型
 keep = prompt_gen.BODY[0]
 keep_n = sum(1 for s in range(2000)
              if prompt_gen.pick_variations(s)["body"].get("zh") == "")
-check("体型维度大权重保持原样", 1100 <= keep_n <= 1600)
+check("体型维度默认保持原样（90% 上下）", 1650 <= keep_n <= 1950)
 
 # ---------- 本地编辑指令 ----------
 picks = prompt_gen.pick_variations(777)
@@ -473,5 +473,46 @@ check("主题画风关键词全部筛出非空子集", not _bad_style_subset)
 _campus_az = {prompt_gen.pick_variations(s, prompt_gen.get_theme("campus"))["artstyle"]["zh"]
               for s in range(120)}
 check("校园主题画风 >= 2 种（主题内也有画风变化）", len(_campus_az) >= 2)
+
+# ---------- v0.19.10：防双头/双人 + 体型池重做 ----------
+# 背景：用户实测「趴在桌上打瞌睡」+ 全身立绘 → 桌上一颗睡着的头 + 原姿势的
+# 完整人又画了一遍。三个推手一起修：睡姿 en 带自相矛盾的 full body / 指令缺
+# 「单人单头」硬约束 / 体型「高挑成熟」触发过频。
+# a) 睡姿类 en 不再带 full body（趴桌不可能同时呈现全身站立像）
+_sleep_bad = [p["zh"] for p in prompt_gen.POSES
+              if "瞌睡" in str(p.get("zh") or "") and "full body" in str(p.get("en") or "")]
+check("睡姿类姿势不再带 full body tag", not _sleep_bad)
+# b) 体型池补齐少女/萝莉两档，且变化合计权重 <= 15%（90+ 变化）
+_bz = [str(it.get("zh") or "") for it in prompt_gen.BODY]
+check("体型池含少女体型", any("少女" in z for z in _bz))
+check("体型池含萝莉体型", any("萝莉" in z for z in _bz))
+_body_total = sum(int(it.get("w", 1)) for it in prompt_gen.BODY)
+_body_change = sum(int(it.get("w", 1)) for it in prompt_gen.BODY if it["zh"])
+check("体型变化合计权重 <= 15%", _body_change * 100 <= _body_total * 15)
+check("高挑成熟不再是变化里的最大头",
+      int(next(it["w"] for it in prompt_gen.BODY if "高挑" in it["zh"]))
+      <= _body_change // 3)
+# c) 姿势类改动的本地指令带「唯一姿势」条款；所有单图指令带「只出现这一个人物」
+_pose_picks = dict(prompt_gen.pick_variations(42),
+                   pose={"zh": "趴在桌上打瞌睡", "en": "sleeping on desk, dozing off"})
+_pose_inst = prompt_gen.build_local_instruction(ENTRY, _pose_picks)
+check("姿势改动指令写明唯一姿势", "为唯一姿势" in _pose_inst and "趴在桌上打瞌睡" in _pose_inst)
+check("单图指令带单人单头约束", "只出现这一个人物" in _pose_inst
+      and "只保留一颗头部" in _pose_inst)
+check("无变化兜底指令也带单人约束", "只出现这一个人物" in inst0)
+# 多视图模板不受单人条款拉扯（设定稿并列多视角是预期行为）
+_3v_inst = prompt_gen.build_local_instruction(ENTRY, prompt_gen.pick_variations(42, tpl3))
+check("三视图指令不混入唯一姿势条款", "为唯一姿势" not in _3v_inst)
+# d) LLM 通道：系统提示与元提示词都带单人单头纪律
+check("LLM 编辑指令系统提示带画面纪律",
+      "一颗头部" in prompt_gen._SYSTEM_PROMPT and "唯一姿势" in prompt_gen._SYSTEM_PROMPT)
+_p_mp = prompt_gen.build_meta_prompt(ENTRY, _pose_picks)
+check("元提示词带单人单头目标", "一个人物" in _p_mp and "唯一姿势" in _p_mp)
+# e) 文生图两路系统提示同样强调单人
+check("qwen 系统提示带单人约束",
+      "一个人物" in prompt_gen._SYSTEM_T2I_QWEN)
+check("natural 系统提示带 solo 约束",
+      "solo" in prompt_gen._SYSTEM_T2I_NATURAL
+      and "single character" in prompt_gen._SYSTEM_T2I_NATURAL)
 
 print("test_prompt_gen: ALL OK")
