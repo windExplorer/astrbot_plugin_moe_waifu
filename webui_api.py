@@ -1481,7 +1481,13 @@ async def h_queue_list(plugin) -> dict:
     active.sort(key=lambda r: (0 if r["status"] == "running" else 1,
                                r.get("queue_pos") or 0))
     finished.sort(key=lambda r: -r["created"])
-    runner = getattr(plugin, "_batch_runner", None)
+    # v0.43.2：修「补齐配额 / 批量补图在顶部队列里完全看不到」。
+    # 旧代码读的是 getattr(plugin, "_batch_runner") —— 那是**模块级函数名**，
+    # 插件实例上根本没有这个属性（真实属性是 _batch_runner() 里挂的 plugin._batch），
+    # 于是 batch 恒为 None；同理 _avatar_runner 在首个批量头像跑起来之前也不存在。
+    # 结果 /queue/list 只回单张任务（试画 / 生成立绘 / 头像），批量补图这条线
+    # 在顶栏永远是「空闲」，队列面板也永远「没有排队中的任务」。
+    runner = getattr(plugin, "_batch", None)
     batch = runner.snapshot() if runner is not None else None
     av = getattr(plugin, "_avatar_runner", None)
     avatar_batch = av.snapshot() if av is not None else None

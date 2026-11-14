@@ -407,13 +407,18 @@
   /* 页内顶部固定：滚动容器是 .page-scroll（padding 16px 22px），负 margin 撑满
      宽度、不透明背景盖住下面滚上来的内容。角色详情的「头部 + 页签」、调试页的
      页签、以及各页的标题/筛选行都套它，滚多长都不用回头找切换入口。 */
+  /* v0.43.2：固定头的下沿留白加大——页签下划线紧贴内容区，切换完一眼看过去
+     像「标题压在正文上」。并注意 .stack > * + * 的 12px margin-top 会与本条
+     margin-bottom 取 max 折叠，所以这里必须写到比 12 大才有实际效果。 */
   .sticky-head { position: sticky; top: 0; z-index: 20;
-    margin: -16px -22px 12px; padding: 14px 22px 10px;
+    margin: -16px -22px 22px; padding: 14px 22px 14px;
     background: var(--wf-bg); border-bottom: 1px solid var(--wf-line);
     box-shadow: 0 8px 16px -14px rgba(80,40,70,.8); }
-  .sticky-head > * + * { margin-top: 8px; }
+  .sticky-head > * + * { margin-top: 10px; }
   .sticky-head .gal-tabs, .sticky-head .dbg-tabs,
   .sticky-head .sec-title { margin-bottom: 0; }
+  /* 页签这一行自身再补 2px 下沿，避免下划线裁到固定区边框上 */
+  .sticky-head .gal-tabs, .sticky-head .dbg-tabs { padding-bottom: 2px; }
   .sticky-sec { position: sticky; top: 0; z-index: 15;
     margin: -16px -22px 12px; padding: 14px 22px 10px;
     background: var(--wf-bg); border-bottom: 1px solid var(--wf-line);
@@ -542,10 +547,9 @@
             <span class="top-queue" :class="{ busy: queueTopCount > 0, broken: queueTopBroken }"
                   :title="queueTopBroken
                             ? '队列状态查询连续失败：插件后端可能没有重载到最新版（请重载插件或重启 AstrBot）'
-                            : '点击查看出图队列（生成立绘 / 试画 / 头像 / 批量）'"
+                            : '点击查看出图队列（生成立绘 / 试画 / 头像 / 批量补图 / 补齐配额）'"
                   @click="queuePanelOpen = true">
-              出图队列 {{ queueTopBroken ? "· 不可用"
-                          : (queueTopCount > 0 ? "· " + queueTopCount : "· 空闲") }}
+              出图队列 {{ queueTopText }}
             </span>
             <n-button size="tiny" secondary :loading="refreshing" @click="refreshAll">
               刷新全部
@@ -5536,7 +5540,7 @@
           loadingGal.value = false;
         }
       }
-      async function loadGalItems(cid, token) {
+      async function loadGalItems(cid, token, keepSel) {
         // v0.18.2：可选 cid/令牌——watch 走「切到哪个角色就只认哪个角色的响应」，
         // 其它调用点（refreshAll 等）不传就按当前 galCharId 与当前令牌走
         var target = cid === undefined ? galCharId.value : cid;
@@ -5549,7 +5553,9 @@
           // seq 升序原样——满库取图 pool_index 的确定性依赖这个顺序，别动）
           galItems.value = (res && res.items) || [];
           // v0.26.1：重载/切角色后清空批量选择（避免选中了上一角色的图）
-          if (typeof galSel !== "undefined") { galSel.value = []; }
+          // v0.43.2：keepSel=true 用于「批量补图每出一张就刷墙」——这种后台
+          // 刷新不该把用户正在勾的批量停用/启用选择清掉。
+          if (!keepSel && typeof galSel !== "undefined") { galSel.value = []; }
         } catch (e) { if (seq === galLoadSeq) galItems.value = []; }
       }
 
@@ -6097,7 +6103,9 @@
             message.success("队列已启动：" + res.chars + " 个角色 / " + res.queued + " 张"
               + (res.skipped ? "（跳过 " + res.skipped + " 个无参考图角色）" : ""));
             batchPreview.value = null;
+            batchDoneSeen = 0;   // v0.43.2：逐张增量刷新从 0 起算
             pollBatch();
+            pollQueueTop();
           }
         } catch (e) { /* 已提示 */ } finally {
           batchStarting.value = false;
@@ -6116,6 +6124,26 @@
         if (!p || !p.running) return "批量补图";
         return "补图中 " + (p.done || 0) + "/" + (p.total || 0);
       });
+      // v0.43.2：每出一张就刷界面——旧实现只在「整批结束」才 refreshAll，
+      // 用户在详情页点完补齐配额后干等几分钟、墙上一张不动（用户实报
+      // 「每次画完一张，界面就应该自动显示出那张照片」）。
+      // 收口成一个增量钩子：列表页批量 / 详情页补齐 / 刷新时拉的 /batch/status
+      // 三条轮询都走它，按 snapshot.done 的增量决定要不要重取立绘墙。
+      var batchDoneSeen = 0;
+      async function noteBatchProgress(snap) {
+        if (!snap || !Number(snap.total)) { batchDoneSeen = 0; return; }  // 空队列/新一批
+        var done = Number(snap.done || 0);
+        if (done <= batchDoneSeen) { return; }
+        batchDoneSeen = done;
+        // 只在「看图的地方」刷新：详情页刷立绘墙 + 速览，总览刷指标卡，
+        // 其它页签（配置 / 记录）没必要为了一张图重新拉数据。
+        if (menu.value === "gallery" && galCharId.value) {
+          await loadGalItems(undefined, undefined, true);
+          loadGalSummary();
+        } else if (menu.value === "overview") {
+          loadOverview();
+        }
+      }
       async function pollBatch() {
         if (batchTimer) { clearTimeout(batchTimer); batchTimer = null; }  // 单链防重
         try {
@@ -6123,6 +6151,7 @@
           if (res) {
             batchProg.value = res.batch || null;
             batchQuota.value = res.quota || batchQuota.value;
+            noteBatchProgress(res.batch);
           }
         } catch (e) { /* 已提示 */ }
         var p = batchProg.value || {};
@@ -7073,6 +7102,18 @@
         if (ab && ab.running) { n += Math.max(0, (ab.total || 0) - (ab.done || 0)); }
         return n;
       });
+      // v0.43.2：顶栏文案收口成 computed（模板里不做方法调用/三元嵌套）——
+      // 批量补图在跑时带上「已画 x/y」，用户在详情页点完补齐配额就能直接看到进度。
+      var queueTopText = Vue.computed(function () {
+        if (queueTopBroken.value) { return "· 不可用"; }
+        var n = queueTopCount.value;
+        var txt = n > 0 ? "· " + n + " 张" : "· 空闲";
+        var b = (queueTop.value || {}).batch;
+        if (b && b.running && Number(b.total)) {
+          txt += "（批量 " + (b.done || 0) + "/" + b.total + "）";
+        }
+        return txt;
+      });
       var KIND_LABELS = { try: "试画", refill: "生成立绘", avatar: "头像" };
       var queueRows = Vue.computed(function () {
         var qt = queueTop.value || {};
@@ -7114,6 +7155,29 @@
                       label: "共 " + b.total + " 张（已完成 " + (b.done || 0)
                              + "，失败 " + (b.failed || 0) + "）",
                       statusText: "进行中", tagType: "info" });
+          // v0.43.2：逐张明细——补齐配额是在角色详情页发起的，用户要能在顶栏
+          // 直接看出「画到哪一张、画的是哪个角色的什么题材」。队列串行，所以
+          // 第一个还没落状态的就是正在画的那张。
+          var bItems = b.items || [];
+          var live = -1;
+          for (var bi = 0; bi < bItems.length; bi++) {
+            if (!bItems[bi].status) { live = bi; break; }
+          }
+          bItems.forEach(function (it, ix) {
+            if (it.status === "ok") { return; }   // 已完成的图在墙上看，不占队列行
+            var st = it.status;
+            rows.push({
+              key: "__batch_" + ix + "__", kindLabel: "批量补图",
+              label: (it.name || it.char_id || "角色") + " · 第 " + (ix + 1)
+                     + "/" + (b.total || bItems.length) + " 张"
+                     + (it.theme_label ? " · " + it.theme_label : ""),
+              statusText: st === "failed" ? ("失败：" + String(it.error || "").slice(0, 30))
+                        : st === "skipped" ? "跳过"
+                        : (ix === live ? "生成中" : "待画"),
+              tagType: st === "failed" ? "error"
+                     : (ix === live ? "info" : "default")
+            });
+          });
         }
         var ab = qt.avatar_batch;
         if (ab && ab.running) {
@@ -7241,7 +7305,9 @@
           galFillTotal.value = queued;
           galFillBusy.value = true;
           galFillOpen.value = false;
+          batchDoneSeen = 0;      // v0.43.2：新一批从 0 起算，逐张增量刷新
           pollGalFill();
+          pollQueueTop();         // 顶部队列立刻反映（不必等 3s 轮询）
         } catch (e) { /* 已提示 */ }
         finally { galFillLoading.value = false; }
       }
@@ -7256,6 +7322,8 @@
               snap = res.batch || null;
             }
           } catch (e) { /* 瞬时失败继续轮 */ }
+          // v0.43.2：每完成一张立刻把新图拉进立绘墙（不等整批结束）
+          await noteBatchProgress(snap);
           if (!galFillBusy.value) { galFillTimer = null; return; }
           if (snap && snap.running === false) {
             galFillBusy.value = false;
@@ -8770,7 +8838,8 @@
         galCharId: galCharId, galCharOpts: galCharOpts, galItems: galItems,
         loadingGal: loadingGal, refillError: refillError,
         galQueueTip: galQueueTip, galSubmitting: galSubmitting,
-        queueTopCount: queueTopCount, queuePanelOpen: queuePanelOpen,
+        queueTopCount: queueTopCount, queueTopText: queueTopText,
+        queuePanelOpen: queuePanelOpen,
         queueTopBroken: queueTopBroken, queueRows: queueRows,
         doDeletePortrait: doDeletePortrait, movePortraitToRef: movePortraitToRef,
         moveRefToPortrait: moveRefToPortrait,

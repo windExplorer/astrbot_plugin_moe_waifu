@@ -2,6 +2,19 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.43.2 (2026-11-15)
+
+- **详情页「补齐配额」后顶部队列一片空白、画完的图不自动出现**（用户实报两条：①「点击补齐配额，提交之后应该在导航栏展示队列信息，现在顶部队列那块无任何显示」；②「每次画完一张，界面就应该自动显示出那张照片」）+ **页签下沿贴内容太近**（用户实报）。
+  - **现象**：详情页点「补齐配额」确认后，顶栏「出图队列」一直显示「空闲」，点开队列面板也写着「当前没有排队 / 进行中的出图任务」；立绘墙要等整批结束才一次性冒出一堆图。
+  - **根因（后端读错属性名，队列快照里根本没有批量补图）**：`h_queue_list` 写的是
+    `runner = getattr(plugin, "_batch_runner", None)` —— `_batch_runner` 是 **webui_api 的模块级函数名**，插件实例上从来没有这个属性（真正的属性是 `_batch_runner(plugin)` 里挂的 `plugin._batch`）。于是 `batch` 恒为 `None`，`/queue/list` 只回单张任务（试画 / 生成立绘 / 头像），批量补图这条线在顶栏与队列面板里**完全不存在**。`avatar_batch` 同理（`_avatar_runner` 在首个批量头像跑起来之前也不存在）。
+  - **根因（前端只在整批结束时才刷墙）**：`pollGalFill` 只在 `snap.running === false` 时 `refreshAll()`；运行期间每 2s 轮询只更新计数，从不重取立绘列表 → 墙上一张不动。
+  - **修复（后端）**：`h_queue_list` 改读真实属性 `plugin._batch` / `plugin._avatar_runner`（不存在则回 `None`），批量补图与批量头像的 `snapshot()` 正常并入快照。
+  - **修复（前端·顶栏）**：新增 `queueTopText` computed，顶栏文案收口——批量在跑时显示「出图队列 · N 张（批量 x/y）」；`doFillStart` / `doBatchStart` 成功后立刻 `pollQueueTop()`，不必等 3s 轮询。队列面板把批量补图**逐张展开**：`角色名 · 第 x/y 张 · 题材` + 状态（生成中 / 待画 / 失败原因 / 跳过），已完成的图不占行（在墙上看）。
+  - **修复（前端·逐张刷新）**：新增 `noteBatchProgress(snap)` 增量钩子，按 `snapshot.done` 的增量决定要不要重取数据——在详情页就刷立绘墙（`loadGalItems(..., keepSel=true)`，顺手不清用户正在勾的批量选择）+ 速览卡，在总览就刷指标卡。`pollBatch` / `pollGalFill` 两条轮询都接上，`doFillStart` / `doBatchStart` 时把 `batchDoneSeen` 归零。刷新页面后接上正在跑的队列也能逐张出图。
+  - **修复（样式）**：`.sticky-head` 下沿留白 12px → 22px、内边距 10px → 14px、头部与页签间距 8px → 10px，页签容器再补 2px 下沿。注意 `.stack > * + *` 的 `margin-top: 12px` 会与固定头的 `margin-bottom` **折叠取 max**，所以必须写到大于 12 才有实际效果（只调 padding 不够）。
+  - **守卫**：`test_batch_fill` 新增 `queue_snapshot_guard()` 4 项——桩插件（`_batch` 为真 `BatchRunner`、`_avatar_runner` 不存在）实走 `h_queue_list`，断言快照带出 `batch.running/total/items/done` 且 `avatar_batch` 为 `None` 时不炸。`test_ui_v042` / `test_webui_contract` / `test_html_integrity` / 内联脚本 `node --check` / 模板配对 / `Vue.compile` / CRLF 全过。
+
 ## v0.43.1 (2026-11-15)
 
 - **自动选源选了 #1 号立绘，而不是主参考图 / 出卡图**（用户实报）。

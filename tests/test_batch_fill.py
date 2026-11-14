@@ -315,6 +315,48 @@ def test_batch_artist():
         bf.draw, bf.prompt_gen, bf.pool = real_draw, real_pg, real_pool
 
 
+def queue_snapshot_guard():
+    """/queue/list 必须带出批量补图进度（v0.43.2 回归守卫）。
+
+    事故：h_queue_list 里读的是 getattr(plugin, "_batch_runner")——那是**模块
+    级函数名**，插件实例上根本没有这个属性（真实属性是 plugin._batch），于是
+    batch 恒为 None。表现：详情页点「补齐配额」后顶部队列一直「空闲」、队列
+    面板永远「没有排队中的任务」（用户实报「顶部队列那块无任何显示」）。
+    """
+    import webui_api as api
+
+    class QPlugin:
+        def __init__(self):
+            self._jobs = {}
+            self._batch = bf.BatchRunner()
+
+    async def run_once():
+        p = QPlugin()
+        p._batch.running = True
+        p._batch.total = 3
+        p._batch.items = [
+            {"char_id": "a", "name": "甲", "index": 0, "theme_id": "campus",
+             "seq": 1, "status": "ok", "error": "",
+             "file": "portraits/a/1.png"},
+            {"char_id": "a", "name": "甲", "index": 1, "theme_id": "swimsuit",
+             "seq": 2, "status": None, "error": ""},
+            {"char_id": "a", "name": "甲", "index": 2, "theme_id": "maid",
+             "seq": 3, "status": None, "error": ""},
+        ]
+        return await api.h_queue_list(p)
+
+    res = asyncio.run(run_once())
+    data = res.get("data") or {}
+    batch = data.get("batch") or {}
+    check("/queue/list 快照带出批量补图进度",
+          bool(batch.get("running")) and batch.get("total") == 3, str(res))
+    check("批量补图进度带逐张明细（顶栏 / 队列面板要用）",
+          len(batch.get("items") or []) == 3)
+    check("批量补图进度带 succeeded/done 计数", batch.get("done") == 1,
+          str(batch))
+    check("未跑过批量头像时快照不炸", data.get("avatar_batch") is None)
+
+
 def async_init(fn):
     """把同步函数包装成 async 函数桩。"""
 
@@ -326,3 +368,4 @@ def async_init(fn):
 
 if __name__ == "__main__":
     main()
+    queue_snapshot_guard()
