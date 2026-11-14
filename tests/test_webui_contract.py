@@ -63,6 +63,7 @@ galFillOpen galFillRows galFillHave galFillQuota galFillLoading
 rerollFillRow rerollFillAll doFillStart
 galQueueTip galSubmitting
 queueTopCount queuePanelOpen queueRows queueTopBroken
+galArtistLoading galArtistPrompt tryArtistLoading tryArtistPrompt
 avatarOf hashColor thumbOf colorOf rerollLabel tv brandColor zhLocale
 bindRows bindSeriesOpts bindRawOpen bindLoading loadBindPools onBindRawInput
 addBindRow setRowGid setRowSeries removeBindRow
@@ -86,7 +87,7 @@ ROUTES = """
 /refs/orphan_delete
 /portraits/restore /portraits/delete_hard
 /refs/set_draw_source /overview
-/prompt/pools
+/prompt/pools /prompt/artist
 /batch/preview /batch/start /batch/status /batch/stop
 /batch/char_start /batch/char_preview
 /queue/list

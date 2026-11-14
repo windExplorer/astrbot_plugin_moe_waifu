@@ -68,13 +68,24 @@ OUTFITS = [
     # —— 泳装系（swimsuit）。v0.14.0 大扩充：原子集只有 3 项、连体泳装独占
     #    46% 权重，且「连体竞技泳衣」因叫「泳衣」漏出主题关键词——用户反馈
     #    「每次换一版都是连体泳衣，比基尼也算啊」——
-    {"w": 5, "zh": "连体泳装", "en": "one-piece swimsuit"},
+    #    v0.38.0 二次整治：用户实测「基本千篇一律的连体泳装，市面上那么多
+    #    好看的泳装」——连体系整体降权（5/4/4→3/3/2），补设计款比基尼
+    #    （蕾丝 / 高腰复古 / 单肩 / 流苏 / 豹纹）与露背设计款连体；连体占比
+    #    45% → ~18%，设计款合计过半。
+    {"w": 3, "zh": "连体泳装", "en": "one-piece swimsuit"},
     {"w": 5, "zh": "分体比基尼", "en": "bikini"},
     {"w": 4, "zh": "荷叶边比基尼", "en": "frilled bikini"},
     {"w": 4, "zh": "运动系比基尼", "en": "sport bikini"},
     {"w": 3, "zh": "系带比基尼", "en": "side-tie bikini"},
-    {"w": 4, "zh": "连体裙式泳衣", "en": "one-piece swimsuit, swim skirt"},
-    {"w": 4, "zh": "连体竞技泳衣", "en": "competition swimsuit, one-piece swimsuit"},
+    {"w": 3, "zh": "蕾丝比基尼（镂空罩纱）", "en": "lace bikini, see-through sarong"},
+    {"w": 3, "zh": "复古高腰比基尼", "en": "high-waist bikini, retro swimsuit"},
+    {"w": 3, "zh": "单肩比基尼（不对称设计）", "en": "asymmetric bikini, one-shoulder bikini"},
+    {"w": 2, "zh": "流苏比基尼", "en": "fringe bikini"},
+    {"w": 2, "zh": "豹纹比基尼", "en": "leopard print bikini"},
+    {"w": 2, "zh": "露背设计款连体泳衣（交叉细带）",
+     "en": "backless one-piece swimsuit, criss-cross straps, designer swimsuit"},
+    {"w": 3, "zh": "连体裙式泳衣", "en": "one-piece swimsuit, swim skirt"},
+    {"w": 2, "zh": "连体竞技泳衣", "en": "competition swimsuit, one-piece swimsuit"},
     {"w": 3, "zh": "长袖防晒泳衣", "en": "rash guard, one-piece swimsuit"},
     {"w": 3, "zh": "泳装配纱笼罩裙", "en": "swimsuit, sarong"},
     {"w": 3, "zh": "泳装外搭防晒衬衫", "en": "swimsuit, oversized shirt"},
@@ -1663,6 +1674,15 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "",
     # 对齐参考图」给不同的约束；单图输出按「多图源=以正面全身为主 / 单图源=
     # 保留多视角源收敛条款 / 无图=不提参考图」。
     mode = ref_mode or template_ref_mode(entry)
+    # v0.38.0：编辑模型默认「保留原服装」——换装类指令必须点名「完全替换」，
+    # 否则泳装换比基尼这类改动经常只改了个别元素、款式还是原来那套。
+    # 无参考图（mode=none）时没有「原服装」可替换，措辞改为纯着装声明
+    # （「无参考图指令不提参考图」守卫会拦漏网的措辞）
+    outfit_zh = str((picks.get("outfit") or {}).get("zh") or "").strip()
+    if outfit_zh:
+        tail += (f"服装以「{outfit_zh}」为准，完全替换参考图中的原有服装，"
+                 "原服装的款式与轮廓不要残留；" if mode != "none"
+                 else f"全身服装以「{outfit_zh}」为准，不要混入其他款式；")
     tail += ("在同一张图内并列展示上述各个视角，输出角色设定稿"
              + _ref_clause_multi_view(mode)
              if multi_view
@@ -1841,6 +1861,8 @@ _SYSTEM_PROMPT = (
     "画面氛围（必须落实）：编辑模型默认保留原图的光线与色调——背景子句里"
     "括号内的光线描述（光源方向、光斑、空气感）必须一并写进指令，让整张图的"
     "光影与新场景一致；只换地点不换光，画面就会发闷。"
+    "改动服装时必须写明「新服装完全替换原服装，原款式轮廓不要残留」——"
+    "编辑模型默认保留原服装，不点名就只改个别元素。"
     "画面纪律（必须写进指令）：画面中只允许出现这一个人物、只保留一颗头部；"
     "改动姿势时以新姿势为唯一姿势，绝不能把原姿势与新姿势同时画出来"
     "（两个头/两个身体/分身都是严重错误）。"
@@ -1897,6 +1919,129 @@ _SYSTEM_T2I_QWEN = (
 )
 
 
+# ---------- AI 画师模式（v0.38.0）：不经预设维度池，LLM 以画师身份整体创作 ----------
+# 用户口径：预设维度池出来的图「一点感觉都没有、很粗制滥造」——维度池保证
+# 多样性与决定论，但每个条目都是「名词积木」，拼出来永远少一口气。画师模式
+# 让 LLM 以顶级画师身份**整体构思一张画**（构图/瞬间/服装/光线/色调一次性
+# 创作），产出落回前端提示词框，走既有的「确认后 prompt 直通」链路出图。
+# 抽卡主链路仍走池子（决定论、不依赖 LLM、免费）；画师模式只在工坊显式点击。
+
+_ARTIST_DOCTRINE = (
+    "创作守则（顶级画师的直觉，逐条内化）："
+    "① 光是画面的主角——先决定光源（方向、时间、色温），让轮廓光、光斑、"
+    "空气感成为构图的一部分，绝不接受「白底站桩加均匀打光」；"
+    "② 画面要有一个「瞬间」——人物正在做一件具体的事（动作+道具+情绪），"
+    "有前因后果的抓拍感，而不是面向镜头摆拍；"
+    "③ 服装要有时装配感——层叠、材质对比、一件点睛单品，符合角色气质，"
+    "细节写到能照着画出来；"
+    "④ 背景要么讲角色的故事（环境里有生活的痕迹），要么是高级的图形化构成"
+    "（色块 / 网点 / 大面积留白），都优于空荡的纯色底；"
+    "⑤ 整张图有明确的色调倾向与主次关系——第一眼落在脸上，第二眼发现细节；"
+    "⑥ 每次创作都要换思路：换机位、换时刻、换情绪，绝不重复上一张的套路。"
+)
+
+_SYSTEM_ARTIST_HEAD = (
+    "你是一位常年霸榜 pixiv 的顶级二次元插画师，现在为一位角色创作一张单人"
+    "插画，由你全权决定画面：构图、瞬间、服装、光线、背景、色调——大胆而"
+    "具体地构思，像发布一张会让粉丝惊呼的新作那样。"
+    + _ARTIST_DOCTRINE
+    + "红线：画面只有这一个人物、一颗头部；不得添加角色 tags 之外的非人类"
+      "部件（尾巴 / 兽耳 / 角 / 翅膀 / 光环等，tags 里本来有才画）；"
+      "不写水印、文字、分镜拼接；不写 8k / highly detailed 之类质量词堆砌。"
+)
+
+
+def artist_system_prompt(style: str, img2img: bool = False) -> str:
+    """按底模风格给画师模式出 system prompt（纯函数）。
+
+    img2img=True 时追加一段「这是编辑指令」的口径——描述目标画面即可，
+    但要提醒以参考图为基准重绘、保持人物可辨认。
+    """
+    if style == "qwen":
+        out = (_SYSTEM_ARTIST_HEAD
+               + "输出格式：一段连贯的简体中文画面描述（8~14 句），按「画风与"
+                 "媒介 → 人物与瞬间 → 服装细节 → 构图取景 → 背景环境 → 光照 → "
+                 "色调」展开，光照单独成句；只描述成品画面，不写任何指令口吻。")
+    elif style == "natural":
+        out = (_SYSTEM_ARTIST_HEAD
+               + "输出格式：一段连贯的英文 caption（60~120 词），按「medium & "
+                 "style → character & moment → outfit details → framing → "
+                 "background & lighting → color mood」展开；描述成品画面，"
+                 "不写指令口吻。")
+    else:
+        out = (_SYSTEM_ARTIST_HEAD
+               + "输出格式：一行 danbooru 风格英文 tags（逗号分隔），以"
+                 "「1girl, solo, best quality」开头，在角色 tags 之外补充："
+                 "场景与光照 tag、动作与道具 tag、服装细节 tag、构图取景 tag、"
+                 "氛围与色调 tag、1~2 个画风 tag；保持 booru 语法。")
+    if img2img:
+        out += ("本次提示词将作为图生图编辑指令使用：按目标画面描述，模型会以"
+                "参考图为基准重绘；描述里点明「人物面部与发型保持可辨认」。")
+    return out
+
+
+async def build_artist_prompt(context, cfg: dict, entry: dict, seed_int: int,
+                              theme_id: str = "", custom: str = "",
+                              outfit: str = "", style: str | None = None,
+                              img2img: bool | None = None) -> tuple:
+    """AI 画师模式：不经预设维度池，LLM 以画师身份整体创作提示词。
+
+    返回 (prompt, source="artist")；未配置对话模型 / 超时 / 空返回时抛
+    RuntimeError（调用方转成用户可读的错误信息）。theme_id 只作题材灵感
+    告知画师（可自由发挥，不锁定维度）；outfit 非空 = 用户指定穿搭，画师的
+    服装设计围绕它展开；style 决定输出格式（danbooru / natural / qwen，
+    None 时按条目工作流探测）。
+    """
+    if style is None:
+        style = detect_t2i_style(context, effective_workflow(entry, cfg))
+    if img2img is None:
+        img2img = str(entry.get("strategy_type") or "") == "img2img"
+    provider = await _resolve_provider(context, cfg.get("prompt_llm_provider", ""))
+    if provider is None:
+        raise RuntimeError("未找到可用的对话模型——AI 画师模式需要先在插件配置里选好对话模型")
+    name = str(entry.get("name") or "该角色")
+    series = str(entry.get("series") or "").strip()
+    lines = [f"角色：{name}" + (f"（出自 {series}）" if series else "")]
+    tags = str(entry.get("tags_en") or "").strip()
+    if tags:
+        lines.append(f"角色特征 tags：{tags}。")
+    feats = identity_feature_text(entry, "zh")
+    if feats:
+        lines.append(f"角色固有特征（必须出现且清晰可见）：{feats}。")
+    outfit = str(outfit or "").strip()
+    if outfit:
+        lines.append(f"用户指定穿搭：{outfit}——服装设计围绕它展开。")
+    if theme_id:
+        theme, _rec = resolve_theme(theme_id, seed_int)
+        if theme:
+            lines.append(f"题材灵感：{theme.get('label') or theme_id}"
+                         "（只作灵感参考，画面由你自由发挥）。")
+    extra = str(custom or "").strip()
+    if extra:
+        lines.append(f"用户附加要求：{extra}。")
+    lines.append(f"创作编号：{seed_int % 100000}"
+                 "（用它拉开每次构思的差异，编号本身不要写进提示词）。")
+    lines.append("请直接给出这张画的最终提示词。")
+    timeout = int(cfg.get("prompt_llm_timeout", 30) or 30)
+    if timeout <= 0:
+        timeout = 30
+    try:
+        resp = await asyncio.wait_for(
+            provider.text_chat(
+                prompt="\n".join(lines),
+                session_id=None,
+                system_prompt=artist_system_prompt(style, img2img),
+            ),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        raise RuntimeError("AI 画师超时了，请再点一次")
+    text = sanitize_llm_output(getattr(resp, "completion_text", "") or "", limit=900)
+    if not text:
+        raise RuntimeError("AI 画师没有返回内容，请再点一次")
+    return text, "artist"
+
+
 def build_meta_prompt(entry: dict, picks: dict, custom: str = "",
                       ref_mode: str = "") -> str:
     name = str(entry.get("name") or "").strip() or "该角色"
@@ -1949,6 +2094,15 @@ def build_meta_prompt(entry: dict, picks: dict, custom: str = "",
         lines += [f"- {label}：{zh}" for label, zh in zh_list]
     else:
         lines.append("- （全部维度保持不变）")
+    # v0.38.0：编辑模型默认「保留原服装」——换装必须点名「完全替换」；
+    # 无参考图（mode=none）时没有「原服装」，措辞改为纯着装声明
+    outfit_zh = str((picks.get("outfit") or {}).get("zh") or "").strip()
+    if outfit_zh:
+        lines.append(f"- 服装锚定：以上面「服装」维度为准，完全替换参考图中的"
+                     f"原有服装，原服装的款式与轮廓不要残留。"
+                     if mode != "none" else
+                     f"- 服装锚定：全身服装以上面「服装」维度为准，"
+                     f"不要混入其他款式。")
     extra = str(custom or "").strip()
     if extra:
         lines.append(f"- 用户附加要求：{extra}")

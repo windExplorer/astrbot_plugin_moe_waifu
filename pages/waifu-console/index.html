@@ -826,6 +826,9 @@
                               @click="generatePromptPreview">重新生成</n-button>
                     <n-button size="small" :disabled="tryPromptLoading"
                               @click="tryAttempt++; generatePromptPreview()">换一版</n-button>
+                    <n-button size="small" type="warning" :loading="tryArtistLoading"
+                              title="不经预设维度池：LLM 以 pixiv 画师身份整体构思一张画"
+                              @click="tryArtistPrompt">🎨 画师出词</n-button>
                   </n-space>
                   <div v-if="tryDims.length > 0" style="margin-top: 10px;">
                     <n-tag v-for="d in tryDims" :key="d.label" size="small" :bordered="false"
@@ -2376,6 +2379,9 @@
                     @click="galAttempt = 0; resetGalDimCtl(); genPromptPreview()">重新生成</n-button>
           <n-button size="small" :disabled="galPromptLoading"
                     @click="galAttempt++; genPromptPreview()">换一版</n-button>
+          <n-button size="small" type="warning" :loading="galArtistLoading"
+                    title="不经预设维度池：LLM 以 pixiv 画师身份整体构思一张画"
+                    @click="galArtistPrompt">🎨 画师出词</n-button>
         </div>
         <!-- v0.14.0：维度 chip 可交互——点值弹下拉（🎲 单独随机一项 / 从池里
              选定值并 📌 锁定）、× 移除该维度（本轮提示词不提及）、
@@ -4349,6 +4355,28 @@
           tryPromptLoading.value = false;
         }
       }
+      // ---- v0.38.0：AI 画师模式——不经预设维度池，LLM 以画师身份整体创作，
+      //      产出落回提示词框，走既有「确认后 prompt 直通」出图链路 ----
+      var tryArtistLoading = Vue.ref(false);
+      async function tryArtistPrompt() {
+        if (!tryCharId.value || tryArtistLoading.value) return;
+        tryArtistLoading.value = true;
+        try {
+          var res = await apiPost("prompt/artist", {
+            id: tryCharId.value, theme: tryTheme.value || "",
+            custom: tryCustom.value || "", outfit: tryOutfit.value || "",
+            attempt: tryAttempt.value || 0, override: overrideOf()
+          });
+          tryPrompt.value = (res && res.prompt) || "";
+          tryPromptSource.value = "AI 画师 · 不经预设维度池";
+          tryDims.value = [];
+          tryBodyZh.value = "";
+          tryStyle.value = "";
+          tryAttempt.value = 0;
+        } catch (e) { /* 已提示 */ } finally {
+          tryArtistLoading.value = false;
+        }
+      }
       function gotoStep2() {
         if (!tryCharId.value) return;
         if (tryMode.value === "img2img" && !tryHasSource()) {
@@ -5603,6 +5631,28 @@
           galPromptKey = galPromptKeyNow();   // v0.29.9：预览成功才记指纹
         } catch (e) { /* 已提示；prompt 留空禁止确认 */ } finally {
           galPromptLoading.value = false;
+        }
+      }
+      // ---- v0.38.0：AI 画师模式——不经预设维度池，LLM 以画师身份整体创作，
+      //      产出落回提示词框，走既有「确认后 prompt 直通」出图链路 ----
+      var galArtistLoading = Vue.ref(false);
+      async function galArtistPrompt() {
+        if (!galCharId.value || galArtistLoading.value) return;
+        galArtistLoading.value = true;
+        try {
+          var res = await apiPost("prompt/artist", {
+            id: galCharId.value, theme: galTheme.value || "",
+            custom: galCustom.value || "", outfit: galOutfit.value || "",
+            attempt: galAttempt.value || 0, override: galPreviewOverride()
+          });
+          galPrompt.value = (res && res.prompt) || "";
+          galPromptSource.value = "AI 画师 · 不经预设维度池";
+          galDims.value = [];          // 画师整段创作，没有预设维度可记
+          galAttempt.value = 0;
+          galPromptConfirmed.value = false;
+          galPromptKey = galPromptKeyNow();   // 重开弹窗不覆盖画师产出
+        } catch (e) { /* 已提示 */ } finally {
+          galArtistLoading.value = false;
         }
       }
       function openPromptModal() {
@@ -7580,6 +7630,7 @@
         tryPrompt: tryPrompt, tryPromptSource: tryPromptSource,
         tryPromptLoading: tryPromptLoading, tryStyle: tryStyle,
         gotoStep2: gotoStep2, generatePromptPreview: generatePromptPreview,
+        tryArtistLoading: tryArtistLoading, tryArtistPrompt: tryArtistPrompt,
         onThemeChange: onThemeChange,
         uploading: uploading, onTryPanelFiles: onTryPanelFiles,
         cancelTryWait: cancelTryWait, adoptTryParams: adoptTryParams, backFromTry: backFromTry,
@@ -7709,6 +7760,7 @@
         galPromptOpen: galPromptOpen, galPromptConfirmed: galPromptConfirmed,
         openPromptModal: openPromptModal, generateFromModal: generateFromModal,
         genPromptPreview: genPromptPreview,
+        galArtistLoading: galArtistLoading, galArtistPrompt: galArtistPrompt,
         // v0.14.0：维度 chip 交互（重摇/锁定/移除/添加）
         galDimsVisible: galDimsVisible, galHiddenDims: galHiddenDims,
         galDimOpts: galDimOpts, onDimPick: onDimPick,

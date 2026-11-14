@@ -2078,6 +2078,50 @@ async def h_prompt_preview(plugin) -> dict:
                "dim_control": dim_control})
 
 
+async def h_prompt_artist(plugin) -> dict:
+    """AI 画师模式（v0.38.0）：不经预设维度池，LLM 以画师身份整体创作提示词。
+
+    产出落回前端提示词框，走既有的「确认后 prompt 直通」链路出图——绘图链路
+    零改动。theme 只作题材灵感（可空）；outfit 是用户指定穿搭；attempt 用于
+    「再想一张」扰动。未配置对话模型 / 超时 / 空返回时返回可读错误信封。
+    """
+    body = await _body()
+    cid = str(body.get("id") or "").strip()
+    if not cid:
+        return err("缺少 id")
+    entry = pool.find_entry(pool.load_packs(_pools_dir(plugin), logger), cid)
+    if entry is None:
+        return err(f"角色库里找不到「{cid}」")
+    override = body.get("override") if isinstance(body.get("override"), dict) else None
+    if override:
+        entry = draw.effective_entry(entry, override)
+    theme_id = str(body.get("theme") or "").strip()
+    custom = str(body.get("custom") or "").strip()[:300]
+    outfit = str(body.get("outfit") or "").strip().strip("。，,")[:80]
+    try:
+        attempt = max(0, int(body.get("attempt") or 0))
+    except (TypeError, ValueError):
+        attempt = 0
+    date = plugin._today()
+    salt = str(plugin._cfg("salt", "moe-waifu"))
+    seq = plugin._store.next_portrait_seq(cid) if plugin._store else 0
+    seed_int = pool.portrait_seed_int(cid, date, seq, salt)
+    if attempt:
+        seed_int = (seed_int + attempt * 7919) % (2 ** 31)
+    cfg = plugin._draw_cfg()
+    try:
+        prompt_text, source = await prompt_gen.build_artist_prompt(
+            plugin.context, cfg, entry, seed_int,
+            theme_id=theme_id, custom=custom, outfit=outfit)
+    except RuntimeError as exc:
+        return err(str(exc))
+    except Exception as exc:
+        logger.warning(f"[{PLUGIN_NAME}] AI 画师出词失败\n{traceback.format_exc()}")
+        return err(f"AI 画师出词失败：{exc}")
+    return ok({"prompt": prompt_text, "source": source, "seed": seed_int,
+               "attempt": attempt})
+
+
 async def h_prompt_pools(plugin) -> dict:
     """维度池下拉选项（v0.14.0）：每个维度池的非空中文短语，按权重降序。
 
@@ -4565,6 +4609,8 @@ def register(plugin) -> None:
         ("/llm_providers", h_llm_providers, ["GET"]),
         ("/themes", h_themes, ["GET"]),
         ("/prompt/preview", h_prompt_preview, ["POST"]),
+        # v0.38.0：AI 画师模式——不经预设维度池，LLM 以画师身份整体创作
+        ("/prompt/artist", h_prompt_artist, ["POST"]),
         ("/prompt/pools", h_prompt_pools, ["GET"]),
         ("/works/discover", h_works_discover, ["POST"]),
         ("/works/discover_add", h_works_discover_add, ["POST"]),

@@ -1271,4 +1271,92 @@ check("图生图：氛围要求写进 system（只换地点不换光）",
 check("图生图：改动子句不可丢写进 system",
       "一条都不能丢" in prompt_gen._SYSTEM_PROMPT)
 
+# ---------- v0.38.0：泳装整治 + 换装锚点 + AI 画师模式 ----------
+_sw2 = prompt_gen.get_theme("swimsuit")
+_conn = sum(1 for s in range(300)
+            if "连体" in prompt_gen.pick_variations(s, _sw2)["outfit"]["zh"])
+check("泳装整治：连体占比 < 30%（300 种子）", _conn / 300 < 0.30, f"{_conn}/300")
+_of_ens2 = [str(o.get("en") or "") for o in prompt_gen.OUTFITS]
+check("泳装设计款在池（蕾丝 / 高腰复古 / 露背设计款）",
+      any("lace bikini" in e for e in _of_ens2)
+      and any("high-waist bikini" in e for e in _of_ens2)
+      and any("backless one-piece" in e for e in _of_ens2))
+_opa = prompt_gen.pick_variations(42)
+_opa["outfit"] = {"w": 0, "zh": "分体比基尼", "en": "bikini"}
+_inst3 = prompt_gen.build_local_instruction(
+    {"id": "x", "name": "魔女", "tags_en": "", "strategy_type": "img2img",
+     "strategy": {"ref": "refs/x.png"}}, _opa, ref_mode="single")
+check("图生图换装锚点：本地指令点名完全替换原服装",
+      "服装以「分体比基尼」为准" in _inst3 and "原服装的款式与轮廓不要残留" in _inst3)
+_meta3 = prompt_gen.build_meta_prompt(
+    {"id": "x", "name": "魔女", "tags_en": ""}, _opa, ref_mode="single")
+check("图生图换装锚点：LLM 元提示词带服装锚定行", "服装锚定" in _meta3)
+check("图生图换装锚点：system 提示点名完全替换",
+      "完全替换原服装" in prompt_gen._SYSTEM_PROMPT)
+
+# AI 画师模式：system 三格式 + 桩测整体创作
+check("画师 system：三格式都带创作守则与红线",
+      all("pixiv" in prompt_gen.artist_system_prompt(s)
+          and "光是画面的主角" in prompt_gen.artist_system_prompt(s)
+          and "只有这一个人物" in prompt_gen.artist_system_prompt(s)
+          for s in ("danbooru", "natural", "qwen")))
+check("画师 system：danbooru 格式要求 1girl, solo 开头",
+      "1girl, solo, best quality" in prompt_gen.artist_system_prompt("danbooru"))
+check("画师 system：img2img 口径追加编辑说明",
+      "图生图编辑指令" in prompt_gen.artist_system_prompt("qwen", img2img=True)
+      and "图生图编辑指令" not in prompt_gen.artist_system_prompt("qwen"))
+
+
+class _ArtistProvider:
+    def __init__(self):
+        self.calls = []
+
+    async def text_chat(self, **kw):
+        self.calls.append(kw)
+
+        class _R:
+            completion_text = "一位绿发少女在黄昏天台收衣服，逆光镶金边……"
+
+        return _R()
+
+
+class _ArtistCtx:
+    def __init__(self, provider):
+        self._p = provider
+
+    async def get_using_provider_async(self):
+        return self._p
+
+
+async def _run_artist():
+    prov = _ArtistProvider()
+    text, source = await prompt_gen.build_artist_prompt(
+        _ArtistCtx(prov), {}, {"id": "x", "name": "魔女", "series": "demo",
+                               "tags_en": "witch hat"},
+        12345, theme_id="", custom="", outfit="黑色泳装")
+    return prov, text, source
+
+
+_prov, _atext, _asrc = asyncio.run(_run_artist())
+check("画师模式：产出落 source=artist 且喂了角色与创作编号",
+      _asrc == "artist" and "魔女" in _prov.calls[0]["prompt"]
+      and "创作编号" in _prov.calls[0]["prompt"]
+      and "黑色泳装" in _prov.calls[0]["prompt"]
+      and _atext.startswith("一位绿发少女"))
+
+
+class _NoProvCtx:
+    async def get_using_provider_async(self):
+        return None
+
+    def get_all_providers(self):
+        return []
+
+
+try:
+    asyncio.run(prompt_gen.build_artist_prompt(_NoProvCtx(), {}, {"id": "x"}, 1))
+    check("画师模式：未配置对话模型报可读错误", False)
+except RuntimeError as _e:
+    check("画师模式：未配置对话模型报可读错误", "对话模型" in str(_e))
+
 print("test_prompt_gen: ALL OK")
