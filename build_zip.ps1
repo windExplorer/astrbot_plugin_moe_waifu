@@ -72,6 +72,7 @@ $includeList = @(
     "webui_api.py",
     "seed_pool.json",
     "logo.png",
+    "fonts",
     "pages",
     "_conf_schema.json",
     "metadata.yaml",

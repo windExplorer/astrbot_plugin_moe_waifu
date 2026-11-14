@@ -56,20 +56,39 @@ with tempfile.TemporaryDirectory() as td:
     lines = card._wrap("这是一段特别长的印象语" * 20, card.load_font(27), card.CARD_W - 92)
     check("折行不超过两行", len(lines) == 2 and lines[1].endswith("…"))
 
-    # 档位色宽边框（v0.9.9）：四档位各有专属色，边框确实覆盖卡片边缘
-    frame_px = {}
-    for t in ("S", "A", "B", "C"):
-        p = td / f"frame_{t}.png"
-        card.render_card(portrait, dict(ENTRY, tier=t), date_str="2026-11-12",
-                         out_path=p)
-        with Image.open(p) as im:
-            frame_px[t] = im.convert("RGB").getpixel((6, 600))
-    check("S/A/B/C 边框颜色互不相同", len(set(frame_px.values())) == 4)
+    # v0.45.0 版式：去宽边框，立绘满版（用户：金边没必要）
     with Image.open(out) as im:
         rgba = im.convert("RGBA")
-        inside = rgba.getpixel((40, 600))
+        edge = rgba.getpixel((4, 300))      # 立绘区：无遮罩、无边框，应与立绘同色
         corner = rgba.getpixel((0, 0))
-    check("宽边框与画面内侧不同色", frame_px["S"][:3] != inside[:3])
+    check("立绘满版（边缘不再有档位色宽边框）", edge[:3] == (120, 190, 200))
     check("圆角外像素透明", corner[3] == 0)
+
+    # 档位印章（替代五角星）：四档底色互不相同，S 为金色系
+    seals = {}
+    for t in ("S", "A", "B", "C"):
+        seal = card._tier_seal(92, t, card.TIER_COLORS[t])
+        seals[t] = seal.convert("RGB").getpixel((62, 96))
+    check("S/A/B/C 印章底色互不相同", len(set(seals.values())) == 4)
+    check("S 印章是金色系", seals["S"][0] > 140 and seals["S"][0] > seals["S"][2])
+
+    # 一句话简介（profile.bio）真的进排版：加与不加输出必然不同
+    plain = td / "no_bio.png"
+    with_bio = td / "bio.png"
+    card.render_card(portrait, ENTRY, date_str="2026-11-11", out_path=plain)
+    card.render_card(portrait, dict(ENTRY, profile={"bio": "测试用的一句话简介。"}),
+                     date_str="2026-11-11", out_path=with_bio)
+    check("profile.bio 参与排版", plain.read_bytes() != with_bio.read_bytes())
+
+    # 漫画体缺字回落：生僻日文汉字没有字形，必须回落而不是豆腐块
+    comic = card.load_font(40, style="comic")
+    body = card.load_font(40, style="name")
+    check("漫画体覆盖常用汉字", card._has_glyph(comic, "初"))
+    if comic is not body:
+        check("漫画体缺字可识别（凪）", not card._has_glyph(comic, "凪"))
+    rare = td / "rare.png"
+    card.render_card(portrait, dict(ENTRY, name="凪雫栞"), date_str="2026-11-11",
+                     out_path=rare)
+    check("生僻字名字仍能渲染", Path(rare).stat().st_size > 1000)
 
 print("test_card: ALL OK")
