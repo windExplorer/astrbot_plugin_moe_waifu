@@ -64,6 +64,7 @@ rerollFillRow rerollFillAll doFillStart
 galQueueTip galSubmitting
 queueTopCount queuePanelOpen queueRows queueTopBroken
 galArtistLoading galArtistPrompt tryArtistLoading tryArtistPrompt
+ovLoading dbgAuditLoading batchArtist galFillArtist
 avatarOf hashColor thumbOf colorOf rerollLabel tv brandColor zhLocale
 bindRows bindSeriesOpts bindRawOpen bindLoading loadBindPools onBindRawInput
 addBindRow setRowGid setRowSeries removeBindRow

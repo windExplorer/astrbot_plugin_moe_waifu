@@ -479,7 +479,12 @@
               <n-gi>
                 <div class="ov-card">
                   <div style="font-size:13px; font-weight:600; margin-bottom:8px;">最近抽签</div>
-                  <div v-if="!ov.recent.length" style="font-size:12px; opacity:.6;">还没有抽签记录</div>
+                  <!-- v0.39.2：首屏加载占位（此前 loading 期显示假「还没有抽签记录」） -->
+                  <div v-if="ovLoading && !ov.recent.length" class="gal-loading">
+                    <n-spin size="small"></n-spin>
+                    <span class="txt">正在载入…</span>
+                  </div>
+                  <div v-if="!ovLoading && !ov.recent.length" style="font-size:12px; opacity:.6;">还没有抽签记录</div>
                   <!-- v0.13.2：头像 + 昵称 + 角色色点/缩略，替代裸 QQ 文本行 -->
                   <div v-for="r in ov.recent" :key="r.user_id + r.date"
                        style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12px;">
@@ -592,6 +597,17 @@
                   </n-card>
                 </n-gi>
               </n-grid>
+              <!-- v0.39.2：首载/刷新时的加载占位（此前 loading 期整块空白） -->
+              <div v-if="loadingAll && filteredEntries.length === 0">
+                <div class="gal-loading">
+                  <n-spin size="small"></n-spin>
+                  <span class="txt">正在载入角色库…</span>
+                </div>
+                <div class="gal-skel" style="margin-top: 10px;
+                     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));">
+                  <i v-for="n in 8" :key="'csk' + n"></i>
+                </div>
+              </div>
               <n-empty v-if="!loadingAll && filteredEntries.length === 0"
                        description="没有匹配的角色"></n-empty>
             </div>
@@ -599,6 +615,7 @@
             <!-- 列表视图 -->
             <n-data-table v-if="charsMode === 'list'" :columns="entryCols"
                           :data="filteredEntries" :row-key="rowKey" style="margin-top: 14px;"
+                          :loading="loadingAll"
                           :pagination="{ pageSize: 20 }" size="small"></n-data-table>
           </div>
 
@@ -640,6 +657,17 @@
                   </n-card>
                 </n-gi>
               </n-grid>
+              <!-- v0.39.2：首载/刷新时的加载占位 -->
+              <div v-if="worksLoading && filteredWorks.length === 0">
+                <div class="gal-loading">
+                  <n-spin size="small"></n-spin>
+                  <span class="txt">正在载入作品库…</span>
+                </div>
+                <div class="gal-skel" style="margin-top: 10px;
+                     grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));">
+                  <i v-for="n in 6" :key="'wsk' + n"></i>
+                </div>
+              </div>
               <n-empty v-if="!worksLoading && filteredWorks.length === 0"
                        :description="works.length ? '没有符合条件的作品，换个筛选试试' : '还没有作品：给角色条目填上「作品名」，就会自动归入作品库'"></n-empty>
             </div>
@@ -1413,6 +1441,11 @@
                   <span class="bind-tip" style="margin: 0;">共 {{ recTotal }} 条 · 第 {{ recPage }} 页</span>
                 </template>
                 <div style="overflow-x: auto;">
+                  <!-- v0.39.2：加载占位（此前 loading 期整块空白） -->
+                  <div v-if="recLoading && !recRows.length" class="gal-loading">
+                    <n-spin size="small"></n-spin>
+                    <span class="txt">正在载入抽签记录…</span>
+                  </div>
                   <table class="rec-table" v-if="recRows.length">
                     <thead><tr>
                       <th>日期</th><th>用户</th><th>昵称</th><th>老婆</th><th>作品</th>
@@ -1536,6 +1569,13 @@
                   <span class="bind-tip" style="margin: 0;">{{ statsData.range ? statsData.range.from + " ~ " + statsData.range.to : "—" }}（含今天）</span>
                 </n-space>
               </n-card>
+
+              <!-- v0.39.2：统计载入占位（此前 loading 期卡片全 0、图表空轴） -->
+              <div v-if="statsLoading && !statsData.trend" class="gal-loading"
+                   style="margin-bottom: 10px;">
+                <n-spin size="small"></n-spin>
+                <span class="txt">正在载入统计数据…</span>
+              </div>
 
               <n-grid :cols="4" :x-gap="10" :y-gap="10">
                 <n-gi v-for="s in statCards" :key="s.label">
@@ -1686,6 +1726,11 @@
                   </n-card>
                 </n-gi>
               </n-grid>
+              <!-- v0.39.2：加载占位 -->
+              <div v-if="usersLoading && !userRows.length" class="gal-loading">
+                <n-spin size="small"></n-spin>
+                <span class="txt">正在载入用户…</span>
+              </div>
               <n-empty v-if="!userRows.length && !usersLoading" description="没有匹配的用户" size="small"></n-empty>
               <div style="display: flex; justify-content: center;" v-if="userTotal > userSize">
                 <n-pagination :item-count="userTotal" :page-size="userSize"
@@ -2154,6 +2199,11 @@
                 <template #header-extra>
                   <n-button size="small" @click="loadDebugHistory">刷新</n-button>
                 </template>
+                <!-- v0.39.2：加载占位 -->
+                <div v-if="dbgAuditLoading && !dbgAudit.length" class="gal-loading">
+                  <n-spin size="small"></n-spin>
+                  <span class="txt">正在载入审计…</span>
+                </div>
                 <table class="rec-table" v-if="dbgAudit.length">
                   <thead><tr><th>时间</th><th>动作</th><th>目标</th><th>说明</th></tr></thead>
                   <tbody><tr v-for="a in dbgAudit" :key="a.id">
@@ -2161,7 +2211,7 @@
                     <td>{{ a.target || "—" }}</td><td>{{ a.detail || "—" }}</td>
                   </tr></tbody>
                 </table>
-                <n-empty v-else description="暂无调试操作" size="small"></n-empty>
+                <n-empty v-else-if="!dbgAuditLoading" description="暂无调试操作" size="small"></n-empty>
               </n-card>
             </div>
           </div>
@@ -2242,7 +2292,12 @@
                   <w-icon-btn icon="trash" type="error" tip="移除这一行（未保存前可用「重置」恢复）"
                               @click="removeBindRow(idx)"></w-icon-btn>
                 </div>
-                <n-empty v-if="bindRows.length === 0" size="small"
+                <!-- v0.39.2：加载占位（此前 loading 期会显示假「还没有分群绑定」） -->
+                <div v-if="bindLoading && bindRows.length === 0" class="gal-loading">
+                  <n-spin size="small"></n-spin>
+                  <span class="txt">正在载入分群绑定…</span>
+                </div>
+                <n-empty v-if="!bindLoading && bindRows.length === 0" size="small"
                          description="还没有分群绑定：点「添加群绑定」新建一行；不绑定的群用全部启用卷"></n-empty>
                 <n-space size="small" :wrap="true">
                   <n-button size="small" @click="addBindRow">+ 添加群绑定</n-button>
@@ -3684,14 +3739,18 @@
         // ⚠️ 纯字段比较，不在模板里调方法（sandbox iframe 下的老坑）
         return m === "img2img" && Number((ov.value || {}).draw_sources || 0) === 0;
       });
+      var ovLoading = Vue.ref(true);   // v0.39.2：总览首屏加载态（最近抽签假空态守卫）
       async function loadOverview() {
+        ovLoading.value = true;
         try {
           var res = await apiGet("overview", {});
           if (res) {
             ov.value = Object.assign({}, ov.value, res);
             ensureAvatars(ov.value.recent);
           }
-        } catch (e) { /* 已提示 */ }
+        } catch (e) { /* 已提示 */ } finally {
+          ovLoading.value = false;
+        }
       }
       function goMenu(key) { setMenu(key); }
       loadOverview();  // 首屏（含服务端恢复到总览）就有数据
@@ -6993,12 +7052,16 @@
       var dbgChar = Vue.ref(null);
       var dbgChar2 = Vue.ref(null);
       var dbgBusy = Vue.ref(false);
+      var dbgAuditLoading = Vue.ref(false);   // v0.39.2：审计列表加载态
       async function loadDebugHistory() {
+        dbgAuditLoading.value = true;
         try {
           var res = await apiGet("debug/history", { limit: 40 });
           dbgRecent.value = (res && res.recent) || [];
           dbgAudit.value = (res && res.audit) || [];
-        } catch (e) { /* 已提示 */ }
+        } catch (e) { /* 已提示 */ } finally {
+          dbgAuditLoading.value = false;
+        }
       }
       function pickRecentUser(uid) { dbgStateUid.value = uid; loadDebugState(); }
       async function loadDebugState() {
@@ -7601,6 +7664,7 @@
         menu: menu, menuOpts: menuOpts, onMenu: onMenu,
         refreshing: refreshing, refreshAll: refreshAll,
         ov: ov, loadOverview: loadOverview, goMenu: goMenu,
+        ovLoading: ovLoading, dbgAuditLoading: dbgAuditLoading,
         // v0.19.3：出图方式中文标签 + 「img2img 但没指定出卡源」提示
         ovGenModeLabel: ovGenModeLabel, ovNoSourceTip: ovNoSourceTip,
         meta: meta, loadingAll: loadingAll, loadAll: loadAll, rowKey: rowKey,
