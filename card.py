@@ -40,6 +40,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 CARD_W, CARD_H = 700, 1200
 _CARD_RADIUS = 30       # 圆角卡片
 _PAD_X = 54             # 左右安全边（文字一律从这里起排）
+_FOOT_PAD = 36          # 页脚下沿到卡片底边的距离（统计/日期当页脚，贴着底边）
 _SEAL = 92              # 档位印章边长（不含内边距）
 SEAL_POSITIONS = ("name", "top_left", "top_right")   # 档位章位置（配置 card_seal_pos）
 
@@ -487,7 +488,8 @@ def render_card(portrait_path, entry: dict, *, date_str: str, same_count: int = 
     bio_f = load_font(23, "body", data_dir)
     brow_f = load_font(20, "body", data_dir)
 
-    bottom = CARD_H - 58
+    # 页脚：统计与日期是**页脚**，不是正文最后一行——下沿只留 36px（v0.47.1）
+    bottom = CARD_H - _FOOT_PAD
 
     # ---- 页脚一整行：左 = 统计，右 = 日期（重抽标贴在日期左侧） ----
     stats = f"今日同款 {max(1, same_count)} 人 · 第 {max(1, total_count)} 次抽到她"
@@ -501,7 +503,9 @@ def render_card(portrait_path, entry: dict, *, date_str: str, same_count: int = 
     dtext = str(date_str or "")
     dspace = 1.2                      # 日期逐字加一点字距，像页脚小标尺
     dw = text_width(dtext, date_f, date_fb) + dspace * len(dtext)
-    dx = CARD_W - _PAD_X - dw
+    # 页脚贴底后右下角会撞上卡片圆角（半径 30）：右沿再多收 8px，
+    # 避免日期最后一个字的底部被圆角裁掉一小块
+    dx = CARD_W - _PAD_X - 8 - dw
     if rerolled:
         rt = "重抽"
         rtw = draw.textlength(rt, font=meta_f)
