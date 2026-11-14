@@ -534,10 +534,23 @@ class MoeWaifuPlugin(Star):
                 await self._send_plain(event, self._summon_line(decision, self._gen_queue))
             # 提示词先产（v0.5.6）：img2img 由 LLM 生成 Qwen-Image-Edit 编辑指令
             # （失败自动回落本地模板），base/lora 为 tags + 变化维度
+            # v0.39.0：抽卡画师模式——开关开启且本次现画时，提示词由 LLM 画师
+            # 整体创作（不经预设维度池）；LLM 任何失败自动回落池子链路，
+            # 抽卡永不因画师中断。库存命中根本不走这里（直接复用立绘），
+            # 画师不会触发也不消耗 LLM。
             draw_cfg = self._draw_cfg()
-            prompt_text, prompt_src = await prompt_gen.build_generation_prompt(
-                self.context, draw_cfg, entry, seed_int
-            )
+            prompt_text, prompt_src = "", ""
+            if bool(self._cfg("artist_draw_enabled", False)):
+                try:
+                    prompt_text, prompt_src = await prompt_gen.build_artist_prompt(
+                        self.context, draw_cfg, entry, seed_int
+                    )
+                except Exception as exc:
+                    logger.warning(f"[{PLUGIN_NAME}] 画师出词失败，回落池子链路：{exc}")
+            if not prompt_text:
+                prompt_text, prompt_src = await prompt_gen.build_generation_prompt(
+                    self.context, draw_cfg, entry, seed_int
+                )
             logger.info(f"[{PLUGIN_NAME}] 立绘提示词（{prompt_src}）：{prompt_text[:80]}")
             # 生图串行队列：萌绘一张 20~120s，多召唤并发时逐张画（提示词生成
             # 不占槽——那是本地/LLM 的活，不该堵住后面人的提示词）

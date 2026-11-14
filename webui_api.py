@@ -3029,6 +3029,7 @@ async def h_overview(plugin) -> dict:
             "quota": quota,
             "gen_source_mode": str(plugin._cfg("gen_source_mode", "mix") or "mix"),
             "img2img_prob": _int_clamp(plugin._cfg("img2img_prob", 50), 50, 0, 100),
+            "artist_draw_enabled": bool(plugin._cfg("artist_draw_enabled", False)),
             "packs": len(packs), "chars": len(entries),
             "verified": sum(1 for e in entries if e["verified"]),
             "portraits": len(portraits),

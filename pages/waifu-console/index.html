@@ -416,7 +416,8 @@
                    v0.19.3：出图方式显示中文；「图生图命中」只在 mix 模式有意义 -->
               <span class="cnt">出图方式 {{ ovGenModeLabel }}<span
                 v-if="ov.gen_source_mode === 'mix'"> · 图生图命中 {{ ov.img2img_prob }}%</span><span
-                v-if="ov.gen_source_mode === 'img2img'"> · 每次都现画（库存满也画）</span></span>
+                v-if="ov.gen_source_mode === 'img2img'"> · 每次都现画（库存满也画）</span><span
+                v-if="ov.artist_draw_enabled"> · 🎨 现画走画师出词</span></span>
               <n-button size="tiny" secondary :loading="refreshing" @click="refreshAll">刷新</n-button>
             </div>
             <div v-if="!ov.anima_ready"
@@ -7346,7 +7347,7 @@
       var CONFIG_SECTIONS = [
         { title: "基础", keys: ["timezone", "salt", "reroll_daily_limit", "portraits_per_char",
                                 "allow_unverified", "ui_grid_cols", "disabled_groups"] },
-        { title: "萌绘生图", keys: ["gen_source_mode", "img2img_prob", "draw_workflow", "img2img_workflow",
+        { title: "萌绘生图", keys: ["gen_source_mode", "img2img_prob", "artist_draw_enabled", "draw_workflow", "img2img_workflow",
                                     "draw_width", "draw_height", "draw_timeout", "img2img_denoise",
                                     "draw_negative_enabled", "draw_negative_prompt", "announce_enabled"] },
         { title: "提示词与变化", keys: ["prompt_llm_enabled", "prompt_llm_provider",
