@@ -171,6 +171,39 @@ OUTFITS = [
     # 哥特扩展（进哥特主题子集）
     {"w": 3, "zh": "哥特束腰腰封与薄纱层叠裙",
      "en": "gothic, corset, waist cincher, sheer skirt, layered skirt"},
+    # —— v0.52.0 半身裙型库（用户参考裙型图：12 种半身裙逐一配上衣）。
+    #    上衣按通用穿搭口径组合（迷你裙配短款露脐上衣、铅笔裙配衬衫通勤、
+    #    大廓形泡泡/层叠裙「上简下繁」配短上衣或背心、鱼尾裙配修身衬衫、
+    #    甜酷系配牛仔短上衣厚底鞋）。zh 关键词同步挂接家族联动：
+    #    挂脖/Y2K/叠穿/牛仔/开衫 → 街头族（厚底鞋/帆布鞋/马丁靴/罗马凉鞋），
+    #    衬衫/铅笔裙 → 通勤族（高跟鞋），学院 → JK 族（乐福鞋/及膝袜）。
+    # 街头少女系
+    {"w": 3, "zh": "紧身迷你裙与挂脖露脐上衣（腿环）",
+     "en": "miniskirt, halterneck crop top, thigh strap, midriff, navel"},
+    {"w": 3, "zh": "Y2K 伞摆喇叭短裙与短款上衣",
+     "en": "y2k fashion, flared skirt, crop top, midriff"},
+    {"w": 3, "zh": "不对称围裹短裙与挂脖上衣（宽腰带）",
+     "en": "asymmetric skirt, wrap skirt, halterneck, wide belt, crop top"},
+    {"w": 3, "zh": "泡泡裙与牛仔短上衣（宽腰带）",
+     "en": "bubble skirt, denim crop top, wide belt"},
+    {"w": 3, "zh": "双层叠穿短裙与吊带上衣（缎带）",
+     "en": "layered skirt, camisole, ribbon"},
+    {"w": 2, "zh": "高开衩围裹裙与短款上衣（Y2K）",
+     "en": "wrap skirt, front slit, crop top, midriff"},
+    # 通勤优雅系
+    {"w": 3, "zh": "铅笔裙与收腰衬衫（通勤）",
+     "en": "pencil skirt, fitted shirt, office lady"},
+    {"w": 3, "zh": "围裹半身裙与衬衫（侧边蝴蝶结）",
+     "en": "wrap skirt, shirt, side bow"},
+    {"w": 3, "zh": "鱼尾裙与修身衬衫（荷叶下摆）",
+     "en": "mermaid skirt, frilled hem, fitted shirt"},
+    {"w": 3, "zh": "背后大蝴蝶结半身裙与衬衫",
+     "en": "back bow, large bow, skirt, shirt"},
+    # 层叠华丽系
+    {"w": 3, "zh": "荷叶边蛋糕裙与吊带上衣（开衫披肩）",
+     "en": "frilled skirt, tiered skirt, camisole, cardigan draped over shoulders"},
+    {"w": 2, "zh": "学院风百褶裙与短款针织毛衣",
+     "en": "pleated skirt, cropped sweater"},
     # —— 通用（无主题归属，随机模式专属）——
     {"w": 5, "zh": "运动外套与短裤", "en": "track jacket, gym clothes"},
     {"w": 5, "zh": "冬季大衣与围巾", "en": "winter coat, scarf"},
