@@ -968,8 +968,17 @@ def _copy_into_refs(plugin, src: Path) -> str:
 
 
 def _unlink_portrait(plugin, rel: str) -> None:
-    (Path(plugin._data_dir) / rel).unlink(missing_ok=True)
-    plugin._store.delete_portrait(rel)
+    """立绘转参考图后移除原立绘 —— v0.42.1 起走回收站，不再硬 unlink。
+
+    旧版直接 `unlink` + 删行，是「立绘转参考图」这个**日常操作**里唯一
+    不可恢复的删除：内容虽已复制到 refs/，但原文件名、seq、prompt、停用态
+    全丢，用户反悔只能重新出图。现在与「彻底删除」统一口径：整行写进
+    `_meta.json` 后移入 data/_trash/，回收站能一键还原成原来的立绘。
+    """
+    row = plugin._store.portrait_by_file(rel) if plugin._store else None
+    _trash_files(plugin, [rel], meta={rel: dict(row)} if row else None)
+    if plugin._store:
+        plugin._store.delete_portrait(rel, row_id=row.get("id") if row else None)
 
 
 def _move_portrait_to_ref(plugin, rel: str, cid: str = "") -> dict:
@@ -1140,7 +1149,7 @@ def _delete_portrait_core(plugin, rel: str) -> dict:
         plugin, [rel], meta={rel: dict(row)} if row else None)
     if moved != 1:
         raise RuntimeError("移入回收站失败")
-    plugin._store.delete_portrait(rel)
+    plugin._store.delete_portrait(rel, row_id=row.get("id") if row else None)
     return {"deleted": rel, "relocated_to": relocated, "trash": trash_dir}
 
 
@@ -1843,15 +1852,12 @@ async def h_refs_orphan_delete(plugin) -> dict:
         return err("只能删除 refs/ 下的未绑定参考图")
     if _path_is_referenced(plugin, norm):
         return err("这张图仍被某个角色或作品封面引用，请先解绑再删除")
-    try:
-        await asyncio.to_thread(fp.unlink)
-    except FileNotFoundError:
+    # v0.42.1：与其它破坏性动作统一口径，移入回收站而不是硬 unlink
+    moved, trash_dir = await asyncio.to_thread(_trash_files, plugin, [path])
+    if not moved:
         return ok({"deleted": path, "already_gone": True})
-    except Exception as exc:
-        logger.warning(f"[{PLUGIN_NAME}] 删除未绑定图片失败\n{traceback.format_exc()}")
-        return err(f"删除失败：{exc}")
-    logger.info(f"[{PLUGIN_NAME}] 已物理删除未绑定图片：{norm}")
-    return ok({"deleted": path})
+    logger.info(f"[{PLUGIN_NAME}] 未绑定参考图移入回收站：{norm} → {trash_dir}")
+    return ok({"deleted": path, "trash_dir": trash_dir})
 
 
 async def h_refs_bind(plugin) -> dict:
@@ -1903,18 +1909,28 @@ async def h_refs_unbind(plugin) -> dict:
     pack_name = _set_entry_field(plugin, cid, mutate)
     if pack_name is None:
         return err(f"角色库里找不到 {cid}")
-    removed_file = False
+    removed_file, skipped = False, ""
     if delete_file:
         fp = _safe_data_file(plugin, path)
-        # 同一张 refs 可能被多个角色 / 作品封面共用：解绑当前角色后还有引用
-        # 就绝不能物理删文件，否则别的角色参考图会凭空消失（v0.9.10 修复）。
-        if fp is not None and not _path_is_referenced(plugin, norm):
+        if fp is not None:
             try:
-                fp.unlink()
-                removed_file = True
+                rel_s = fp.resolve().relative_to(
+                    Path(plugin._data_dir).resolve()).as_posix()
             except Exception:
-                pass
-    return ok({"id": cid, "removed": path, "file_deleted": removed_file})
+                rel_s = ""
+            # v0.42.1：参考图解绑绝不能碰 portraits/。旧版 `_safe_data_file`
+            # 只校验「落在 data 目录内」，若 path 指向立绘，解绑后引用为空就
+            # 直接 unlink —— portraits 行还在，立绘墙变成「文件丢失」且不可恢复。
+            if rel_s.startswith("portraits/"):
+                skipped = "立绘文件请到「立绘」页删除（会进回收站）"
+            # 同一张 refs 可能被多个角色 / 作品封面共用：解绑当前角色后还有引用
+            # 就绝不能删文件，否则别的角色参考图会凭空消失（v0.9.10 修复）。
+            elif not _path_is_referenced(plugin, norm):
+                # v0.42.1：硬 unlink 改成回收站，误删也能从回收站搬回来
+                moved, _ = _trash_files(plugin, [path])
+                removed_file = moved > 0
+    return ok({"id": cid, "removed": path, "file_deleted": removed_file,
+               "file_skipped": skipped})
 
 
 async def h_image_data(plugin) -> dict:
@@ -3068,18 +3084,14 @@ def _name_color_map(plugin) -> dict:
 
 
 def _delete_card_files(plugin, paths) -> int:
-    """删 data 目录内的卡图/立绘文件（越界或不存在则跳过）。返回实际删除数。"""
-    n = 0
-    for p in paths or []:
-        fp = _safe_data_file(plugin, str(p or ""))
-        if fp is None:
-            continue
-        try:
-            fp.unlink()
-            n += 1
-        except Exception:
-            logger.warning(f"[{PLUGIN_NAME}] 删除文件失败：{fp}")
-    return n
+    """删 data 目录内的卡图/立绘文件（越界或不存在则跳过）。返回实际处理数。
+
+    v0.42.1：调试类删除一律走回收站。旧版这里是全仓唯一漏网的硬 unlink，
+    「强制换签」删掉的卡图再也找不回来；CHANGELOG 里声称的「统一回收站」
+    其实没覆盖到这条路径。
+    """
+    moved, _ = _trash_files(plugin, list(paths or []))
+    return moved
 
 
 def _trash_root(plugin) -> Path:
@@ -3314,6 +3326,10 @@ async def h_trash_purge(plugin) -> dict:
         return ok({"dirs": 0, "files": 0})
     wanted = [str(s).strip() for s in (body.get("stamps") or [])
               if str(s).strip() and "/" not in str(s) and ".." not in str(s)]
+    # v0.42.1：旧版「stamps 为空 = 全清」，前端漏传 / 误构造请求就能把整个
+    # 回收站（所有可恢复的立绘）一次 rmtree 掉。全清必须显式带 purge_all。
+    if not wanted and not bool(body.get("purge_all")):
+        return err("清空全部回收站需显式带 purge_all=true（防止漏传 stamps 误全清）")
     dirs = files = 0
     for d in sorted(root.iterdir()):
         if not d.is_dir():
@@ -3471,7 +3487,9 @@ async def h_debug_reset_char_day(plugin) -> dict:
         return err("缺少 char_id")
     date = str(body.get("date") or plugin._today()).strip()
     res = plugin._store.reset_char_day(cid, date)
-    trashed, trash_dir = _trash_files(plugin, res["removed_files"])
+    # v0.42.1：带上整行 meta，还原时 prompt/seq/停用态不丢
+    trashed, trash_dir = _trash_files(
+        plugin, res["removed_files"], meta=res.get("removed_rows"))
     plugin._store.debug_log("reset", cid,
                             f"{date} 重试当日生成，移入回收站 {trashed} 张")
     return ok({"char_id": cid, "date": date, "cleared_draws": res["cleared_draws"],
@@ -3498,8 +3516,12 @@ async def h_debug_clear_portraits(plugin) -> dict:
     if not bool(body.get("confirm")):
         return err("该操作清空的是「角色」的立绘库（不是某个用户的抽签记录），"
                    "请带 confirm=true 再次提交")
+    # v0.42.1：删行前先抓完整行，批量清空也能逐张还原（含停用态与提示词）。
+    # 旧版只把文件搬进回收站，_meta.json 为空，还原全靠文件名解析 → 数据半残。
+    rows = plugin._store.char_portrait_rows(cid)
+    meta = {str(r["file"]).replace("\\", "/"): dict(r) for r in rows}
     files = plugin._store.clear_char_portraits(cid)
-    trashed, trash_dir = _trash_files(plugin, files)
+    trashed, trash_dir = _trash_files(plugin, files, meta=meta)
     plugin._store.debug_log(
         "reset", cid,
         f"清空立绘库 {len(files)} 张（回收站：{trash_dir or '—'}）")

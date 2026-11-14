@@ -954,8 +954,16 @@ class Store:
         self._conn.commit()
         return int(cur.rowcount or 0)
 
-    def delete_portrait(self, file: str) -> None:
-        self._conn.execute("DELETE FROM portraits WHERE file=?", (file,))
+    def delete_portrait(self, file: str, row_id: int | None = None) -> None:
+        """删立绘行。传 row_id 时按自增主键删（最多一行）；否则才按路径删。
+
+        v0.42.1：立绘路径理论上唯一，但历史脏数据里出现过两行共用同一 file，
+        按路径删会一次带走两行——「删一张图」不该有这种隐藏破坏面。
+        """
+        if row_id is not None:
+            self._conn.execute("DELETE FROM portraits WHERE id=?", (int(row_id),))
+        else:
+            self._conn.execute("DELETE FROM portraits WHERE file=?", (str(file or ""),))
         self._conn.commit()
 
     def set_portrait_active(self, file: str, active: bool) -> int:
@@ -1227,11 +1235,11 @@ class Store:
         返回 {removed_files, cleared_draws}（文件由调用方移入回收站）。
         """
         rows = self._conn.execute(
-            "SELECT id, file FROM portraits WHERE char_id=? AND date=?"
+            "SELECT * FROM portraits WHERE char_id=? AND date=?"
             " ORDER BY seq DESC, created_at DESC, id DESC", (char_id, date)
         ).fetchall()
-        by_file = {r["file"]: r["id"] for r in rows}
-        target, target_id = "", None
+        by_file = {r["file"]: dict(r) for r in rows}
+        target, target_row = "", None
         if rows:
             for r in self._conn.execute(
                 "SELECT portrait_file FROM draws WHERE char_id=? AND date=?"
@@ -1239,23 +1247,51 @@ class Store:
             ):
                 p = str(r["portrait_file"] or "")
                 if p in by_file:
-                    target, target_id = p, by_file[p]
+                    target, target_row = p, by_file[p]
                     break
-            if target_id is None:
-                target, target_id = rows[0]["file"], rows[0]["id"]
+            if target_row is None:
+                target_row = dict(rows[0])
+                target = target_row["file"]
         removed = [target] if target else []
+        # v0.42.1：把被删行的完整字段一并返回，调用方写进回收站 _meta.json。
+        # 旧版只返路径，还原时 prompt/theme/dims/active 全靠猜，等于「找得回文件、
+        # 找不回数据」。
+        removed_rows = {target: target_row} if target_row else {}
         # 按自增主键删：同路径万一有重复行也只删一条，破坏面钉死在一张图
-        if target_id is not None:
-            self._conn.execute("DELETE FROM portraits WHERE id=?", (target_id,))
-        cur = self._conn.execute(
-            "UPDATE draws SET card_path='', updated_at=? WHERE char_id=? AND date=?",
-            (_now(), char_id, date),
-        )
+        if target_row is not None:
+            self._conn.execute("DELETE FROM portraits WHERE id=?", (target_row["id"],))
+        cleared = 0
+        # 卡路径也只清「用了这张立绘」的签。旧版 WHERE char_id=? AND date=?
+        # 会把该角色当日**所有用户**的卡路径一起清空，制造一片死链，
+        # 与「只删一张立绘」的新口径不一致。
+        if target:
+            cur = self._conn.execute(
+                "UPDATE draws SET card_path='', updated_at=?"
+                " WHERE char_id=? AND date=? AND portrait_file=?",
+                (_now(), char_id, date, target),
+            )
+            cleared = int(cur.rowcount or 0)
         self._conn.commit()
-        return {"removed_files": removed, "cleared_draws": int(cur.rowcount or 0)}
+        return {"removed_files": removed, "removed_rows": removed_rows,
+                "cleared_draws": cleared}
+
+    def char_portrait_rows(self, char_id: str) -> list[dict]:
+        """清空立绘库前抓完整行（含 prompt/theme/dims/active）。
+
+        v0.42.1：`clear_char_portraits` 删行后这些字段就没了，调用方必须在
+        删之前取走，写进回收站 `_meta.json`，还原时才能连停用态一起复原。
+        """
+        return [dict(r) for r in self._conn.execute(
+            "SELECT * FROM portraits WHERE char_id=?", (char_id,)).fetchall()]
 
     def clear_char_portraits(self, char_id: str) -> list[str]:
-        """清空某角色全部立绘行。返回被删文件相对路径清单（调用方删文件）。"""
+        """清空某角色全部立绘行。返回被删文件相对路径清单（调用方删文件）。
+
+        ⚠️ 全仓唯一仍会「一次删多张立绘」的宽条件入口，语义就是用户主动的
+        「清空该角色立绘库」。调用方必须：①服务端 confirm；②前端两段确认；
+        ③先 `char_portrait_rows()` 取完整行传 `_trash_files(meta=...)`。
+        三者缺一都会把「可恢复」变成「只剩文件名的半残恢复」。
+        """
         rows = self._conn.execute(
             "SELECT file FROM portraits WHERE char_id=?", (char_id,)
         ).fetchall()

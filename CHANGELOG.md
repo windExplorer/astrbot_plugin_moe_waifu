@@ -2,6 +2,35 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.42.1 (2026-11-14)
+
+- **「删除立绘图片」全仓安全审计 + 加固**（用户要求对 v0.42.0 那个数据事故做全局复查，而不是只修触发它的那一条路径）。审计范围：`store.py` 全部 `DELETE FROM`、`webui_api.py` 全部破坏性路由与 `unlink`/`shutil.move`/`rmtree`、`main.py`/`draw.py`/`batch_fill.py` 的后台清理、前端所有 `apiPost` 删除端点与两段确认。结论：**没有任何后台自动逻辑会删 `portraits/`**（启动时只清 `cards/*.png` >90 天与 `try_cache/*.png` >7 天；出图 staging 只删副本）；但查出 5 处同类隐患，其中 2 处是真会「删了找不回来」的。
+
+- **① 日常操作「立绘转参考图」是硬删，不进回收站（最高危，且是常用功能）**：
+  - **根因**：`webui_api._unlink_portrait` 直接 `(data_dir/rel).unlink()` + `delete_portrait(rel)`。虽然内容先复制成了 `refs/mv_<digest>.png`，但原文件名、seq、prompt、停用态全丢，用户反悔只能重新出图。CHANGELOG 里「调试类删除一律走回收站」的口径从没覆盖到这条路径。
+  - **修复**：与「彻底删除」统一——先 `portrait_by_file()` 取整行，`_trash_files(meta={rel: 整行})` 写 `_meta.json` 后移入 `data/_trash/`，再按主键删行。回收站一键还原能把停用态、提示词、尺寸一起写回。
+  - 顺带把 `store.delete_portrait` 改成可选 `row_id`（按主键最多删一行）；历史脏数据里出现过两行共用同一 file，按路径删会一次带走两行。
+
+- **② 批量删除进回收站却没写 meta ——「找得回文件、找不回数据」**：
+  - **根因**：`/debug/reset_char_day` 与 `/debug/clear_portraits` 调 `_trash_files(plugin, files)` 时都不传 `meta`；`_trash_files` 的 `saved` 为空就不写 `_meta.json`。还原只能靠文件名正则猜 `date/seq/seed`，`prompt/theme/dims/active` 一律丢失，停用图还原后还会被重置成启用。
+  - **修复**：`store.reset_char_day` 改为 `SELECT *` 并返回 `removed_rows`；新增 `store.char_portrait_rows(cid)` 让「按角色清空」在删行**之前**抓全部整行；两个 handler 都把完整 meta 传给 `_trash_files`。守卫真跑验证：6 张立绘（含 1 张停用）→ reset 删 1 张、转参考图删 1 张、批量清空删 4 张，三种路径的 `_meta.json` 都逐张保留 `prompt/active`。
+
+- **③ `reset_char_day` 仍按 `(char_id, date)` 批量清卡路径**：SQL 是 `UPDATE draws SET card_path='' WHERE char_id=? AND date=?`，会把该角色当日**所有用户**的卡路径清空，制造一片死链，与 v0.42.0 刚收敛的「只删一张立绘」口径矛盾。收窄为 `AND portrait_file=?`（只清用了那张立绘的签）；`cleared_draws` 也只在确有其图时统计。
+
+- **④ 前端两个「按角色清库」入口同名覆盖 —— 作用对象错乱**：
+  - **根因**：`index.html` 里定义了两次 `async function doClearCharPortraits()`，JS 后定义覆盖前定义。「今日签操作」区的按钮文案写着清 `dbgState.draw` 的角色、armed key 是 `quick:clear_portraits`，实际执行的却是高级区那个用 `dbgChar2` / `dbg:clrport` 的版本 → 按钮点了像没反应（arm 状态永远对不上），`dbgChar2` 为空时直接报「请选择角色」，更糟的是可能清掉**另一个角色**的立绘。
+  - **修复**：抽 `_clearCharPortraits(cid, label, armKey)` 共用实现，拆成 `doClearCharPortraitsQuick()`（用刚查到的角色）与 `doClearCharPortraits()`（用 `dbgChar2`），两个按钮各绑各的；`setup return` 里重复的同名 key 也去掉。两段确认现在统一显示「作用对象 + 页面张数 + 含已停用 + 所有用户共用 + 文件进回收站可还原」。
+
+- **⑤ 其它护栏（同一轮收口）**：
+  - `/refs/unbind` 的 `delete_file=true` 以前只校验「落在 data 目录内」，若 path 指向 `portraits/` 会在解绑后硬删文件而 `portraits` 行还在 → 立绘墙出现「文件丢失」且不可恢复。现在拒绝 `portraits/` 路径并给明确提示，refs 文件的删除也改走回收站。
+  - `/refs/orphan_delete`、强制换签的 `_delete_card_files` 两处硬 `unlink` 改走 `_trash_files`（后者是调试类删除里唯一漏网的，历史 CHANGELOG 声称已统一其实没有）。现在 `webui_api.py` 只剩 `/avatar/discard` 一处硬删，且只作用于 `avatars/_pending_*` 候选图。
+  - `/trash/purge` 旧版「`stamps` 为空 = 全清」，漏传参数即可一次 `rmtree` 掉所有可恢复的立绘。全清现在必须显式带 `purge_all=true`，前端 `doTrashPurgeAll` 同步适配。
+  - 批量去重 `pools/dedupe` 补两段确认（以前前端硬编码 `confirm:true` 一键提交，是维护区唯一没有两段确认的批量破坏入口）。
+
+- **审计结论（保留项，非遗漏）**：`store.clear_char_portraits` 的 `DELETE FROM portraits WHERE char_id=?` 是全仓**唯一**仍会一次删多张立绘的宽条件，语义就是用户主动的「清空该角色立绘库」，不改；它现在有服务端 `confirm`、前端两段确认、逐张完整 meta 三重约束，且函数注释写死了调用方必须满足这三条。`/trash/purge` 与 `/portraits/set_active`（≤500 张，可逆）同样保留。
+- **给之前那次误删的补救说明**：v0.42.0 之前被删的图在 `data/_trash/<时间戳>/` 里（没被硬删），调试工具 →「回收站」按时间戳「全部还原」即可搬回；那一批没有 `_meta.json`，还原会从文件名恢复 `date/seq/seed`、停用态按启用处理，提示词等元数据找不回来（旧版限制）。新版本之后的删除不再有这个损失。
+- **验证**：新增 `tests/test_portrait_delete_safety.py`（AST 抠函数体做静态约束 + 真 SQLite/真回收站跑 reset、转参考图、批量清空三条路径）；`test_webui_contract` 契约清单补新入口。**27 个脚本式自检全过**（含 `Vue.compile` / `node --check` / 标签配对 / CRLF）。
+
 ## v0.42.0 (2026-11-14)
 
 - **工坊改版 + 四个旧问题挖根因**（用户一轮提了 11 条：图生图默认图源 / 角色图库 / 头像生成报错与预览 / 立绘启用停用计数 / 顶部固定 / 速览与资料合并 / tab 与总览样式 / 配置悬浮保存 / 抽卡提示别提绘图 / 重置误删十几张立绘 / 调试搜索历史消失）。按「现象 → 根因 → 修复」分四条记，尤其第 ② 条是数据事故，别只当 UI 小改。

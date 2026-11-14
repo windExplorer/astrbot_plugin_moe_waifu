@@ -2285,7 +2285,7 @@
                   那个是上一张卡的「清空该用户全部签」。
                 </n-alert>
                 <n-button size="small" type="error" :loading="dbgBusy"
-                          @click="doClearCharPortraits">
+                          @click="doClearCharPortraitsQuick">
                   {{ delArm === "quick:clear_portraits"
                      ? "再点确认：删除该角色全部立绘"
                      : "清空该角色立绘库（含文件）" }}
@@ -4301,6 +4301,14 @@
           return !!sel[g.key];
         }).map(function (g) { return g.key; });
         if (!keys.length) { message.warning("请先勾选要清理的重复组"); return; }
+        // v0.42.1：批量删角色条目以前是「点一下直接带 confirm:true 提交」，
+        // 是调试/维护区里唯一没有两段确认的批量破坏入口
+        if (!armDelete("dedupe")) {
+          message.warning("将清理 " + keys.length +
+                          " 组重复角色（删条目、立绘行改挂保留角色，不删图片），再点一次确认");
+          return;
+        }
+        delArm.value = "";
         dedupeBusy.value = true;
         try {
           var res = await apiPost("pools/dedupe", { keys: keys, confirm: true });
@@ -7502,7 +7510,12 @@
       async function _trashPurge(stamps) {
         trashBusy.value = true;
         try {
-          var res = await apiPost("trash/purge", { stamps: stamps, confirm: true });
+          // v0.42.1：全清（stamps 为空）必须显式带 purge_all，
+          // 否则服务端会拒绝（防漏传参数把整个回收站一次清空）
+          var payload = (stamps && stamps.length)
+            ? { stamps: stamps, confirm: true }
+            : { purge_all: true, confirm: true };
+          var res = await apiPost("trash/purge", payload);
           delArm.value = "";
           message.success("已清除 " + (res.files || 0) + " 个文件");
           await loadTrash();
@@ -7714,33 +7727,43 @@
           dbgBusy.value = false;
         }
       }
-      // v0.19.5：按角色清空立绘库（独立入口，必须两段确认 + 弹窗里点名角色与张数）。
-      // 事故背景：这个动作原来是「今日签操作」里的一颗按钮，用户以为是清某个 QQ
-      // 用户的抽取记录，点了之后该角色的立绘墙（所有用户共用）被清空、文件也没了。
-      async function doClearCharPortraits() {
+      // v0.42.1：两处「按角色清库」入口以前都叫 doClearCharPortraits，后定义
+      // 覆盖前定义 —— 「今日签操作」区的按钮实际用的是高级区选的 dbgChar2，
+      // armed key（quick:clear_portraits）也永远对不上，按钮点了像没反应；
+      // 更糟的是清的可能是**另一个角色**。现在拆成两个入口共用一个实现。
+      // v0.19.5 事故背景：这颗按钮原本挂在「今日签操作」里，用户以为是清某个
+      // QQ 的抽取记录，结果把角色的立绘墙（所有用户共用）清空了。
+      async function _clearCharPortraits(cid, label, armKey) {
+        if (!cid) { message.error("请选择角色"); return; }
+        if (!armDelete(armKey)) {
+          message.warning("将清空「" + label + "」的全部立绘行（页面显示 " +
+                          portraitCount(cid) +
+                          " 张，含已停用，所有用户共用）；再点一次确认，文件进回收站可还原");
+          return;
+        }
+        delArm.value = "";
+        dbgBusy.value = true;
+        try {
+          var res = await apiPost("debug/clear_portraits",
+                                  { char_id: cid, confirm: true });
+          message.success("已清空 " + label + " 的立绘库（" +
+                          ((res && res.cleared) || 0) + " 张，已移入回收站" +
+                          ((res && res.trash_dir) ? "：" + res.trash_dir : "") + "）");
+          refreshAfterDebug();
+          await refreshAll();
+        } catch (e) { /* 已提示 */ } finally {
+          dbgBusy.value = false;
+        }
+      }
+      // 今日签操作区：作用对象固定是刚查到的状态里的角色
+      function doClearCharPortraitsQuick() {
         if (!dbgState.value || !dbgState.value.draw) {
           message.error("今天还没有抽签记录，不知道该清哪个角色");
           return;
         }
         var row = dbgState.value.draw;
-        if (!armDelete("quick:clear_portraits")) {
-          message.warning("这是按角色清空立绘库（" + (row.char_name || row.char_id) +
-                          " 共 " + portraitCount(row.char_id) +
-                          " 张，所有用户共用），再点一次确认");
-          return;
-        }
-        dbgBusy.value = true;
-        try {
-          var res = await apiPost("debug/clear_portraits",
-                                  { char_id: row.char_id, confirm: true });
-          message.success("已清空 " + (row.char_name || row.char_id) + " 的立绘库（" +
-                          ((res && res.cleared) || 0) + " 张，已移入回收站" +
-                          ((res && res.trash_dir) ? "：" + res.trash_dir : "") + "）");
-          delArm.value = "";
-          refreshAfterDebug();
-        } catch (e) { /* 已提示 */ } finally {
-          dbgBusy.value = false;
-        }
+        return _clearCharPortraits(row.char_id, row.char_name || row.char_id,
+                                   "quick:clear_portraits");
       }
       async function doForceReroll() {
         if (!dbgUid.value) { message.error("请输入用户 ID"); return; }
@@ -7790,22 +7813,11 @@
           dbgBusy.value = false;
         }
       }
-      async function doClearCharPortraits() {
+      // 高级区：作用对象是下拉选中的 dbgChar2
+      function doClearCharPortraits() {
         if (!dbgChar2.value) { message.error("请选择角色"); return; }
-        if (!armDelete("dbg:clrport")) return;
-        dbgBusy.value = true;
-        try {
-          // 后端要求 confirm=true（防误调）；这里前端已有 armDelete 两段确认
-          var res = await apiPost("debug/clear_portraits",
-                                  { char_id: dbgChar2.value, confirm: true });
-          message.success("已清空 " + charNameOf(dbgChar2.value) + " 的立绘库（删文件 " +
-                          ((res && res.files_deleted) || 0) + "/" +
-                          ((res && res.cleared) || 0) + "），配额自动补生会从 0 重建");
-          refreshAfterDebug();
-          await refreshAll();
-        } catch (e) { /* 已提示 */ } finally {
-          dbgBusy.value = false;
-        }
+        return _clearCharPortraits(dbgChar2.value, charNameOf(dbgChar2.value),
+                                   "dbg:clrport");
       }
 
       Vue.watch(menu, function (m) {
@@ -8315,7 +8327,7 @@
         dbgConfigRows: dbgConfigRows,
         loadDebugState: loadDebugState, loadDebugHistory: loadDebugHistory,
         pickRecentUser: pickRecentUser, doQuickAction: doQuickAction,
-        doClearCharPortraits: doClearCharPortraits,
+        doClearCharPortraitsQuick: doClearCharPortraitsQuick,
         simF: simF, simResult: simResult, simBusy: simBusy,
         simScopeText: simScopeText, cfgBoundGroups: cfgBoundGroups,
         doSimulate: doSimulate, simulateNext: simulateNext, pickSimGroup: pickSimGroup,

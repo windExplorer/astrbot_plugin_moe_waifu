@@ -43,6 +43,7 @@ loadDebugState loadDebugHistory pickRecentUser simF simResult simBusy
 doSimulate simulateNext dbgRenderUid dbgRenderDate doRerender
 dbgUid dbgDate dbgUid2 dbgDate2 dbgChar dbgChar2 dbgBusy
 doForceReroll doClearDraws doResetCharDay doClearCharPortraits
+doClearCharPortraitsQuick
 charNameOf decisionLabel barPct
 movePortraitToRef moveRefToPortrait doQuickAction
 galOrphans bindOrphan galOrphansOpen deleteOrphan
