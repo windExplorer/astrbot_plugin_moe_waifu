@@ -237,10 +237,23 @@ with tempfile.TemporaryDirectory() as td:
           all(r["kind"] != "query" for r in st.debug_audit(20)))
     st.close()
 
-# ---------- ⑤ 查询历史进页即加载 ----------
-check("调试页查询历史卡片存在", 'dbgQueries.length' in PAGE and "查询历史" in PAGE)
+# ---------- ⑤ 查询历史（v0.50.0 改版：卡片下线，只留按钮右侧标签） ----------
+check("调试页查询历史卡片已下线", "dbgQueries" not in PAGE
+      and 'title="查询历史"' not in PAGE)
+check("最近查询标签在「查询状态」按钮右侧且可直接查",
+      'class="dbg-query-bar"' in PAGE and "最近查询" in PAGE
+      and "pickRecentUser(u)" in PAGE)
 check("进调试页 / 首屏 / 查完状态都会拉历史",
       "Vue.watch(menu, function (k)" in PAGE and PAGE.count("loadDebugHistory()") >= 4)
+# ---------- ⑤b v0.50.0：头像 / 缩略图点开看大图 ----------
+check("头像可点开大图（头像墙 / 资料页 / 图库页）",
+      PAGE.count("openCharAvatarViewer") >= 4)
+check("用户 QQ 头像可点开大图（总览 / 记录 / 用户列表 / 用户详情）",
+      PAGE.count("openAvatarBig") >= 4)
+check("总览最近抽签的角色缩略可点开大图",
+      "openCharCoverViewer(r.char_id, r.char_name)" in PAGE)
+check("data URL 也能进 lightbox（不经 /image/data）",
+      "function openImageViewerUrl" in PAGE and "lightbox.setSrc(src, name)" in PAGE)
 
 # ---------- ⑥ 图生图默认源 ----------
 check("自动选源优先级：出卡源 → 主参考 → 第一张",

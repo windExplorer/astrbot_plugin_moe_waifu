@@ -498,8 +498,17 @@
   .av-tile:hover .av-pic { transform: translateY(-2px) scale(1.03);
     border-color: var(--wf-brand);
     box-shadow: 0 8px 20px -10px rgba(160,50,120,.85); }
-  .av-pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .av-pic img { width: 100%; height: 100%; object-fit: cover; display: block;
+    cursor: zoom-in; }
   .av-letter { font-size: 26px; font-weight: 700; line-height: 1; user-select: none; }
+  /* 头像墙角落的「详情」角标：点头像本身看大图，进详情走这里 */
+  .av-detail { position: absolute; right: 4px; bottom: 4px; z-index: 3;
+    font-size: 10.5px; line-height: 1; padding: 3px 6px; border-radius: 999px;
+    color: #fff; cursor: pointer; background: rgba(20,12,20,.55);
+    border: 1px solid rgba(255,255,255,.28); opacity: 0;
+    transition: opacity .15s ease, background .15s ease; }
+  .av-tile:hover .av-detail { opacity: 1; }
+  .av-detail:hover { background: rgba(20,12,20,.8); }
   .av-hover { position: absolute; left: 50%; bottom: calc(100% + 6px);
     transform: translate(-50%, 4px); z-index: 6; pointer-events: none;
     display: flex; flex-direction: column; gap: 2px; align-items: center;
@@ -535,12 +544,17 @@
   .config-save-float .dirty { font-size: 12px; color: var(--wf-brand); }
   .config-save-float .clean { font-size: 12px; opacity: .6; }
 
+  /* 调试页：状态查询输入行（v0.50.0——普通 flex，不用 n-space：带 v-if 的
+     兄弟节点（「最近查询」+ 标签组）在 Space 里会因槽 key 冲突错位） */
+  .dbg-query-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   /* 调试页：查询历史列表 */
   .dbg-query-row { display: flex; align-items: center; gap: 10px; padding: 5px 0;
     font-size: 12px; border-bottom: 1px dashed var(--wf-line); }
   .dbg-query-row .uid { color: var(--wf-brand); cursor: pointer; font-weight: 600; }
   .dbg-query-row .uid:hover { text-decoration: underline; }
   .dbg-query-row .ts { opacity: .6; flex: none; }
+  /* v0.50.0：可点开大图的缩略图（用户头像 / 角色缩略 / 头像墙） */
+  .zoomable { cursor: zoom-in; }
 
   /* 素材库（v0.43.0）：主题表 + 维度词 chip */
   .word-list { display: flex; flex-wrap: wrap; gap: 6px; max-height: 300px;
@@ -757,14 +771,19 @@
                   <!-- v0.13.2：头像 + 昵称 + 角色色点/缩略，替代裸 QQ 文本行 -->
                   <div v-for="r in ov.recent" :key="r.user_id + r.date"
                        style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12px;">
-                    <img v-if="avatarOf(r.user_id)" class="avatar" :src="avatarOf(r.user_id)"
-                         style="width:26px; height:26px;" alt="">
+                    <img v-if="avatarOf(r.user_id)" class="avatar zoomable" :src="avatarOf(r.user_id)"
+                         style="width:26px; height:26px;" alt=""
+                         title="点击查看头像大图"
+                         @click.stop="openAvatarBig(r.user_id, r.nickname || r.user_id)">
                     <span v-else class="avatar-fallback" :style="{ width: '26px', height: '26px',
                           fontSize: '12px', background: hashColor(r.user_id) }">{{ (r.nickname || r.user_id).slice(0, 1) }}</span>
                     <span style="flex:none; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
                           :title="r.user_id">{{ r.nickname || r.user_id }}</span>
-                    <img v-if="thumbOf(r.char_id)" :src="thumbOf(r.char_id)"
-                         style="width:20px; height:34px; object-fit:cover; border-radius:4px; flex:none;" alt="">
+                    <!-- v0.50.0：角色缩略也能点开看大图 -->
+                    <img v-if="thumbOf(r.char_id)" :src="thumbOf(r.char_id)" class="zoomable"
+                         style="width:20px; height:34px; object-fit:cover; border-radius:4px; flex:none;" alt=""
+                         title="点击查看角色大图"
+                         @click.stop="openCharCoverViewer(r.char_id, r.char_name)">
                     <span class="dot" :style="{ background: r.char_color || colorOf(r.char_id) }"></span>
                     <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
                       {{ r.char_name || r.char_id }}</span>
@@ -884,17 +903,20 @@
                        description="没有匹配的角色"></n-empty>
             </div>
 
-            <!-- 头像墙视图（v0.49.0）：一屏纯头像；没有头像用文字头像兜底，
-                 悬停浮出「名字 + 作品」小气泡，点击进角色详情 -->
+            <!-- 头像墙视图（v0.49.0 / v0.50.0）：一屏纯头像；没有头像用文字头像兜底，
+                 悬停浮出「名字 + 作品」小气泡。点头像看大图，右下角「详情」进角色页 -->
             <div v-if="charsMode === 'avatar'" style="margin-top: 14px;">
               <div class="av-wall" v-if="filteredEntries.length > 0">
                 <div v-for="e in filteredEntries" :key="'avw' + e.id" class="av-tile"
                      :title="(e.name || '') + ' · ' + (e.series || '未填作品')"
                      @click="gotoGallery(e.id)">
                   <div class="av-pic" :style="{ background: (e.color || '#8A8A9A') + '33' }">
-                    <img v-if="avatarThumbs[e.id]" :src="avatarThumbs[e.id]" alt="">
+                    <img v-if="avatarThumbs[e.id]" :src="avatarThumbs[e.id]" alt=""
+                         @click.stop="openCharAvatarViewer(e)">
                     <span v-else class="av-letter"
                           :style="{ color: e.color || '#8A8A9A' }">{{ (e.name || '?').slice(0, 1) }}</span>
+                    <span v-if="avatarThumbs[e.id]" class="av-detail" title="进入角色详情"
+                          @click.stop="gotoGallery(e.id)">详情</span>
                   </div>
                   <div class="av-hover">
                     <b>{{ e.name }}</b>
@@ -1284,7 +1306,9 @@
               <!-- v0.31.0：头像——上传 / 从已有图裁取 / AI 生成 / 移除 -->
               <n-card size="small" :bordered="true" title="头像">
                 <div class="prof-avatar-row">
-                  <img v-if="galAvatarThumb" :src="galAvatarThumb" class="prof-avatar-img" alt="头像">
+                  <img v-if="galAvatarThumb" :src="galAvatarThumb" class="prof-avatar-img zoomable"
+                       alt="头像" title="点击查看头像大图"
+                       @click="openCharAvatarViewer()">
                   <div v-else class="prof-avatar-img"
                        style="display:flex; align-items:center; justify-content:center;
                               font-size:12px; opacity:.55; box-sizing:border-box;">无头像</div>
@@ -1715,8 +1739,9 @@
                 <div class="lib-head">头像 <span class="cnt">{{ galAvatarThumb ? "已设置" : "未设置" }}</span></div>
                 <div v-if="galAvatarThumb" class="av-compare">
                   <figure>
-                    <!-- 头像是 data URL（后端即时缩略），不走 /image/data 的 lightbox -->
-                    <img :src="galAvatarThumb" class="lib-avatar" alt="当前头像" title="当前头像">
+                    <!-- v0.50.0：点开看大图（原图走 /image/data；拿不到原图时回退缩略 data URL） -->
+                    <img :src="galAvatarThumb" class="lib-avatar" alt="当前头像"
+                         title="点击查看头像大图" @click="openCharAvatarViewer()">
                     <figcaption>当前头像</figcaption>
                   </figure>
                   <div class="bind-tip" style="margin-top:0;">到「资料」页签可上传、从立绘裁取或 AI 生成替换。</div>
@@ -1818,8 +1843,10 @@
                         <td>{{ d.date }}</td>
                         <td><a class="link-btn" :title="d.user_id" @click="gotoUser(d.user_id)"
                                style="display:inline-flex; align-items:center; gap:6px;">
-                          <img v-if="avatarOf(d.user_id)" class="avatar" :src="avatarOf(d.user_id)"
-                               style="width:20px; height:20px;" alt="">
+                          <img v-if="avatarOf(d.user_id)" class="avatar zoomable"
+                               :src="avatarOf(d.user_id)" style="width:20px; height:20px;" alt=""
+                               title="点击查看头像大图"
+                               @click.stop="openAvatarBig(d.user_id, d.nickname || d.user_id)">
                           {{ d.user_id }}</a></td>
                         <td>{{ d.nickname || "—" }}</td>
                         <td><span class="dot" :style="{ background: d.char_color }"></span>{{ d.char_name || d.char_id }}</td>
@@ -2069,8 +2096,9 @@
                           @click="openUser(u.user_id)">
                     <!-- v0.13.2：头像（后端代理，缺失回落首字母色块） -->
                     <div style="display: flex; gap: 10px; align-items: flex-start;">
-                      <img v-if="avatarOf(u.user_id)" class="avatar" :src="avatarOf(u.user_id)"
-                           style="width: 44px; height: 44px;" alt="">
+                      <img v-if="avatarOf(u.user_id)" class="avatar zoomable" :src="avatarOf(u.user_id)"
+                           style="width: 44px; height: 44px;" alt="" title="点击查看头像大图"
+                           @click.stop="openAvatarBig(u.user_id, u.nickname || u.user_id)">
                       <span v-else class="avatar-fallback"
                             :style="{ width: '44px', height: '44px', fontSize: '18px',
                                       background: hashColor(u.user_id) }">{{ (u.nickname || u.user_id).slice(0, 1) }}</span>
@@ -2102,8 +2130,10 @@
               <n-card size="small" :bordered="true" v-if="userDetail && userDetail.found">
                 <template #header>
                   <div class="sec-title" style="margin: 0;">
-                    <img v-if="avatarOf(userDetail.user_id)" class="avatar" :src="avatarOf(userDetail.user_id)"
-                         style="width: 40px; height: 40px;" alt="">
+                    <img v-if="avatarOf(userDetail.user_id)" class="avatar zoomable"
+                         :src="avatarOf(userDetail.user_id)"
+                         style="width: 40px; height: 40px;" alt="" title="点击查看头像大图"
+                         @click.stop="openAvatarBig(userDetail.user_id, userDetail.nickname || userDetail.user_id)">
                     <span v-else class="avatar-fallback"
                           :style="{ width: '40px', height: '40px', fontSize: '16px',
                                     background: hashColor(userDetail.user_id) }">{{ (userDetail.nickname || userDetail.user_id).slice(0, 1) }}</span>
@@ -2281,17 +2311,24 @@
                 </div>
               </n-card>
               <n-card v-if="dbgTab === 'state'" size="small" title="状态查询" :bordered="true">
-                <n-space vertical size="small">
-                  <n-space align="center" :wrap="true" size="small">
+                <!-- v0.50.0：容器一律 div.stack / 普通 flex 行——带 v-if 的兄弟节点
+                     放进 n-space 会因槽 key 冲突出错位补丁（老坑） -->
+                <div class="stack">
+                  <div class="dbg-query-bar">
                     <n-input v-model:value="dbgStateUid" size="small" clearable
                              placeholder="用户 ID（QQ 号）" style="width: 200px;"
                              @keyup.enter="loadDebugState"></n-input>
                     <n-button size="small" type="primary" :loading="dbgStateLoading"
                               @click="loadDebugState">查询状态</n-button>
-                    <n-button v-for="u in dbgRecent" :key="u" size="tiny"
-                              @click="pickRecentUser(u)">{{ u }}</n-button>
-                  </n-space>
-                  <div class="bind-tip" style="margin-top: 0;">最近查过的用户会留在标签里；查询只读，不改任何数据。</div>
+                    <!-- v0.50.0：最近查过的 QQ 号就在按钮右侧，点一下直接查
+                         （原「查询历史」整张卡片按用户要求下线） -->
+                    <template v-if="dbgRecent.length">
+                      <span class="bind-tip" style="margin-top: 0;">最近查询</span>
+                      <n-button v-for="u in dbgRecent" :key="u" size="tiny" secondary
+                                @click="pickRecentUser(u)">{{ u }}</n-button>
+                    </template>
+                  </div>
+                  <div class="bind-tip" style="margin-top: 0;">点右侧标签可直接重新查询；查询只读，不改任何数据。</div>
                   <n-grid :cols="2" :x-gap="12" v-if="dbgState">
                     <n-gi>
                       <div class="sec-title">今日状态 · {{ dbgState.today }}</div>
@@ -2335,30 +2372,7 @@
                       <n-empty v-else description="暂无任务" size="small"></n-empty>
                     </n-gi>
                   </n-grid>
-                </n-space>
-              </n-card>
-
-              <!-- v0.42.0：查询历史（用户反馈「搜索历史记录没了」）——旧版只有
-                   8 个去重 uid 小标签，且 loadDebugHistory 只在切到「操作审计」
-                   时才调用，进页面根本没数据。现在进调试页就拉，独立成卡。 -->
-              <n-card v-if="dbgTab === 'state'" size="small" title="查询历史" :bordered="true">
-                <template #header-extra>
-                  <n-button size="tiny" @click="loadDebugHistory">刷新</n-button>
-                </template>
-                <div class="bind-tip" style="margin-top: 0; margin-bottom: 6px;">
-                  最近查过的 QQ 号（点一下直接重新查询）。查询是只读操作，不改任何数据。
                 </div>
-                <div v-if="dbgAuditLoading && !dbgQueries.length" class="gal-loading">
-                  <n-spin size="small"></n-spin><span class="txt">正在载入…</span>
-                </div>
-                <div v-if="dbgQueries.length">
-                  <div v-for="q in dbgQueries" :key="'dq:' + q.id" class="dbg-query-row">
-                    <span class="ts">{{ fmtTime(q.created_at) }}</span>
-                    <span class="uid" @click="pickRecentUser(q.target)">{{ q.target || "—" }}</span>
-                    <span class="bind-tip" style="margin-top:0;">{{ q.detail || "状态查询" }}</span>
-                  </div>
-                </div>
-                <div v-else-if="!dbgAuditLoading" class="lib-empty">还没有查询记录：上方输入 QQ 号点「查询状态」即可。</div>
               </n-card>
 
               <!-- 星语式：查到状态后才出现，按钮自动带上当前 QQ 与今天，不用重复填参数 -->
@@ -3561,7 +3575,9 @@
           <span class="bind-tip" style="margin-top:0;" v-if="galAvatarBusy">已进生图队列，请等本次完成</span>
         </div>
         <div v-if="avatarGenResult" class="av-result">
-          <img :src="avatarGenResult.thumb" alt="生成结果">
+          <img :src="avatarGenResult.thumb" alt="生成结果" class="zoomable"
+               title="点击查看大图"
+               @click="openImageViewerUrl(avatarGenResult.thumb, '本次生成的头像')">
           <div class="stack" style="flex:1; min-width: 220px;">
             <div class="av-compare">
               <figure v-if="galAvatarThumb">
@@ -4500,6 +4516,15 @@
           if (!url) { lightbox.close(); message.error("原图加载失败"); return; }
           lightbox.setSrc(url, name);
         }).catch(function () { lightbox.close(); });
+      }
+      // v0.50.0：手里已经是 data URL（QQ 头像 / 后端缩略）时直接喂 lightbox，
+      // 不走 /image/data（那条路只认 data 目录内的文件路径）。
+      function openImageViewerUrl(url, title) {
+        var src = String(url || "");
+        var name = String(title || "查看大图");
+        if (!src) { message.info("这张图还没有可查看的原图"); return; }
+        lightbox.open(name);
+        lightbox.setSrc(src, name);
       }
 
       // ---- 拖拽上传（v0.5.2：整页级 dragover/drop 路由） ----
@@ -7175,6 +7200,21 @@
         var e = allEntries.value.find(function (x) { return x.id === charId; });
         return (e && e.thumb) || "";
       }
+      // v0.50.0：总览「最近抽签」的角色缩略 → 点开看大图（封面原图优先，
+      // 没有封面就退回卡片缩略 data URL，别弹「文件不存在」）
+      function openCharCoverViewer(charId, name) {
+        var e = allEntries.value.find(function (x) { return x.id === charId; });
+        var label = name || (e && e.name) || charId || "查看大图";
+        var rel = (e && e.cover_path) || "";
+        if (rel) { openViewer(rel, label); return; }
+        openImageViewerUrl(thumbOf(charId), label);
+      }
+      // v0.50.0：用户 QQ 头像点开看大图（/user/avatar 已是 data URL，直接喂 lightbox）
+      function openAvatarBig(uid, label) {
+        var url = avatarOf(uid);
+        if (!url) { message.info("这个用户的头像还没加载到（或本来就没有）"); return; }
+        openImageViewerUrl(url, (label || uid || "用户") + " 的头像");
+      }
       // 重抽列文案（nonce 0 = 首抽，N = 换过 N 次；裸数字不直观）
       function rerollLabel(n) {
         var v = Number(n || 0);
@@ -7858,6 +7898,18 @@
       function invalidateAvatarThumbs() {
         avatarThumbsLoaded.value = false;
         if (charsMode.value === "avatar") { loadAvatarThumbs(true); }
+      }
+      // v0.50.0：角色头像点开看大图。传 entry（头像墙）就用它自己的；不传
+      // （资料 / 图库页）就用当前详情角色。原图优先，拿不到回退缩略 data URL。
+      function openCharAvatarViewer(entry) {
+        var e = (entry && entry.id) ? entry : null;
+        var cid = String((e && e.id) || galCharId.value || "");
+        var label = (e && e.name) || charNameOf(cid) || "角色头像";
+        var rel = String((e && e.avatar)
+                         || (galSummary.value && galSummary.value.avatar) || "");
+        if (rel) { openViewer(rel, label + " 的头像"); return; }
+        openImageViewerUrl(avatarThumbs.value[cid] || galAvatarThumb.value,
+                           label + " 的头像");
       }
       Vue.watch(charsMode, function (m) {
         if (m === "avatar") { loadAvatarThumbs(); }
@@ -8883,7 +8935,6 @@
       var dbgStateLoading = Vue.ref(false);
       var dbgRecent = Vue.ref([]);
       var dbgAudit = Vue.ref([]);
-      var dbgQueries = Vue.ref([]);   // v0.42.0：完整查询历史（带时间）
       var dbgConfigLabels = {
         timezone: "时区", salt: "种子盐（脱敏）", reroll_daily_limit: "每日换老婆次数",
         portraits_per_char: "每角色立绘配额", allow_unverified: "未验证角色可抽",
@@ -8926,7 +8977,7 @@
           var res = await apiGet("debug/history", { limit: 40 });
           dbgRecent.value = (res && res.recent) || [];
           dbgAudit.value = (res && res.audit) || [];
-          dbgQueries.value = (res && res.queries) || [];
+          // v0.50.0：查询历史卡片下线，只留 recent（去重后的最近 QQ 号标签）
         } catch (e) { /* 已提示 */ } finally {
           dbgAuditLoading.value = false;
         }
@@ -10110,7 +10161,7 @@
         trashPurgeText: trashPurgeText, loadTrash: loadTrash,
         doTrashRestoreOne: doTrashRestoreOne, doTrashRestoreGroup: doTrashRestoreGroup,
         doTrashPurgeGroup: doTrashPurgeGroup, doTrashPurgeAll: doTrashPurgeAll,
-        dbgRecent: dbgRecent, dbgAudit: dbgAudit, dbgQueries: dbgQueries,
+        dbgRecent: dbgRecent, dbgAudit: dbgAudit,
         dbgConfigRows: dbgConfigRows,
         loadDebugState: loadDebugState, loadDebugHistory: loadDebugHistory,
         pickRecentUser: pickRecentUser, doQuickAction: doQuickAction,
@@ -10185,6 +10236,10 @@
         galAvPreviewLoading: galAvPreviewLoading,
         openAvatarBatchPreview: openAvatarBatchPreview,
         avatarThumbs: avatarThumbs, avatarThumbsLoading: avatarThumbsLoading,
+        // v0.50.0：头像 / 角色缩略点开看大图
+        openCharAvatarViewer: openCharAvatarViewer, openAvatarBig: openAvatarBig,
+        openCharCoverViewer: openCharCoverViewer,
+        openImageViewerUrl: openImageViewerUrl,
         galFillBusy: galFillBusy, galFillLabel: galFillLabel,
         galFillOpen: galFillOpen, galFillRows: galFillRows,
         galFillHave: galFillHave, galFillQuota: galFillQuota,
