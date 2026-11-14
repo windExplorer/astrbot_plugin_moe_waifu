@@ -5,7 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>萌萌今日老婆 · 工坊</title>
 <style>
-  html, body { margin: 0; padding: 0; height: 100%; background: #faf7fb; }
+  /* v0.42.0：主题变量集中收口（暗色由 JS 给 html 加 .is-dark 切换） */
+  :root {
+    --wf-brand: #d63384;
+    --wf-brand-2: #8b5cf6;
+    --wf-bg: #faf7fb;
+    --wf-surface: rgba(255,255,255,.72);
+    --wf-line: rgba(128,128,128,.18);
+  }
+  html.is-dark {
+    --wf-bg: #18161c;
+    --wf-surface: rgba(42,38,50,.78);
+    --wf-line: rgba(255,255,255,.14);
+    --wf-brand: #e879b5;
+  }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--wf-bg); }
   [v-cloak] { display: none; }
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-thumb { background: rgba(140,120,140,.28); border-radius: 4px; }
@@ -98,22 +112,27 @@
      「预览」按钮会随范围左右平移，切范围时不好定位 */
   .batch-scope-slot { width: 248px; flex: 0 0 auto; display: flex;
     align-items: center; }
-  /* v0.28.0：调试页分页条 */
-  .dbg-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
-  .dbg-tab { padding: 5px 14px; border-radius: 999px; font-size: 13px;
-    cursor: pointer; user-select: none;
-    border: 1px solid rgba(128,128,128,.28); background: rgba(128,128,128,.08); }
-  .dbg-tab:hover { border-color: rgba(64,158,255,.55); }
-  .dbg-tab.on { background: rgba(64,158,255,.16);
-    border-color: rgba(64,158,255,.65); color: #2080f0; font-weight: 600; }
-  /* v0.31.0：角色详情页签条（dbg-tabs 的品牌粉变体）+ 头像 + 资料表单网格 */
-  .gal-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
-  .gal-tab { padding: 5px 14px; border-radius: 999px; font-size: 13px;
-    cursor: pointer; user-select: none;
-    border: 1px solid rgba(128,128,128,.28); background: rgba(128,128,128,.08); }
-  .gal-tab:hover { border-color: rgba(214,51,132,.55); }
-  .gal-tab.on { background: rgba(214,51,132,.14);
-    border-color: rgba(214,51,132,.65); color: #d63384; font-weight: 600; }
+  /* v0.42.0：页签从「胶囊药丸」改成「分段下划线」——药丸在长页里视觉噪点多、
+     选中态只靠浅色底很难一眼分辨；顶部圆角 + 渐变下划线更像现代控制台。
+     调试页与角色详情页共用一套骨架，只靠 .on 的渐变色区分主次。 */
+  .dbg-tabs, .gal-tabs { display: flex; gap: 2px; flex-wrap: wrap;
+    align-items: flex-end; margin-bottom: 12px;
+    border-bottom: 1px solid var(--wf-line); }
+  .dbg-tab, .gal-tab { position: relative; padding: 8px 16px 10px;
+    font-size: 13px; cursor: pointer; user-select: none;
+    border: 1px solid transparent; border-bottom: none;
+    border-radius: 10px 10px 0 0; color: inherit; opacity: .6;
+    background: transparent;
+    transition: opacity .15s ease, background .15s ease; }
+  .dbg-tab:hover, .gal-tab:hover { opacity: .92;
+    background: rgba(128,128,128,.07); }
+  .dbg-tab.on, .gal-tab.on { opacity: 1; font-weight: 600;
+    color: var(--wf-brand); border-color: var(--wf-line);
+    background: linear-gradient(180deg, rgba(214,51,132,.13), rgba(214,51,132,0)); }
+  .dbg-tab.on::after, .gal-tab.on::after { content: ""; position: absolute;
+    left: 12px; right: 12px; bottom: -1px; height: 2px; border-radius: 2px;
+    background: linear-gradient(90deg, var(--wf-brand), var(--wf-brand-2)); }
+  /* v0.31.0：角色详情头像 + 资料表单网格 */
   .gal-avatar { width: 42px; height: 42px; border-radius: 50%;
     object-fit: cover; border: 2px solid rgba(214,51,132,.45); }
   .prof-avatar-img { width: 96px; height: 96px; border-radius: 50%;
@@ -327,11 +346,21 @@
   .cal-cell.empty { background: transparent; }
   .cal-week { display: grid; grid-template-columns: repeat(7, 30px); gap: 4px;
               font-size: 10px; opacity: .5; text-align: center; margin-bottom: 3px; }
-  /* ---- v0.13.2：总览统计卡（与 stat-card/chart-card 同一卡片语言） ---- */
-  .ov-card { border: 1px solid rgba(128,128,128,.22); border-radius: 10px;
-             padding: 14px; height: 100%; background: rgba(255,255,255,.6); }
+  /* ---- v0.42.0：总览卡升级（渐变顶边 + 完成度进度条 + 图标位） ---- */
+  .ov-card { position: relative; overflow: hidden;
+    border: 1px solid var(--wf-line); border-radius: 12px;
+    padding: 14px 16px; height: 100%; background: var(--wf-surface);
+    box-shadow: 0 2px 10px -8px rgba(80,40,70,.4); }
+  .ov-card::before { content: ""; position: absolute; left: 0; top: 0;
+    width: 100%; height: 3px;
+    background: linear-gradient(90deg, var(--wf-brand), var(--wf-brand-2)); }
   .ov-label { font-size: 12px; opacity: .65; }
   .ov-num { font-size: 30px; font-weight: 700; line-height: 1.3; }
+  .ov-icon { float: right; font-size: 18px; opacity: .55; }
+  .ov-bar { height: 5px; border-radius: 4px; margin-top: 8px;
+    background: rgba(128,128,128,.14); overflow: hidden; }
+  .ov-bar > i { display: block; height: 100%; border-radius: 4px;
+    background: linear-gradient(90deg, var(--wf-brand), var(--wf-brand-2)); }
   /* ---- v0.13.2：用户头像（后端代理 data URL；缺失回落首字母色块） ---- */
   .avatar { border-radius: 50%; object-fit: cover; flex: none;
             background: rgba(214,51,132,.12); display: inline-flex;
@@ -364,6 +393,103 @@
   .sim-avatar { width: 52px; height: 52px; border-radius: 12px; flex: none; }
   .rec-note { font-size: 11px; opacity: .6; line-height: 1.6; }
   .user-active { outline: 2px solid #d63384; outline-offset: -2px; }
+
+  /* ==================== v0.42.0 工坊改版 ==================== */
+  /* 页内顶部固定：滚动容器是 .page-scroll（padding 16px 22px），负 margin 撑满
+     宽度、不透明背景盖住下面滚上来的内容。角色详情的「头部 + 页签」、调试页的
+     页签、以及各页的标题/筛选行都套它，滚多长都不用回头找切换入口。 */
+  .sticky-head { position: sticky; top: 0; z-index: 20;
+    margin: -16px -22px 12px; padding: 14px 22px 10px;
+    background: var(--wf-bg); border-bottom: 1px solid var(--wf-line);
+    box-shadow: 0 8px 16px -14px rgba(80,40,70,.8); }
+  .sticky-head > * + * { margin-top: 8px; }
+  .sticky-head .gal-tabs, .sticky-head .dbg-tabs,
+  .sticky-head .sec-title { margin-bottom: 0; }
+  .sticky-sec { position: sticky; top: 0; z-index: 15;
+    margin: -16px -22px 12px; padding: 14px 22px 10px;
+    background: var(--wf-bg); border-bottom: 1px solid var(--wf-line);
+    box-shadow: 0 8px 16px -14px rgba(80,40,70,.8); }
+  .sticky-sec .sec-title { margin-bottom: 0; }
+  /* 轻量变体：直接贴在已有工具行 / 标题上，不改 display 与宽度（n-space
+     组件也能挂），只负责钉住 + 不透明背景遮住下面滚上来的内容。 */
+  .sticky-tools { position: sticky; top: 0; z-index: 12;
+    background: var(--wf-bg); padding: 8px 0;
+    box-shadow: 0 6px 12px -12px rgba(80,40,70,.8); }
+
+  /* 总览：横幅 + 卡片式快捷入口 */
+  .ov-hero { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 18px 20px; border-radius: 14px; color: #fff;
+    background: linear-gradient(115deg, #c62f7d 0%, #a0449c 55%, #7c5cd6 100%);
+    box-shadow: 0 10px 26px -14px rgba(160,50,120,.8); }
+  .ov-hero .h-title { font-size: 18px; font-weight: 700; letter-spacing: .5px; }
+  .ov-hero .h-sub { font-size: 12px; opacity: .88; margin-top: 4px; line-height: 1.6; }
+  .ov-hero .h-badge { margin-left: auto; display: flex; gap: 10px; flex-wrap: wrap; }
+  .ov-hero .h-chip { padding: 6px 12px; border-radius: 999px; font-size: 12px;
+    background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.28); }
+  .ov-quick { display: flex; gap: 8px; flex-wrap: wrap; }
+  .ov-quick-btn { display: flex; align-items: center; gap: 8px; padding: 9px 14px;
+    border-radius: 10px; cursor: pointer; font-size: 13px;
+    border: 1px solid var(--wf-line); background: var(--wf-surface);
+    transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease; }
+  .ov-quick-btn:hover { transform: translateY(-2px); border-color: var(--wf-brand);
+    box-shadow: 0 8px 18px -12px rgba(160,50,120,.9); }
+
+  /* 角色详情 · 图库页签：三类图片分节网格 */
+  .lib-sec { margin-bottom: 16px; }
+  .lib-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    font-size: 13px; font-weight: 600; }
+  .lib-head .cnt { font-weight: 400; font-size: 12px; opacity: .55; }
+  .lib-grid { display: grid; gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+  .lib-grid .gal-item img { aspect-ratio: 1 / 1; object-fit: cover;
+    object-position: 50% 12%; max-height: none; }
+  .lib-grid.tall .gal-item img { aspect-ratio: 7 / 12; }
+  .lib-avatar { width: 120px; height: 120px; border-radius: 14px; object-fit: cover;
+    border: 2px solid rgba(214,51,132,.4); cursor: zoom-in; }
+  .lib-empty { font-size: 12px; opacity: .6; padding: 10px 12px;
+    border: 1px dashed var(--wf-line); border-radius: 10px; }
+
+  /* 头像生成弹窗：模式 / 图源 / 结果预览 */
+  .av-mode-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .av-src-strip { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 8px; }
+  .av-src-item { flex: 0 0 88px; cursor: pointer; border-radius: 10px;
+    overflow: hidden; border: 2px solid transparent; background: rgba(128,128,128,.1); }
+  .av-src-item.on { border-color: var(--wf-brand); }
+  .av-src-item img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover;
+    object-position: 50% 12%; display: block; }
+  .av-src-item .lab { font-size: 10px; text-align: center; padding: 3px 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .av-result { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .av-result img { width: 160px; height: 160px; border-radius: 14px; object-fit: cover;
+    border: 2px solid rgba(214,51,132,.4); }
+  .av-compare { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .av-compare figure { margin: 0; text-align: center; font-size: 11px; opacity: .7; }
+  .av-compare img { width: 108px; height: 108px; border-radius: 12px; object-fit: cover;
+    border: 1px solid var(--wf-line); }
+
+  /* 配置页：分区锚点 + 左侧色条 + 悬浮固定保存条 */
+  .cfg-anchor { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .cfg-anchor span { padding: 5px 12px; border-radius: 8px; cursor: pointer;
+    font-size: 12px; border: 1px solid var(--wf-line); background: var(--wf-surface); }
+  .cfg-anchor span:hover { border-color: var(--wf-brand); color: var(--wf-brand); }
+  .cfg-sec { position: relative; padding-left: 14px; scroll-margin-top: 96px; }
+  .cfg-sec::before { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px;
+    width: 3px; border-radius: 3px;
+    background: linear-gradient(180deg, var(--wf-brand), var(--wf-brand-2)); }
+  .config-save-float { position: fixed; right: 26px; bottom: 22px; z-index: 60;
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    border-radius: 14px; background: var(--wf-surface);
+    border: 1px solid var(--wf-line);
+    box-shadow: 0 12px 32px -12px rgba(80,40,70,.7); backdrop-filter: blur(8px); }
+  .config-save-float .dirty { font-size: 12px; color: var(--wf-brand); }
+  .config-save-float .clean { font-size: 12px; opacity: .6; }
+
+  /* 调试页：查询历史列表 */
+  .dbg-query-row { display: flex; align-items: center; gap: 10px; padding: 5px 0;
+    font-size: 12px; border-bottom: 1px dashed var(--wf-line); }
+  .dbg-query-row .uid { color: var(--wf-brand); cursor: pointer; font-weight: 600; }
+  .dbg-query-row .uid:hover { text-decoration: underline; }
+  .dbg-query-row .ts { opacity: .6; flex: none; }
 </style>
 </head>
 <body>
@@ -409,16 +535,24 @@
                （v0.2.1 坑的真面目，div v-if 也躲不过）。普通 div + .stack 间距工具类。 -->
           <div class="stack">
 
-          <!-- ============ 总览（v0.10.0，第一栏；v0.13.2 去重信息 + 角色缩略 + 头像） ============ -->
+          <!-- ============ 总览（v0.42.0：横幅 + 指标卡 + 配额完成度） ============ -->
           <div v-if="menu === 'overview'" class="stack">
-            <div class="sec-title">总览
-              <!-- v0.13.2：版本/萌绘状态与顶部状态栏重复，只留出图方式（一信息一显示）
-                   v0.19.3：出图方式显示中文；「图生图命中」只在 mix 模式有意义 -->
-              <span class="cnt">出图方式 {{ ovGenModeLabel }}<span
-                v-if="ov.gen_source_mode === 'mix'"> · 图生图命中 {{ ov.img2img_prob }}%</span><span
-                v-if="ov.gen_source_mode === 'img2img'"> · 每次都现画（库存满也画）</span><span
-                v-if="ov.artist_draw_enabled"> · 🎨 现画走画师出词</span></span>
-              <n-button size="tiny" secondary :loading="refreshing" @click="refreshAll">刷新</n-button>
+            <div class="ov-hero">
+              <div>
+                <div class="h-title">♥ 萌萌今日老婆 · 工坊</div>
+                <div class="h-sub">
+                  共 {{ ov.chars }} 位角色 / {{ ov.packs }} 卷 · 立绘 {{ ov.portraits }} 张 · 今日 {{ ov.today_draws }} 人抽到老婆<br>
+                  出图方式 {{ ovGenModeLabel }}<span
+                    v-if="ov.gen_source_mode === 'mix'"> · 图生图命中 {{ ov.img2img_prob }}%</span><span
+                    v-if="ov.gen_source_mode === 'img2img'"> · 每次都现画（库存满也画）</span><span
+                    v-if="ov.artist_draw_enabled"> · 🎨 现画走画师出词</span>
+                </div>
+              </div>
+              <div class="h-badge">
+                <span class="h-chip">v{{ ov.version }}</span>
+                <span class="h-chip">{{ ov.anima_ready ? "萌绘已就绪" : "萌绘未就绪" }}</span>
+                <span class="h-chip" style="cursor:pointer;" @click="refreshAll">↻ 刷新</span>
+              </div>
             </div>
             <div v-if="!ov.anima_ready"
                  style="padding: 8px 12px; border-radius: 8px; background: rgba(230,162,60,.12); color: #c47f17; font-size: 13px;">
@@ -434,20 +568,27 @@
             <n-grid :cols="4" :x-gap="12" :y-gap="12">
               <n-gi>
                 <div class="ov-card">
+                  <span class="ov-icon">♥</span>
                   <div class="ov-label">角色</div>
                   <div class="ov-num" :style="{ color: brandColor }">{{ ov.chars }}</div>
                   <div class="ov-label">{{ ov.verified }} 个已验证 · {{ ov.packs }} 卷</div>
+                  <div class="ov-bar"><i :style="{ width: ovVerifiedPct }"></i></div>
                 </div>
               </n-gi>
               <n-gi>
                 <div class="ov-card">
-                  <div class="ov-label">立绘</div>
+                  <span class="ov-icon">▤</span>
+                  <!-- v0.42.0：只显示启用中的立绘，停用的单独标注不混进主数字 -->
+                  <div class="ov-label">立绘（启用中）</div>
                   <div class="ov-num" :style="{ color: brandColor }">{{ ov.portraits }}</div>
-                  <div class="ov-label">{{ ov.chars_full }} 个角色已满 {{ ov.quota }} 张配额</div>
+                  <div class="ov-label">{{ ov.chars_full }}/{{ ov.chars }} 个角色已满 {{ ov.quota }} 张<span
+                    v-if="ov.portraits_disabled > 0"> · 停用 {{ ov.portraits_disabled }}</span></div>
+                  <div class="ov-bar"><i :style="{ width: ovFullPct }"></i></div>
                 </div>
               </n-gi>
               <n-gi>
                 <div class="ov-card">
+                  <span class="ov-icon">✦</span>
                   <div class="ov-label">今日抽卡</div>
                   <div class="ov-num" :style="{ color: brandColor }">{{ ov.today_draws }}</div>
                   <div class="ov-label">累计 {{ ov.total_draws }} 人次</div>
@@ -455,19 +596,46 @@
               </n-gi>
               <n-gi>
                 <div class="ov-card">
-                  <div class="ov-label">参考图</div>
+                  <span class="ov-icon">◈</span>
+                  <div class="ov-label">参考图 / 出卡源</div>
                   <div class="ov-num" :style="{ color: brandColor }">{{ ov.refs_bound }}</div>
-                  <div class="ov-label">{{ ov.orphans }} 张未绑定待找回</div>
+                  <div class="ov-label">{{ ov.draw_sources }} 个角色已指定出卡源 · {{ ov.orphans }} 张待找回</div>
+                  <div class="ov-bar"><i :style="{ width: ovDrawSrcPct }"></i></div>
                 </div>
               </n-gi>
             </n-grid>
             <n-grid :cols="2" :x-gap="12" :y-gap="12">
               <n-gi>
                 <div class="ov-card">
-                  <div style="font-size:13px; font-weight:600; margin-bottom:6px;">出卡图生图源</div>
-                  <div style="font-size:12px; opacity:.75; line-height:1.7;">
-                    {{ ov.draw_sources }} 个角色已指定。未指定时抽卡不会走图生图，
-                    也不会私自取参考图列表里的图；混合模式命中概率 {{ ov.img2img_prob }}%。
+                  <div class="lib-head">立绘配额与出卡源
+                    <span class="cnt">配额 {{ ov.quota }} 张/角色</span></div>
+                  <div class="bar-row">
+                    <span class="bar-label">配额已满角色</span>
+                    <div class="bar-track"><div class="bar-fill"
+                      :style="{ width: ovFullPct, background: brandColor }"></div></div>
+                    <span class="bar-num">{{ ov.chars_full }}/{{ ov.chars }}</span>
+                  </div>
+                  <div class="bar-row">
+                    <span class="bar-label">已有立绘角色</span>
+                    <div class="bar-track"><div class="bar-fill"
+                      :style="{ width: ovWithPortraitPct, background: brandColor }"></div></div>
+                    <span class="bar-num">{{ ov.chars_with_portrait }}/{{ ov.chars }}</span>
+                  </div>
+                  <div class="bar-row">
+                    <span class="bar-label">已验证角色</span>
+                    <div class="bar-track"><div class="bar-fill"
+                      :style="{ width: ovVerifiedPct, background: brandColor }"></div></div>
+                    <span class="bar-num">{{ ov.verified }}/{{ ov.chars }}</span>
+                  </div>
+                  <div class="bar-row">
+                    <span class="bar-label">已指定出卡源</span>
+                    <div class="bar-track"><div class="bar-fill"
+                      :style="{ width: ovDrawSrcPct, background: brandColor }"></div></div>
+                    <span class="bar-num">{{ ov.draw_sources }}/{{ ov.chars }}</span>
+                  </div>
+                  <div style="font-size:12px; opacity:.75; line-height:1.7; margin-top:10px;">
+                    未指定出卡源时抽卡不会走图生图，也不会私自取参考图列表里的图；
+                    混合模式命中概率 {{ ov.img2img_prob }}%。
                   </div>
                   <div v-if="ov.no_source.length" style="font-size:12px; opacity:.75; margin-top:8px;">
                     画法为图生图但没指定出卡源（将回退文生图）：
@@ -504,13 +672,12 @@
                 </div>
               </n-gi>
             </n-grid>
-            <div>
-              <n-space :wrap="true" size="small">
-                <n-button size="small" type="primary" @click="goMenu('chars')">角色库</n-button>
-                <n-button size="small" @click="goMenu('try')">试画台</n-button>
-                <n-button size="small" @click="goMenu('records')">抽签记录</n-button>
-                <n-button size="small" @click="goMenu('config')">配置</n-button>
-              </n-space>
+            <div class="ov-quick">
+              <div class="ov-quick-btn" @click="goMenu('chars')">♥ 角色库</div>
+              <div class="ov-quick-btn" @click="goMenu('try')">✎ 试画台</div>
+              <div class="ov-quick-btn" @click="goMenu('records')">▤ 抽签记录</div>
+              <div class="ov-quick-btn" @click="goMenu('debug')">⚙ 调试工具</div>
+              <div class="ov-quick-btn" @click="goMenu('config')">☰ 配置</div>
             </div>
             <div v-if="ov.orphans > 0" class="bind-tip">
               有 {{ ov.orphans }} 张图片未绑定任何角色：进「角色库 → 角色详情 → 参考图」可一键找回。
@@ -519,7 +686,7 @@
 
           <!-- ============ 角色库 ============ -->
           <div v-if="menu === 'chars'">
-            <n-space align="center" :wrap="true">
+            <n-space align="center" :wrap="true" class="sticky-tools">
               <n-radio-group v-model:value="charsMode" size="small">
                 <n-radio-button value="card">卡片</n-radio-button>
                 <n-radio-button value="list">列表</n-radio-button>
@@ -623,7 +790,7 @@
           <div v-if="menu === 'works'">
             <div v-if="!currentWork" class="stack">
               <!-- v0.13.2：刷新并入筛选行（旧版孤零零占一行） -->
-              <n-space align="center" :wrap="true">
+              <n-space align="center" :wrap="true" class="sticky-tools">
                 <n-input v-model:value="workKeyword" placeholder="搜作品名 / 角色名 / id"
                          size="small" clearable style="width: 200px;"></n-input>
                 <n-select v-model:value="workFilterCat" :options="workCatOpts"
@@ -725,7 +892,7 @@
           <div v-if="menu === 'try'">
             <n-card size="small" :bordered="true">
               <n-space vertical size="medium">
-                <n-space align="center" :wrap="true">
+                <n-space align="center" :wrap="true" class="sticky-tools">
                   <n-button size="small" @click="backFromTry">← 返回</n-button>
                   <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
                   <n-steps size="small" :current="tryStep" style="flex: 1; min-width: 300px;">
@@ -919,6 +1086,8 @@
 
           <!-- ============ 角色详情（v0.6.0：原「立绘库」升级——立绘 + 参考图 + 生成立绘） ============ -->
           <div v-if="menu === 'gallery'" class="stack">
+            <!-- v0.42.0：角色信息 + 页签一起固定——滚立绘墙时名字与切换入口不跑掉 -->
+            <div class="sticky-head">
             <!-- 头部：返回 + 角色切换/信息 + 直达操作
                  （用普通 flex div 而非 n-space：n-space 的默认插槽里放 template v-if 会双渲染） -->
             <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
@@ -940,7 +1109,9 @@
                             @click="openEditById(galCharId)"></w-icon-btn>
               </template>
               <n-tag v-else size="small" :bordered="false" type="warning">孤立立绘（原条目已删除）</n-tag>
-              <span class="bind-tip" style="margin-top: 0;">立绘 {{ galItems.length }}/{{ meta.quota }} · 参考图 {{ galRefs.length }}</span>
+              <!-- v0.42.0：配额只算启用中的立绘，停用的单独标注（不占配额） -->
+              <span class="bind-tip" style="margin-top: 0;">立绘 {{ galActiveCount }}/{{ meta.quota }} · 参考图 {{ galRefs.length }}<span
+                v-if="galDisabledCount > 0"> · 停用 {{ galDisabledCount }}</span></span>
               <w-icon-btn icon="refresh" tip="刷新全部" :loading="refreshing"
                           @click="refreshAll"></w-icon-btn>
               <!-- v0.31.0：角色头像（有才显示，点击进资料页换） -->
@@ -949,17 +1120,18 @@
                    @click="switchGalTab('profile')">
             </div>
 
-            <!-- v0.31.0：详情页页签化——概览（速览+生成） / 资料（头像+评级+百科+印象语） /
-                 立绘 / 参考图。此前立绘墙 + 参考图墙 + 生成面板 + 印法语一股脑堆一页，
-                 越长越难找；未绑定图片在「参考图」页签里独立成节。 -->
+            <!-- v0.42.0：速览并入资料、新增图库（参考图 / 立绘 / 头像一屏总览）；
+                 页签 = 资料 / 立绘 / 参考图 / 图库，不再有单独的「概览」。 -->
             <div class="gal-tabs">
               <div v-for="t in galTabs" :key="t.key" class="gal-tab"
                    :class="{ on: galTab === t.key }"
                    @click="switchGalTab(t.key)">{{ t.label }}</div>
             </div>
+            </div><!-- /sticky-head：头部与页签固定区结束 -->
 
-            <div v-if="galTab === 'overview'" class="stack">
-              <!-- v0.31.0：速览——入库日期 / 首次被抽 / 累计次数 / 平均生成耗时 -->
+            <!-- v0.42.0：速览与资料合并成同一页（原本两页来回切，信息还重复） -->
+            <div v-if="galTab === 'profile'" class="stack">
+              <!-- 速览——入库日期 / 首次被抽 / 累计次数 / 平均生成耗时 -->
               <n-card size="small" :bordered="true" title="速览">
                 <template #header-extra>
                   <span class="bind-tip" style="margin: 0;"
@@ -975,13 +1147,12 @@
                   <div class="prof-label">累计被抽</div>
                   <div>{{ galSummary && galSummary.draw_count > 0 ? galSummary.draw_count + " 次" : tv(null) }}</div>
                   <div class="prof-label">立绘</div>
-                  <div>{{ galItems.length }} 张<span v-if="galSummary && galSummary.portrait_avg_ms > 0"> · 平均生成耗时 {{ fmtDur(galSummary.portrait_avg_ms) }}</span></div>
+                  <div>{{ galActiveCount }} 张<span
+                    v-if="galDisabledCount > 0"> · 另有 {{ galDisabledCount }} 张已停用</span><span
+                    v-if="galSummary && galSummary.portrait_avg_ms > 0"> · 平均生成耗时 {{ fmtDur(galSummary.portrait_avg_ms) }}</span></div>
                 </div>
               </n-card>
-            </div><!-- /概览页签 -->
 
-
-            <div v-else-if="galTab === 'profile'" class="stack">
               <!-- v0.31.0：头像——上传 / 从已有图裁取 / AI 生成 / 移除 -->
               <n-card size="small" :bordered="true" title="头像">
                 <div class="prof-avatar-row">
@@ -995,13 +1166,14 @@
                                 @click="galAvatarUploadOpen = true">上传头像</n-button>
                       <n-button size="small" secondary @click="openAvatarPick">从立绘 / 参考图裁取</n-button>
                       <n-button size="small" type="primary" secondary :loading="galAvatarBusy"
-                                @click="doAvatarGenerate">AI 生成头像</n-button>
+                                :disabled="galAvatarBusy"
+                                @click="openAvatarGen">AI 生成头像</n-button>
                       <n-button size="small" quaternary type="error"
                                 :armed="delArm === 'avatar:' + galCharId"
                                 :tip="delArm === 'avatar:' + galCharId ? '再点一次确认移除' : '移除头像'"
                                 @click="avatarClear">移除头像</n-button>
                     </n-space>
-                    <div class="bind-tip">AI 生成优先走图生图（用出卡源/生成源，身份最稳），没有生成源的角色按条目画法文生图；产物统一裁成 512×512 方形。</div>
+                    <div class="bind-tip">「AI 生成头像」会打开设置弹窗：默认图生图并使用主参考图，也可切换文生图；结果先预览，由你决定是否替换当前头像（统一裁成 512×512 方形）。生成期间不能重复提交。</div>
                   </div>
                 </div>
               </n-card>
@@ -1176,7 +1348,7 @@
             </n-card>
 
               <div class="sec-title">立绘
-                <span class="cnt">{{ galItems.length }}/{{ meta.quota }} · 不足配额会按种子自动补生{{ galDrawRef ? " · 出卡源已指定" : "" }}<template v-if="galDisabledCount > 0"> · 已停用 {{ galDisabledCount }}（不占配额）</template></span>
+                <span class="cnt">{{ galActiveCount }}/{{ meta.quota }} · 不足配额会按种子自动补生{{ galDrawRef ? " · 出卡源已指定" : "" }}<template v-if="galDisabledCount > 0"> · 已停用 {{ galDisabledCount }}（不占配额）</template></span>
                 <!-- v0.21.0：停用的立绘默认隐藏，点这里切换显示 -->
                 <span class="bind-tip" style="margin-top: 0; cursor: pointer;"
                       v-if="galDisabledCount > 0"
@@ -1390,13 +1562,61 @@
                   </n-grid>
                 </div>
             </div>
+
+            <!-- v0.42.0：图库——头像 / 参考图 / 立绘一屏汇总（只读总览）；
+                 管理操作（设主参考、停用、转移）仍在各自页签，避免两个地方抢状态 -->
+            <div v-else-if="galTab === 'library'" class="stack">
+              <div class="bind-tip" style="margin-top: 0;">
+                这里汇总该角色的全部图片素材，点缩略图看大图。设主参考 / 停用 / 转移等管理操作仍在「立绘」「参考图」页签。
+              </div>
+              <div class="lib-sec">
+                <div class="lib-head">头像 <span class="cnt">{{ galAvatarThumb ? "已设置" : "未设置" }}</span></div>
+                <div v-if="galAvatarThumb" class="av-compare">
+                  <figure>
+                    <!-- 头像是 data URL（后端即时缩略），不走 /image/data 的 lightbox -->
+                    <img :src="galAvatarThumb" class="lib-avatar" alt="当前头像" title="当前头像">
+                    <figcaption>当前头像</figcaption>
+                  </figure>
+                  <div class="bind-tip" style="margin-top:0;">到「资料」页签可上传、从立绘裁取或 AI 生成替换。</div>
+                </div>
+                <div v-else class="lib-empty">还没有头像：到「资料」页签上传、裁取或 AI 生成。</div>
+              </div>
+              <div class="lib-sec">
+                <div class="lib-head">参考图
+                  <span class="cnt">{{ galRefs.length }} 张{{ galMainRef ? " · 已指定主参考" : "" }}{{ galDrawRef ? " · 已指定出卡源" : "" }}</span></div>
+                <div v-if="galRefsView.length" class="lib-grid">
+                  <div v-for="r in galRefsView" :key="'libref:' + r.path" class="gal-item">
+                    <img v-if="r.thumb" :src="r.thumb" class="clickable-img" alt="参考图"
+                         title="点击查看大图" @click.stop="openViewer(r.path, '参考图')">
+                    <div v-else class="gal-meta">文件丢失</div>
+                    <div class="gal-meta">{{ galMainRef === r.path ? "主参考" : "备选" }}{{ galDrawRef === r.path ? " · 出卡源" : "" }}</div>
+                  </div>
+                </div>
+                <div v-else class="lib-empty">还没有参考图：到「参考图」页签上传，或从立绘转入。</div>
+              </div>
+              <div class="lib-sec">
+                <div class="lib-head">立绘
+                  <span class="cnt">启用 {{ galActiveCount }} 张<template
+                    v-if="galDisabledCount > 0"> · 停用 {{ galDisabledCount }} 张</template> · 配额 {{ meta.quota }}</span></div>
+                <div v-if="galItems.length" class="lib-grid tall">
+                  <div v-for="it in galItems" :key="'libp:' + it.file" class="gal-item"
+                       :class="{ 'is-disabled': !it.active }">
+                    <img v-if="it.thumb" :src="it.thumb" class="clickable-img" alt="立绘"
+                         title="点击查看大图" @click.stop="openViewer(it.file, '#' + it.display_no)">
+                    <div v-else class="gal-meta">文件丢失</div>
+                    <div class="gal-meta">#{{ it.display_no }}{{ !it.active ? " · 已停用" : "" }}{{ isCover(it) ? " · 封面" : "" }}</div>
+                  </div>
+                </div>
+                <div v-else class="lib-empty">还没有立绘：到「立绘」页签补图，或去试画台试一张。</div>
+              </div>
+            </div>
           </div>
 
           <!-- ============ 抽签记录（v0.9.0） ============ -->
           <div v-if="menu === 'records'">
             <n-space vertical size="medium">
               <n-card size="small" :bordered="true">
-                <div class="sec-title" style="margin-bottom: 10px;">抽签记录
+                <div class="sec-title sticky-tools" style="margin-bottom: 10px;">抽签记录
                   <span class="cnt">一人一天一行；重抽前的角色在「详情」的流水里</span>
                 </div>
                 <n-space vertical size="small">
@@ -1560,7 +1780,7 @@
           <div v-if="menu === 'stats'">
             <n-space vertical size="medium">
               <n-card size="small" :bordered="true">
-                <n-space align="center" :wrap="true" size="small">
+                <n-space align="center" :wrap="true" size="small" class="sticky-tools">
                   <span style="font-weight: 600; font-size: 14px;">数据统计</span>
                   <n-button v-for="o in statsRangeOpts" :key="o.days" size="small"
                             :type="statsDays === o.days ? 'primary' : 'default'"
@@ -1689,7 +1909,7 @@
           <div v-if="menu === 'users'">
             <n-space vertical size="medium">
               <n-card size="small" :bordered="true">
-                <n-space align="center" :wrap="true" size="small">
+                <n-space align="center" :wrap="true" size="small" class="sticky-tools">
                   <n-input v-model:value="userQuery" size="small" clearable
                            placeholder="搜 QQ 号或昵称" style="width: 220px;"
                            @keyup.enter="loadUsers"></n-input>
@@ -1841,10 +2061,13 @@
                  ⚠️ 容器用普通 div + flex（stack-v），不用 n-space：vendored
                  naive 的 Space 给槽子元素包固定 key，v-if 切 tab 会撞 key
                  导致内容串页。 -->
+            <!-- v0.42.0：调试页页签也固定（状态与修签内容很长） -->
+            <div class="sticky-head">
             <div class="dbg-tabs">
               <div v-for="t in dbgTabs" :key="t.key" class="dbg-tab"
                    :class="{ on: dbgTab === t.key }"
                    @click="switchDbgTab(t.key)">{{ t.label }}</div>
+            </div>
             </div>
             <div class="stack-v">
               <!-- v0.24.1：关系模型阶段 1 只读状态（诊断分页） -->
@@ -1973,6 +2196,29 @@
                 </n-space>
               </n-card>
 
+              <!-- v0.42.0：查询历史（用户反馈「搜索历史记录没了」）——旧版只有
+                   8 个去重 uid 小标签，且 loadDebugHistory 只在切到「操作审计」
+                   时才调用，进页面根本没数据。现在进调试页就拉，独立成卡。 -->
+              <n-card v-if="dbgTab === 'state'" size="small" title="查询历史" :bordered="true">
+                <template #header-extra>
+                  <n-button size="tiny" @click="loadDebugHistory">刷新</n-button>
+                </template>
+                <div class="bind-tip" style="margin-top: 0; margin-bottom: 6px;">
+                  最近查过的 QQ 号（点一下直接重新查询）。查询是只读操作，不改任何数据。
+                </div>
+                <div v-if="dbgAuditLoading && !dbgQueries.length" class="gal-loading">
+                  <n-spin size="small"></n-spin><span class="txt">正在载入…</span>
+                </div>
+                <div v-if="dbgQueries.length">
+                  <div v-for="q in dbgQueries" :key="'dq:' + q.id" class="dbg-query-row">
+                    <span class="ts">{{ fmtTime(q.created_at) }}</span>
+                    <span class="uid" @click="pickRecentUser(q.target)">{{ q.target || "—" }}</span>
+                    <span class="bind-tip" style="margin-top:0;">{{ q.detail || "状态查询" }}</span>
+                  </div>
+                </div>
+                <div v-else-if="!dbgAuditLoading" class="lib-empty">还没有查询记录：上方输入 QQ 号点「查询状态」即可。</div>
+              </n-card>
+
               <!-- 星语式：查到状态后才出现，按钮自动带上当前 QQ 与今天，不用重复填参数 -->
               <n-card size="small" :bordered="true" v-if="dbgTab === 'state' && dbgState">
                 <template #header>
@@ -2015,11 +2261,12 @@
                     </n-button>
                   </n-space>
                   <div class="rec-note">
-                    「重置」= 删今天这一条签（含当天流水、卡图）+ <b>把该角色今日已生成的立绘也移入回收站</b>，
-                    所以下次抽到同一角色会重新生成而不是「当日复用」（v0.19.6，旧版只删签，
-                    常见困惑：重置了还是当日复用立绘）。历史记录不动；
+                    「重置」只删今天这一条签（含当天流水、卡图），<b>不会动任何立绘</b>（v0.42.0：
+                    旧版会顺手按日期清该角色当日的立绘，批量补图时一次能删十几张，已彻底解耦）。
+                    历史记录不动；想重画今天的立绘请用「重试今日老婆立绘」（最多只清与该签关联的一张）。
                     「清空该用户全部签」才是把这个 QQ 的所有抽签记录都删掉（连带卡图，种子重派）；
                     「强制换签」把 nonce+1 重派种子，下次「今日老婆」出新的角色，不受每日换签上限限制。
+                    之前误删的图可在「回收站」页签按时间戳还原。
                   </div>
                 </n-space>
               </n-card>
@@ -2329,17 +2576,25 @@
 
           <!-- ============ 配置 ============ -->
           <div v-if="menu === 'config'">
+            <!-- v0.42.0：顶部固定工具条 + 分区锚点；保存按钮移到右下角悬浮条，
+                 改哪一项都不用滚回页首。 -->
+            <div class="sticky-head">
+              <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <span style="font-weight:600; font-size:15px;">配置</span>
+                <span class="bind-tip" style="margin-top:0;">改完点右下角悬浮「保存配置」；改「种子盐值」会洗牌所有人当天的抽卡结果</span>
+                <n-button size="small" :loading="refreshing"
+                          @click="refreshAll({ config: true })">刷新（丢弃未保存修改）</n-button>
+              </div>
+              <div class="cfg-anchor">
+                <span v-for="sec in configSections" :key="'anc:' + sec.title"
+                      @click="scrollToConfigSection(sec.title)">{{ sec.title }}</span>
+              </div>
+            </div>
             <n-card size="small" :bordered="true">
               <n-space vertical size="medium">
-                <n-space align="center">
-                  <n-button type="primary" :loading="configSaving" @click="saveConfig">保存配置</n-button>
-                  <n-button size="small" :loading="refreshing"
-                            @click="refreshAll({ config: true })">刷新（丢弃未保存修改）</n-button>
-                  <span class="bind-tip">保存后即时生效；改「种子盐值」会洗牌所有人当天的抽卡结果</span>
-                </n-space>
                 <!-- v0.13.2：分区卡片化 + 控件宽度统一（选择器 420 与输入框对齐） -->
-                <div v-for="sec in configSections" :key="sec.title" class="chart-card"
-                     style="margin-bottom: 14px;">
+                <div v-for="sec in configSections" :key="sec.title" class="chart-card cfg-sec"
+                     :id="'cfg-sec-' + sec.title" style="margin-bottom: 14px;">
                   <div style="font-weight:600; font-size:14px; margin: 0 0 12px;">{{ sec.title }}</div>
                   <div v-for="it in sec.items" :key="it.key" style="margin-bottom: 14px;">
                     <div style="font-size:13px; margin-bottom: 4px;">{{ it.description }}</div>
@@ -2370,6 +2625,15 @@
                 <div class="bind-tip">分群绑定（group_pools）请用「分群绑定」页签管理，此处不重复展示。</div>
               </n-space>
             </n-card>
+            <!-- v0.42.0：悬浮固定保存条（position: fixed，滚到任何分区都在） -->
+            <div class="config-save-float">
+              <span v-if="configDirty" class="dirty">● 有未保存的修改</span>
+              <span v-else class="clean">配置已是最新</span>
+              <n-button size="small" :disabled="configSaving"
+                        @click="refreshAll({ config: true })">放弃修改</n-button>
+              <n-button size="small" type="primary" :loading="configSaving"
+                        @click="saveConfig">保存配置</n-button>
+            </div>
           </div>
           </div>
         </div>
@@ -2783,7 +3047,68 @@
               {{ g.kind === "ref" ? "参考图" : "立绘 #" + g.display_no }} · 点此设为头像</div>
           </div>
         </div>
-        <div v-else class="bind-tip">该角色还没有立绘 / 参考图：先去「概览」生成或「参考图」上传。</div>
+        <div v-else class="bind-tip">该角色还没有立绘 / 参考图：先去「立绘」补图或「参考图」上传。</div>
+      </div>
+    </n-modal>
+
+    <!-- ============ v0.42.0：AI 生成头像设置弹窗（模式 / 图源 / 结果可选替换） ============ -->
+    <n-modal v-model:show="galAvatarGenOpen" preset="dialog" title="AI 生成头像"
+             style="width: 620px;">
+      <div class="stack">
+        <div class="bind-tip" style="margin-top:0;">
+          生成结果先在这里预览，<b>不会自动替换</b>当前头像——满意后点「替换当前头像」。
+          生成期间按钮锁住，前一张完成前不能重复提交。
+        </div>
+        <div class="av-mode-row">
+          <n-radio-group v-model:value="avatarGenMode" size="small">
+            <n-radio-button value="i2i">图生图（默认）</n-radio-button>
+            <n-radio-button value="t2i">文生图</n-radio-button>
+          </n-radio-group>
+          <span class="bind-tip" style="margin-top:0;">
+            {{ avatarGenMode === "i2i" ? "以所选图源为基准裁成头像特写，身份最稳" : "按条目画法与固有特征重画，不使用参考图" }}
+          </span>
+        </div>
+        <div v-if="avatarGenMode === 'i2i'">
+          <div class="lib-head" style="margin-bottom:4px;">图源
+            <span class="cnt">{{ genSources.length }} 张可选 · 默认使用{{ avatarGenSrcLabel }}</span></div>
+          <div class="av-src-strip" v-if="genSources.length">
+            <div v-for="g in genSources" :key="'avgen:' + g.kind + ':' + g.path"
+                 class="av-src-item" :class="{ on: avatarGenSrc === g.path }"
+                 @click="avatarGenSrc = g.path">
+              <img v-if="g.thumb" :src="g.thumb" alt="候选图源">
+              <div v-else class="gal-meta">丢失</div>
+              <div class="lab">{{ g.kind === "ref" ? "参考图" : "立绘 #" + g.display_no }}</div>
+            </div>
+          </div>
+          <div v-else class="lib-empty">该角色还没有参考图 / 立绘：请改用文生图，或先到「参考图」页签上传。</div>
+        </div>
+        <div class="av-mode-row">
+          <n-button size="small" type="primary" :loading="galAvatarBusy"
+                    :disabled="galAvatarBusy || !galCharId || (avatarGenMode === 'i2i' && !avatarGenSrc)"
+                    @click="doAvatarGenerate">
+            {{ galAvatarBusy ? "生成中…" : "开始生成" }}
+          </n-button>
+          <span class="bind-tip" style="margin-top:0;" v-if="galAvatarBusy">已进生图队列，请等本次完成</span>
+        </div>
+        <div v-if="avatarGenResult" class="av-result">
+          <img :src="avatarGenResult.thumb" alt="生成结果">
+          <div class="stack" style="flex:1; min-width: 220px;">
+            <div class="av-compare">
+              <figure v-if="galAvatarThumb">
+                <img :src="galAvatarThumb" alt="当前头像"><figcaption>当前</figcaption>
+              </figure>
+              <figure>
+                <img :src="avatarGenResult.thumb" alt="生成结果"><figcaption>本次生成</figcaption>
+              </figure>
+            </div>
+            <div class="bind-tip" style="margin-top:0;">{{ avatarGenResult.mode === "i2i" ? "图生图" : "文生图" }} · 512×512 方形</div>
+            <div class="av-mode-row">
+              <n-button size="small" type="primary" :loading="avatarGenApplying"
+                        @click="applyAvatarResult">替换当前头像</n-button>
+              <n-button size="small" @click="discardAvatarResult">放弃这一次</n-button>
+            </div>
+          </div>
+        </div>
       </div>
     </n-modal>
 
@@ -3518,6 +3843,8 @@
       // v0.13.2：zhCN locale——vendored naive 不配 locale 会显示英文
       // 「Please Select / Please Input」；去掉了此前重复声明的 theme。
       var isDark = !!bridgeCtx().isDark;
+      // v0.42.0：把暗色同步给 CSS 变量（html.is-dark），固定头部/卡片背景才不穿帮
+      if (isDark) { document.documentElement.classList.add("is-dark"); }
       var theme = isDark ? NS.darkTheme : null;
       var zhLocale = NS.zhCN || null;
       var brandColor = isDark ? "#e879b5" : "#d63384";
@@ -3722,7 +4049,26 @@
         version: "", anima_ready: false, quota: 5, gen_source_mode: "mix",
         img2img_prob: 50, packs: 0, chars: 0, verified: 0, portraits: 0,
         chars_full: 0, refs_bound: 0, orphans: 0, draw_sources: 0,
-        no_source: [], today_draws: 0, total_draws: 0, recent: []
+        no_source: [], today_draws: 0, total_draws: 0, recent: [],
+        // v0.42.0：总览进度条（后端 overview 只数启用中立绘）
+        chars_with_portrait: 0, portraits_disabled: 0
+      });
+      function ovPct(a, b) {
+        var n = Number(a || 0), d = Number(b || 0);
+        if (!d) { return "0%"; }
+        return Math.max(0, Math.min(100, Math.round(n / d * 100))) + "%";
+      }
+      var ovVerifiedPct = Vue.computed(function () {
+        return ovPct(ov.value.verified, ov.value.chars);
+      });
+      var ovFullPct = Vue.computed(function () {
+        return ovPct(ov.value.chars_full, ov.value.chars);
+      });
+      var ovWithPortraitPct = Vue.computed(function () {
+        return ovPct(ov.value.chars_with_portrait, ov.value.chars);
+      });
+      var ovDrawSrcPct = Vue.computed(function () {
+        return ovPct(ov.value.draw_sources, ov.value.chars);
       });
       // v0.19.3：出图方式的中文标签 + 两种「配了却不会按预期生效」的提示。
       // 用户实报：「配置的是只用图生图模板，但还是取的立绘」——两条真实原因：
@@ -5190,6 +5536,26 @@
         if (i >= 0) { arr.splice(i, 1); } else { arr.push(g.path); }
         galRefsSel.value = arr;
       }
+      // v0.42.0：图生图「默认选中指定图源或第一张图」。
+      // 优先级：出卡源（galDrawRefAbs / galDrawRef）→ 主参考（galMainRef）→
+      // genSources 第一张（参考图在前、启用立绘在后）。只在切模式 / 数据到位 /
+      // 打开面板 / 提交这些入口补，用户主动清空后不会被立刻强行补回。
+      function ensureDefaultGenSource() {
+        if (galMode.value !== "img2img") { return; }
+        if (galRefsSel.value && galRefsSel.value.length) { return; }
+        var src = genSources.value || [];
+        if (!src.length) { return; }
+        var paths = src.map(function (g) { return g.path; });
+        var prefer = [galDrawRefAbs.value, galDrawRef.value, galMainRef.value];
+        var pick = "";
+        for (var i = 0; i < prefer.length; i++) {
+          if (prefer[i] && paths.indexOf(prefer[i]) >= 0) { pick = prefer[i]; break; }
+        }
+        galRefsSel.value = [pick || paths[0]];
+      }
+      Vue.watch(galMode, function (m) {
+        if (m === "img2img") { ensureDefaultGenSource(); }
+      });
       // v0.13.2：删除 useAsSource 死代码——模板自 v0.7.0 起只用 selectGenSource，
       // 它一直只是暴露在 return 里没人引用
 
@@ -5223,6 +5589,11 @@
       var galShowDisabled = Vue.ref(false);
       var galDisabledCount = Vue.computed(function () {
         return (galItems.value || []).filter(function (it) { return !it.active; }).length;
+      });
+      // v0.42.0：所有「立绘数量 / 配额」展示一律用启用中的数量——停用的图
+      // 不占配额也不参与抽卡，混在一起算看着别扭（用户口径）。
+      var galActiveCount = Vue.computed(function () {
+        return (galItems.value || []).filter(function (it) { return !!it.active; }).length;
       });
       // v0.26.1：批量停用 / 启用——进入批量模式后点卡片选中，再统一操作。
       // 停用是软删除：文件与行都保留、可随时恢复，只是不参与抽卡与配额。
@@ -5316,6 +5687,8 @@
         if (kept.length !== galRefsSel.value.length) {
           galRefsSel.value = kept;
         }
+        // v0.42.0：切角色 / 刷新后数据到位，若还没选源就补上默认那张
+        ensureDefaultGenSource();
       });
       var galDetailOpen = Vue.ref(false);
       var galDetail = Vue.ref(null);
@@ -5756,6 +6129,8 @@
       }
       function openPromptModal() {
         if (!galCharId.value) return;
+        // v0.42.0：开面板即保证图生图有一张默认源，不再让用户对着空选择发懵
+        ensureDefaultGenSource();
         galPromptOpen.value = true;
         galDimOpen.value = "";   // v0.19.7：自绘下拉，开弹窗先收起残留的展开态
         resetGalDimCtl();
@@ -5770,9 +6145,12 @@
         // v0.7.0：用户口径——面板主按钮只开面板，这里按「开始生成」才出图
         if (galPromptLoading.value) return;
         if (!String(galPrompt.value || "").trim()) return;
-        if (galMode.value === "img2img" && !galRefsSel.value.length) {
-          message.error("图生图重绘需要先生成源：关掉面板后在下方墙上点 ⊕ 选定一张或多张");
-          return;
+        if (galMode.value === "img2img") {
+          ensureDefaultGenSource();
+          if (!galRefsSel.value.length) {
+            message.error("图生图重绘需要先准备一张参考图或立绘");
+            return;
+          }
         }
         galPromptConfirmed.value = true;
         galPromptOpen.value = false;
@@ -5786,8 +6164,9 @@
                         theme: (galArtistMade.value ? "" : (galTheme.value || "")) };
         if (galAsRef.value) { payload.no_archive = true; }   // v0.7.5：只生成不归档
         if (galMode.value === "img2img") {
+          ensureDefaultGenSource();
           if (!galRefsSel.value.length) {
-            message.error("图生图重绘需要先生成源：在下方墙上点 ⊕ 选定一张或多张参考图/立绘");
+            message.error("图生图重绘需要先准备一张参考图或立绘");
             return;
           }
           // v0.11.0：多图源（按点选顺序）；ref 仍传第一张兼容旧链路
@@ -5872,8 +6251,8 @@
         galRefsSel.value = [];
         galPrompt.value = ""; galPromptSource.value = ""; galDims.value = [];
         galAttempt.value = 0; galPromptConfirmed.value = false;
-        // v0.31.0：页签回概览，速览 / 头像 / 资料表单跟着换人
-        galTab.value = "overview";
+        // v0.42.0：页签回「资料」（已合并速览 / 头像 / 资料表单）
+        galTab.value = "profile";
         galSummary.value = null; galAvatarThumb.value = "";
         galProfileMsg.value = ""; galProfile.value = {}; galTier.value = "";
         if (!cid) { galSwitching.value = false; return; }
@@ -6070,21 +6449,24 @@
         return m + "m" + (s < 10 ? "0" : "") + s + "s";
       }
 
-      // ---- v0.31.0 角色详情页签：概览 / 资料 / 立绘 / 参考图 ----
-      var galTab = Vue.ref("overview");
+      // ---- v0.42.0 角色详情页签：资料（速览+资料+印象语） / 立绘 / 参考图 / 图库 ----
+      var galTab = Vue.ref("profile");
       var galTabs = Vue.computed(function () {
         return [
-          { key: "overview", label: "概览" },
           { key: "profile", label: "资料" },
-          { key: "portraits", label: "立绘 " + galItems.value.length },
-          { key: "refs", label: "参考图 " + galRefs.value.length }
+          { key: "portraits", label: "立绘 " + galActiveCount.value },
+          { key: "refs", label: "参考图 " + galRefs.value.length },
+          { key: "library", label: "图库" }
         ];
       });
       function switchGalTab(k) {
         if (!k) return;
         galTab.value = k;
-        if (k === "profile") { fillGalProfileFromEntry(); }
-        if (k === "overview" && !galSummary.value) { loadGalSummary(); }
+        // 资料页现在合并了速览与资料表单，进页两件事都要准备
+        if (k === "profile") {
+          fillGalProfileFromEntry();
+          if (!galSummary.value) { loadGalSummary(); }
+        }
       }
       // 速览：入库日期 / 首次被抽 / 累计被抽 / 立绘数 / 平均生成耗时（/char/summary）
       var galSummary = Vue.ref(null);
@@ -6171,6 +6553,36 @@
       var galAvatarUploadOpen = Vue.ref(false);
       var galAvatarNote = Vue.ref("");
       var galAvatarPickOpen = Vue.ref(false);
+      // v0.42.0：AI 生成头像弹窗——默认图生图 + 默认指定图源，结果预览后
+      // 由用户决定是否替换；生成期间全程锁按钮，前一张没完成不能重复提交。
+      var galAvatarGenOpen = Vue.ref(false);
+      var avatarGenMode = Vue.ref("i2i");
+      var avatarGenSrc = Vue.ref("");
+      var avatarGenResult = Vue.ref(null);
+      var avatarGenApplying = Vue.ref(false);
+      var avatarGenSrcLabel = Vue.computed(function () {
+        var s = String(avatarGenSrc.value || "");
+        if (!s) { return "（暂无可用图源）"; }
+        var designated = [galDrawRefAbs.value, galDrawRef.value, galMainRef.value];
+        return designated.indexOf(s) >= 0 ? "指定图源（主参考 / 出卡源）" : "第一张可用图";
+      });
+      function pickDefaultAvatarSrc() {
+        var src = genSources.value || [];
+        if (!src.length) { avatarGenSrc.value = ""; return; }
+        var paths = src.map(function (g) { return g.path; });
+        var prefer = [galDrawRefAbs.value, galDrawRef.value, galMainRef.value];
+        var pick = "";
+        for (var i = 0; i < prefer.length; i++) {
+          if (prefer[i] && paths.indexOf(prefer[i]) >= 0) { pick = prefer[i]; break; }
+        }
+        avatarGenSrc.value = pick || paths[0];
+      }
+      function openAvatarGen() {
+        if (!galCharId.value || galAvatarBusy.value) { return; }
+        pickDefaultAvatarSrc();
+        avatarGenResult.value = null;
+        galAvatarGenOpen.value = true;
+      }
       var galAvBatchOpen = Vue.ref(false);
       var galAvBatch = Vue.ref(null);
       var galAvBatchTimer = null;
@@ -6197,7 +6609,7 @@
       }
       function openAvatarPick() {
         if (!genSources.value.length) {
-          message.warning("该角色还没有立绘 / 参考图：先去「概览」生成或「参考图」上传");
+          message.warning("该角色还没有立绘 / 参考图：先去「立绘」补图或「参考图」上传");
           return;
         }
         galAvatarPickOpen.value = true;
@@ -6221,22 +6633,77 @@
         } catch (e) { /* 已提示 */ }
       }
       async function doAvatarGenerate() {
-        if (!galCharId.value || galAvatarBusy.value) return;
+        if (!galCharId.value || galAvatarBusy.value) { return; }
+        var mode = avatarGenMode.value === "t2i" ? "t2i" : "i2i";
+        var ref = mode === "i2i" ? String(avatarGenSrc.value || "") : "";
+        if (mode === "i2i" && !ref) {
+          message.warning("图生图需要先选一张图源，或切换到文生图");
+          return;
+        }
+        // v0.42.0：busy 必须从提交一直锁到 job 完成/失败。旧版写在 finally 里，
+        // 而 pollJob 只是注册回调（并不 await），API 一返回就解锁 → 用户连点能
+        // 堆出一串并发头像任务。现在只在两个回调里释放，且 settled 防重复。
         galAvatarBusy.value = true;
+        avatarGenResult.value = null;
+        var settled = false;
+        var finish = function () {
+          if (settled) { return; }
+          settled = true;
+          galAvatarBusy.value = false;
+        };
         try {
-          var res = await apiPost("avatar/generate", { id: galCharId.value });
+          // apply:false → 后端只出候选图（不写条目），替换由用户在弹窗里确认
+          var res = await apiPost("avatar/generate",
+            { id: galCharId.value, mode: mode, ref: ref, apply: false });
           var jobId = (res && res.job_id) || "";
-          if (!jobId) { return; }
-          pollJob(jobId, async function (st) {
-            if (st && st.thumb) { galAvatarThumb.value = st.thumb; }
-            message.success("头像已生成");
-            await loadGalSummary();
+          if (!jobId) { finish(); return; }
+          pollJob(jobId, function (st) {
+            finish();
+            avatarGenResult.value = {
+              thumb: (st && st.thumb) || "",
+              file: (st && (st.pending || st.avatar)) || "",
+              mode: mode
+            };
+            message.success("头像已生成，请在弹窗里决定是否替换");
           }, function (why) {
+            finish();
             message.error("头像生成失败：" + why);
           });
-        } catch (e) { /* 已提示 */ }
-        finally { galAvatarBusy.value = false; }
+        } catch (e) {
+          finish();
+        }
       }
+      async function applyAvatarResult() {
+        var r = avatarGenResult.value;
+        if (!r || !r.file || avatarGenApplying.value) { return; }
+        avatarGenApplying.value = true;
+        var file = r.file;
+        try {
+          await apiPost("pools/avatar_set", { id: galCharId.value, file: file });
+          // 候选文件用完即清，别在 avatars/ 里攒垃圾
+          try { await apiPost("avatar/discard", { file: file }); } catch (e2) { /* 忽略 */ }
+          message.success("头像已替换");
+          avatarGenResult.value = null;
+          galAvatarGenOpen.value = false;
+          await loadGalSummary();
+        } catch (e) { /* 已提示 */ }
+        finally { avatarGenApplying.value = false; }
+      }
+      async function discardAvatarResult() {
+        var r = avatarGenResult.value;
+        if (r && r.file) {
+          try { await apiPost("avatar/discard", { file: r.file }); } catch (e) { /* 忽略 */ }
+        }
+        avatarGenResult.value = null;
+      }
+      Vue.watch(galAvatarGenOpen, function (open) {
+        // 直接关弹窗 = 放弃未采用的候选（已走 applyAvatarResult 时 result 已清空）
+        if (!open && avatarGenResult.value && avatarGenResult.value.file) {
+          apiPost("avatar/discard", { file: avatarGenResult.value.file })
+            .catch(function () { /* 静默 */ });
+          avatarGenResult.value = null;
+        }
+      });
       async function startAvatarBatch() {
         try {
           var res = await apiPost("avatars/batch", {});
@@ -7062,6 +7529,7 @@
       var dbgStateLoading = Vue.ref(false);
       var dbgRecent = Vue.ref([]);
       var dbgAudit = Vue.ref([]);
+      var dbgQueries = Vue.ref([]);   // v0.42.0：完整查询历史（带时间）
       var dbgConfigLabels = {
         timezone: "时区", salt: "种子盐（脱敏）", reroll_daily_limit: "每日换老婆次数",
         portraits_per_char: "每角色立绘配额", allow_unverified: "未验证角色可抽",
@@ -7104,10 +7572,17 @@
           var res = await apiGet("debug/history", { limit: 40 });
           dbgRecent.value = (res && res.recent) || [];
           dbgAudit.value = (res && res.audit) || [];
+          dbgQueries.value = (res && res.queries) || [];
         } catch (e) { /* 已提示 */ } finally {
           dbgAuditLoading.value = false;
         }
       }
+      // v0.42.0：进调试页就拉历史。旧版只在切到「操作审计」页签时拉，
+      // 停在默认的「状态与修签」时 recent / queries 一直是空的，看起来就像
+      // 「搜索历史记录没了」。watch 覆盖 setMenu 与服务端页签记忆两条路径。
+      Vue.watch(menu, function (k) {
+        if (k === "debug") { loadDebugHistory(); }
+      });
       function pickRecentUser(uid) { dbgStateUid.value = uid; loadDebugState(); }
       async function loadDebugState() {
         if (!dbgStateUid.value) { message.error("请输入用户 ID"); return; }
@@ -7116,6 +7591,8 @@
           var res = await apiGet("debug/state", { uid: dbgStateUid.value });
           dbgState.value = res || null;
           if (res) { fetchAvatar(dbgStateUid.value); }
+          // 每次查询后立刻刷新查询历史，标签与列表都是最新的
+          loadDebugHistory();
           // 星语式上下文：查到谁，下面所有面板就默认对谁操作，不用重复填 QQ / 角色。
           // 用户仍可手动改输入框去操作别的目标。
           if (res) {
@@ -7205,25 +7682,15 @@
             message.success("已强制换签 " + uid + "：nonce=" +
                             (res && res.row ? res.row.nonce : "?") + "，下次抽签出新角色");
           } else if (kind === "clear_today") {
+            // v0.42.0：「重置」= 纯删今日签，绝不碰立绘。
+            // 旧版会顺手调「重试当日生成」端点，后者按 (char_id, date) 批量删
+            // 当日立绘——批量补图时同一天能攒十几张，一次重置全没了（用户实报）。
+            // 想重画今天的立绘请用「重试今日老婆立绘」（后端已收敛成最多一张）。
             res = await apiPost("debug/clear_draws", { user_id: uid, date: today });
-            // v0.19.6：重置要「真重来」——顺手把该角色**今天已生成的那张立绘**
-            // 也移入回收站。否则下次抽到同一角色会命中「当日复用立绘」（判断的是
-            // portraits 表里该角色当天的立绘，与这个 QQ 的签无关），用户实报
-            // 「重置了还是有今日记录、不图生图、不重新生成」。
-            var pr = null;
-            if (row && row.char_id) {
-              try {
-                pr = await apiPost("debug/reset_char_day",
-                                   { char_id: row.char_id, date: today });
-              } catch (e2) { /* 已提示；不挡主流程 */ }
-            }
             message.success("已重置今日签 " + uid + "（删除 " +
                             ((res && res.cleared) || 0) + " 条，卡图进回收站 " +
-                            ((res && res.cards_trashed) || 0) + " 张；" +
-                            (row && row.char_name ? row.char_name : "该角色") +
-                            " 今日立绘也移入回收站 " +
-                            ((pr && pr.files_trashed) || 0) +
-                            " 张。统计次数已扣减、种子已重派，下次抽取会重新生成）");
+                            ((res && res.cards_trashed) || 0) +
+                            " 张；立绘库不受影响。统计次数已扣减、种子已重派）");
           } else if (kind === "clear_all_draws") {
             // v0.19.5：不带 date = 清该用户所有日期的签（用户口径：清「所选 QQ 用户
             // 抽取的老婆记录」）；卡图进回收站，可找回
@@ -7328,7 +7795,9 @@
         if (!armDelete("dbg:clrport")) return;
         dbgBusy.value = true;
         try {
-          var res = await apiPost("debug/clear_portraits", { char_id: dbgChar2.value });
+          // 后端要求 confirm=true（防误调）；这里前端已有 armDelete 两段确认
+          var res = await apiPost("debug/clear_portraits",
+                                  { char_id: dbgChar2.value, confirm: true });
           message.success("已清空 " + charNameOf(dbgChar2.value) + " 的立绘库（删文件 " +
                           ((res && res.files_deleted) || 0) + "/" +
                           ((res && res.cleared) || 0) + "），配额自动补生会从 0 重建");
@@ -7477,6 +7946,24 @@
       var configItems = Vue.ref([]);
       var configModel = Vue.ref({});
       var configSaving = Vue.ref(false);
+      // v0.42.0：悬浮保存条要能提示「有未保存的修改」，基线取 loadConfig 的快照
+      var configBaseline = {};
+      var configDirty = Vue.computed(function () {
+        var items = configItems.value || [];
+        for (var i = 0; i < items.length; i++) {
+          var k = items[i].key;
+          var cur = configModel.value[k] === undefined ? "" : configModel.value[k];
+          var old = configBaseline[k] === undefined ? "" : configBaseline[k];
+          if (String(cur) !== String(old)) { return true; }
+        }
+        return false;
+      });
+      function scrollToConfigSection(title) {
+        var el = document.getElementById("cfg-sec-" + title);
+        if (el && el.scrollIntoView) {
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
       // 卡片网格列数（v0.5.11）：全局配置 ui_grid_cols，角色库/作品库/立绘库跟随；
       // 配置未装载或非法值时回落 4，钳制在 2~10
       var uiCols = Vue.computed(function () {
@@ -7494,6 +7981,7 @@
           var n = Math.min(10, Math.max(2, Math.round(Number(v) || 4)));
           apiPost("config", { values: { ui_grid_cols: n } }).then(function () {
             configModel.value["ui_grid_cols"] = n;  // 配置页模型同步
+            configBaseline["ui_grid_cols"] = n;     // 已即时写盘，不算未保存修改
           }).catch(function () { /* 已提示；computed 未写 → 下拉弹回原值 */ });
         }
       });
@@ -7521,6 +8009,7 @@
             var m = {};
             configItems.value.forEach(function (it) { m[it.key] = it.value; });
             configModel.value = m;
+            configBaseline = Object.assign({}, m);   // 保存/重载后清空脏标记
             if (res.timezone) { cfgTimezone.value = String(res.timezone); }
             cfgBoundGroups.value = Array.isArray(res.bound_groups) ? res.bound_groups : [];
           }
@@ -7691,6 +8180,9 @@
         }
       }
       loadAll().then(function () {
+        // v0.42.0：首屏也拉一次调试历史（服务端页签记忆恢复到 debug 时
+        // 不必依赖 watch 时机，查询历史一定不为空）
+        loadDebugHistory();
         return Promise.all([loadGallery(), loadConfig(), loadWorks(), loadWorkflows(),
                             loadLlmProviders(), loadThemes()]);
       });
@@ -7712,6 +8204,9 @@
         ovLoading: ovLoading, dbgAuditLoading: dbgAuditLoading,
         // v0.19.3：出图方式中文标签 + 「img2img 但没指定出卡源」提示
         ovGenModeLabel: ovGenModeLabel, ovNoSourceTip: ovNoSourceTip,
+        // v0.42.0：总览进度条
+        ovVerifiedPct: ovVerifiedPct, ovFullPct: ovFullPct,
+        ovWithPortraitPct: ovWithPortraitPct, ovDrawSrcPct: ovDrawSrcPct,
         meta: meta, loadingAll: loadingAll, loadAll: loadAll, rowKey: rowKey,
         charsMode: charsMode, cardPage: cardPage, cardPageSize: cardPageSize,
         pagedEntries: pagedEntries, gotoTryFromChars: gotoTryFromChars,
@@ -7816,7 +8311,8 @@
         trashPurgeText: trashPurgeText, loadTrash: loadTrash,
         doTrashRestoreOne: doTrashRestoreOne, doTrashRestoreGroup: doTrashRestoreGroup,
         doTrashPurgeGroup: doTrashPurgeGroup, doTrashPurgeAll: doTrashPurgeAll,
-        dbgRecent: dbgRecent, dbgAudit: dbgAudit, dbgConfigRows: dbgConfigRows,
+        dbgRecent: dbgRecent, dbgAudit: dbgAudit, dbgQueries: dbgQueries,
+        dbgConfigRows: dbgConfigRows,
         loadDebugState: loadDebugState, loadDebugHistory: loadDebugHistory,
         pickRecentUser: pickRecentUser, doQuickAction: doQuickAction,
         doClearCharPortraits: doClearCharPortraits,
@@ -7867,6 +8363,12 @@
         galAvatarPickOpen: galAvatarPickOpen, openAvatarPick: openAvatarPick,
         doAvatarSet: doAvatarSet, avatarClear: avatarClear,
         doAvatarGenerate: doAvatarGenerate, onAvatarPanelFiles: onAvatarPanelFiles,
+        // v0.42.0：头像生成弹窗
+        galAvatarGenOpen: galAvatarGenOpen, openAvatarGen: openAvatarGen,
+        avatarGenMode: avatarGenMode, avatarGenSrc: avatarGenSrc,
+        avatarGenSrcLabel: avatarGenSrcLabel, avatarGenResult: avatarGenResult,
+        avatarGenApplying: avatarGenApplying,
+        applyAvatarResult: applyAvatarResult, discardAvatarResult: discardAvatarResult,
         galAvBatchOpen: galAvBatchOpen, galAvBatch: galAvBatch,
         startAvatarBatch: startAvatarBatch, stopAvatarBatch: stopAvatarBatch,
         galFillBusy: galFillBusy, galFillLabel: galFillLabel,
@@ -7896,6 +8398,7 @@
         galSort: galSort, galItemsView: galItemsView,
         // v0.21.0：软删除（停用/恢复/彻底删除）
         galShowDisabled: galShowDisabled, galDisabledCount: galDisabledCount,
+        galActiveCount: galActiveCount,
         // v0.26.1：批量停用 / 启用
         galBulk: galBulk, galSel: galSel, galSelCount: galSelCount,
         toggleGalBulk: toggleGalBulk, toggleGalSel: toggleGalSel,
@@ -7936,6 +8439,7 @@
         removeBindRow: removeBindRow,
         doSaveBind: doSaveBind,
         configSections: configSections, configModel: configModel, configSaving: configSaving,
+        configDirty: configDirty, scrollToConfigSection: scrollToConfigSection,
         uiCols: uiCols, colOpts: colOpts, uiColsSel: uiColsSel,
         saveConfig: saveConfig, optOpts: optOpts, isMulti: isMulti,
         isWorkflowKey: isWorkflowKey, wfOpts: wfOpts,

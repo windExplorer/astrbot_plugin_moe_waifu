@@ -3001,7 +3001,10 @@ async def h_overview(plugin) -> dict:
                 if e:
                     entries.append(e)
         quota = max(1, int(plugin._cfg("portraits_per_char", 5) or 5))
-        portraits = plugin._store.list_portraits_all() if plugin._store else []
+        all_portraits = plugin._store.list_portraits_all() if plugin._store else []
+        # v0.42.0：总览的「立绘」只数启用中的行——停用图不占配额、不参与抽卡，
+        # 把它算进总数会让「已满配额的角色」和配额完成度看着对不上（用户口径）。
+        portraits = [r for r in all_portraits if int(r.get("active") or 0) == 1]
         by_char = {}
         for row in portraits:
             by_char[row["char_id"]] = by_char.get(row["char_id"], 0) + 1
@@ -3040,6 +3043,9 @@ async def h_overview(plugin) -> dict:
             "verified": sum(1 for e in entries if e["verified"]),
             "portraits": len(portraits),
             "chars_full": sum(1 for n in by_char.values() if n >= quota),
+            # v0.42.0：总览页配额完成度 / 停用统计（前端进度条用）
+            "chars_with_portrait": len(by_char),
+            "portraits_disabled": len(all_portraits) - len(portraits),
             "refs_bound": refs_bound, "orphans": len(_orphan_items(plugin)),
             "draw_sources": draw_sources, "no_source": no_source[:6],
             "today_draws": today_draws, "total_draws": total_draws,
@@ -3451,8 +3457,12 @@ async def h_debug_force_reroll(plugin) -> dict:
 
 
 async def h_debug_reset_char_day(plugin) -> dict:
-    """重试某角色当日生成：删当日立绘行与文件、清指向它的签卡路径，
-    下次有人抽到该角色即重新生成。"""
+    """重试某角色当日生成：**只**清与该签关联的那一张当日立绘、清卡路径。
+
+    v0.42.0：底层 `store.reset_char_day` 已收敛成「最多删一行」——批量补图会让
+    同一角色当天有十几张立绘，旧版按 `date` 批量删会把整面墙清空。本端点
+    只服务于「重试今日老婆立绘」，与「重置今日记录」（纯删签）彻底解耦。
+    """
     if not plugin._store:
         return err("插件未初始化完成")
     body = await _body()
@@ -3892,7 +3902,9 @@ async def h_debug_history(plugin) -> dict:
     limit = _int_clamp(body.get("limit") or _q("limit", 30), 30, 1, 200)
     recent = await asyncio.to_thread(plugin._store.debug_recent, 8)
     audit = await asyncio.to_thread(plugin._store.debug_audit, limit)
-    return ok({"recent": recent, "audit": audit})
+    # v0.42.0：补完整查询流水（调试页「查询历史」列表），不只是去重 uid 标签
+    queries = await asyncio.to_thread(plugin._store.debug_queries, min(limit, 30))
+    return ok({"recent": recent, "audit": audit, "queries": queries})
 
 
 async def h_debug_simulate(plugin) -> dict:
@@ -4475,58 +4487,86 @@ async def h_avatar_clear(plugin) -> dict:
     return ok({"pack": pack})
 
 
-async def generate_avatar_for(plugin, entry: dict, workflow: str = "") -> tuple:
+async def generate_avatar_for(plugin, entry: dict, workflow: str = "",
+                              mode: str = "", ref: str = "",
+                              apply: bool = True) -> tuple:
     """生成单个角色头像并落盘（单发 job 与批量队列共用），返回 (rel, w, h)。
 
-    画法选择：条目是 img2img 且有显式生成源（ref / gen_refs / draw_ref）→
-    走 comfyui_img2img + 固定「头像特写」编辑指令（身份锚定最强）；
-    否则按条目画法走 comfyui_draw 文生图，提示词按底模风格拼
-    （detect_t2i_style 与立绘链同源）。产物统一裁方形。
+    v0.42.0 三条口径（工坊「生成头像」弹窗）：
+    - `mode="i2i"` 强制图生图，`ref` 指定图源（空则自动挑主参考 / 出卡源）；
+      `mode="t2i"` 强制文生图；空 = 沿用条目画法。
+    - `apply=False` 产物落到 `avatars/_pending_<cid>_<ts>.png` 且**不写条目**，
+      由前端预览后决定要不要调 /pools/avatar_set 替换（结果可选是否替换）。
+    - 批量队列始终 apply=True（没有预览环节）。
     """
     cid = str(entry.get("id") or "").strip()
     if not cid:
         raise RuntimeError("条目缺 id")
     cfg = plugin._draw_cfg()
     data_dir = str(plugin._data_dir or "")
+    want_i2i = str(mode or "").strip().lower() == "i2i"
+    want_t2i = str(mode or "").strip().lower() == "t2i"
     prompt = ""
     use_entry = entry
-    if str(entry.get("strategy_type") or "base") == "img2img":
-        st = entry.get("strategy") or {}
+    st = entry.get("strategy") or {}
+    # 图生图：条目本身是 img2img，或本次在弹窗里显式选了「图生图」
+    if not want_t2i and (want_i2i
+                         or str(entry.get("strategy_type") or "base") == "img2img"):
         gen = draw.gen_refs(st, data_dir)
-        ref = draw.explicit_ref(st, data_dir) or draw.draw_source(entry, data_dir)
-        if ref and ref not in gen:
-            gen.insert(0, ref)
+        picked = draw._ref_path(str(ref), data_dir) if str(ref or "").strip() else ""
+        if picked and picked not in gen:
+            gen.insert(0, picked)
+        if not gen:
+            fallback = (draw.explicit_ref(st, data_dir)
+                        or draw.draw_source(entry, data_dir))
+            if fallback:
+                gen.insert(0, fallback)
         if gen:
             use_entry = draw.effective_entry(
                 entry, {"strategy_type": "img2img", "ref": gen[0], "refs": gen})
             prompt = avatars.I2I_INSTRUCTION
+        elif want_i2i:
+            raise RuntimeError(
+                "图生图生成头像需要先选一张图源（主参考 / 出卡源 / 立绘）")
     if not prompt:
+        # 强制文生图：把 img2img 条目临时改成 base，否则 generate_portrait
+        # 会按 strategy_type 走 comfyui_img2img 并把参考图喂进去
+        if want_t2i and str(use_entry.get("strategy_type") or "") == "img2img":
+            use_entry = draw.effective_entry(use_entry, {"strategy_type": "base"})
         style = prompt_gen.detect_t2i_style(
             plugin.context, prompt_gen.effective_workflow(use_entry, cfg))
         prompt = avatars.build_avatar_prompt(use_entry, style)
-    ov = {}
     wf = str(workflow or "").strip()
     if wf:
-        ov = {"workflow": wf, "img2img_workflow": wf}
-        use_entry = draw.effective_entry(use_entry, ov)
+        use_entry = draw.effective_entry(
+            use_entry, {"workflow": wf, "img2img_workflow": wf})
     seed = int(time.time() * 1000) % (2 ** 31)
     src, status, err, _dur = await draw.generate_portrait(
         plugin.context, cfg, use_entry, seed, _synthetic_event(), prompt=prompt)
     if src is None:
         raise RuntimeError(str(err or status or "萌绘生成失败"))
-    dst = _avatar_abs(plugin, cid)
+    if apply:
+        dst = _avatar_abs(plugin, cid)
+        rel = avatars.avatar_rel(cid)
+    else:
+        stamp = int(time.time() * 1000)
+        rel = (f"{avatars.AVATAR_DIR}/_pending_"
+               f"{avatars.safe_avatar_name(cid)}_{stamp}.png")
+        dst = Path(plugin._data_dir) / rel
     w, h = avatars.crop_square(src, dst)
-    rel = avatars.avatar_rel(cid)
+    if apply:
+        def mutate(_e, raw):
+            raw["avatar"] = rel
 
-    def mutate(_e, raw):
-        raw["avatar"] = rel
-
-    _set_entry_field(plugin, cid, mutate)
+        _set_entry_field(plugin, cid, mutate)
     return rel, w, h
 
 
 async def h_avatar_generate(plugin) -> dict:
-    """单发头像生成：后台 job + 前端轮询 /jobs/status（kind=avatar）。"""
+    """单发头像生成：后台 job + 前端轮询 /jobs/status（kind=avatar）。
+
+    v0.42.0：支持 mode=i2i|t2i、ref=指定图源、apply=false（只出候选不替换）。
+    """
     body = await _body()
     cid = str(body.get("id") or "").strip()
     if not cid:
@@ -4535,6 +4575,11 @@ async def h_avatar_generate(plugin) -> dict:
     if entry is None:
         return err(f"角色库里找不到「{cid}」")
     workflow = str(body.get("workflow") or "").strip()
+    mode = str(body.get("mode") or "").strip().lower()
+    if mode not in ("", "i2i", "t2i"):
+        return err("mode 只能是 i2i / t2i")
+    ref = str(body.get("ref") or "").strip()
+    apply = body.get("apply", True) is not False
     job_id = f"avatar:{cid}:{int(time.time() * 1000)}"
     plugin._jobs[job_id] = {"status": "queued", "kind": "avatar", "char_id": cid,
                             "entry_label": pool.entry_label(entry), "src_path": "",
@@ -4542,19 +4587,47 @@ async def h_avatar_generate(plugin) -> dict:
     _prune_jobs(plugin)
     # v0.34.0：头像生成同样进出图串行队列（与生成立绘共用，互不并发）
     pos = _draw_queue(plugin).enqueue(
-        job_id, functools.partial(_run_avatar_job, plugin, job_id, entry, workflow))
+        job_id, functools.partial(_run_avatar_job, plugin, job_id, entry,
+                                  workflow, mode, ref, apply))
     return ok({"job_id": job_id, "label": pool.entry_label(entry),
-               "queued": True, "queue_pos": pos})
+               "queued": True, "queue_pos": pos,
+               "mode": mode or "auto", "applied": apply})
 
 
-async def _run_avatar_job(plugin, job_id: str, entry: dict, workflow: str) -> None:
+async def h_avatar_discard(plugin) -> dict:
+    """丢弃未采用的头像候选（只清 avatars/_pending_*，绝不碰正式头像）。"""
+    body = await _body()
+    rel = str(body.get("file") or "").strip()
+    if not rel:
+        return ok({"removed": 0})
+    p = Path(rel)
+    if p.parent.as_posix() != avatars.AVATAR_DIR \
+            or not p.name.startswith("_pending_"):
+        return err("只能丢弃本次生成的候选文件")
+    fp = Path(plugin._data_dir) / avatars.AVATAR_DIR / p.name
+    if not fp.is_file():
+        return ok({"removed": 0})
+    try:
+        fp.unlink()
+    except OSError as exc:
+        return err(f"清理候选文件失败：{exc}")
+    return ok({"removed": 1})
+
+
+async def _run_avatar_job(plugin, job_id: str, entry: dict, workflow: str,
+                          mode: str = "", ref: str = "",
+                          apply: bool = True) -> None:
     job = plugin._jobs.get(job_id, {})
     job["status"] = "running"   # v0.34.0：worker 真正开跑时才置 running
     t0 = time.monotonic()
     try:
-        rel, w, h = await generate_avatar_for(plugin, entry, workflow=workflow)
+        rel, w, h = await generate_avatar_for(
+            plugin, entry, workflow=workflow, mode=mode, ref=ref, apply=apply)
+        fp = _safe_data_file(plugin, rel)
         job.update({"status": "ok", "avatar": rel, "width": w, "height": h,
-                    "thumb": _thumb_data_url(_avatar_abs(plugin, entry["id"]), 240),
+                    "thumb": _thumb_data_url(fp, 240) if fp else None,
+                    "applied": bool(apply),
+                    "pending": "" if apply else rel,
                     "duration_ms": int((time.monotonic() - t0) * 1000)})
     except Exception as exc:
         job.update({"status": "error", "error": str(exc)[:200],
@@ -4645,6 +4718,7 @@ def register(plugin) -> None:
         ("/pools/avatar_set", h_avatar_set, ["POST"]),
         ("/pools/avatar_clear", h_avatar_clear, ["POST"]),
         ("/avatar/generate", h_avatar_generate, ["POST"]),
+        ("/avatar/discard", h_avatar_discard, ["POST"]),
         ("/avatars/batch", h_avatars_batch, ["POST"]),
         ("/avatars/batch_status", h_avatars_batch_status, ["GET", "POST"]),
         ("/avatars/batch_stop", h_avatars_batch_stop, ["POST"]),

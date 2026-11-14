@@ -1215,17 +1215,38 @@ class Store:
         self._conn.commit()
 
     def reset_char_day(self, char_id: str, date: str) -> dict:
-        """重试某角色当日生成：删当日立绘行 + 清指向它的签卡路径。
+        """重试某角色当日生成：**最多只清一张**当日立绘行 + 清指向它的签卡路径。
 
-        返回 {removed_files, cleared_draws}（文件由调用方删）。
+        v0.42.0 事故修复：旧实现按 char_id + date 批量删立绘行（没有行数上限）。
+        批量补图 / 手工补图会让同一角色当天攒下十几张立绘（date
+        全是今天），调试页「重置今日记录」顺手调一次就把整面立绘墙清空了——
+        用户实报「十几张立绘一次性被删没了，我只是要重置抽卡记录」。
+        现在优先删当日签 `draws.portrait_file` 指向的那一张；取不到就退化为当日
+        最后生成的一张。无论如何只删一行，误调的破坏面被钉死在一张图。
+
+        返回 {removed_files, cleared_draws}（文件由调用方移入回收站）。
         """
         rows = self._conn.execute(
-            "SELECT file FROM portraits WHERE char_id=? AND date=?", (char_id, date)
+            "SELECT id, file FROM portraits WHERE char_id=? AND date=?"
+            " ORDER BY seq DESC, created_at DESC, id DESC", (char_id, date)
         ).fetchall()
-        removed = [r["file"] for r in rows]
-        if removed:
-            self._conn.execute(
-                "DELETE FROM portraits WHERE char_id=? AND date=?", (char_id, date))
+        by_file = {r["file"]: r["id"] for r in rows}
+        target, target_id = "", None
+        if rows:
+            for r in self._conn.execute(
+                "SELECT portrait_file FROM draws WHERE char_id=? AND date=?"
+                " AND portrait_file<>''", (char_id, date),
+            ):
+                p = str(r["portrait_file"] or "")
+                if p in by_file:
+                    target, target_id = p, by_file[p]
+                    break
+            if target_id is None:
+                target, target_id = rows[0]["file"], rows[0]["id"]
+        removed = [target] if target else []
+        # 按自增主键删：同路径万一有重复行也只删一条，破坏面钉死在一张图
+        if target_id is not None:
+            self._conn.execute("DELETE FROM portraits WHERE id=?", (target_id,))
         cur = self._conn.execute(
             "UPDATE draws SET card_path='', updated_at=? WHERE char_id=? AND date=?",
             (_now(), char_id, date),
@@ -1623,6 +1644,18 @@ class Store:
     def debug_audit(self, limit: int = 40) -> list:
         rows = self._conn.execute(
             "SELECT * FROM debug_history WHERE kind<>'query'"
+            " ORDER BY id DESC LIMIT ?", (max(1, min(200, int(limit))),),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def debug_queries(self, limit: int = 20) -> list:
+        """最近的状态查询记录（v0.42.0：调试页「查询历史」列表）。
+
+        `debug_recent` 只有去重后的 8 个 uid 标签，用户反馈「搜索历史记录没了」——
+        补一条带时间、可点击回填的完整查询流水。
+        """
+        rows = self._conn.execute(
+            "SELECT * FROM debug_history WHERE kind='query'"
             " ORDER BY id DESC LIMIT ?", (max(1, min(200, int(limit))),),
         ).fetchall()
         return [dict(r) for r in rows]

@@ -88,7 +88,14 @@ def build_avatar_prompt(entry: dict, style: str) -> str:
     name = str(entry.get("name") or "").strip() or "该角色"
     tags = str(entry.get("tags_en") or "").strip().rstrip(",")
     if style == "qwen":
-        import prompt_gen
+        # v0.42.0：包内运行时必须用相对导入——顶层 `import prompt_gen`
+        # 在 AstrBot 插件包里会抛 No module named 'prompt_gen'（用户实报
+        # 「生成头像报错」）。本地平铺调试（tests 把插件目录塞进 sys.path）
+        # 才回落绝对导入，口径与 webui_api / batch_fill 顶部一致。
+        try:
+            from . import prompt_gen
+        except ImportError:  # pragma: no cover - 本地平铺调试
+            import prompt_gen
 
         segs = [f"一幅{str((entry.get('name') or '')).strip() or '该角色'}的方形头像插画。",
                 f"画面主体是{name}：头部与肩部的特写构图，人物面部居中、"
@@ -102,7 +109,14 @@ def build_avatar_prompt(entry: dict, style: str) -> str:
                     "细节精致，画面里只有这一个人物。")
         return "。".join(s.strip("。") for s in segs if s.strip()) + "。"
     if style == "natural":
-        import prompt_gen
+        # v0.42.0：包内运行时必须用相对导入——顶层 `import prompt_gen`
+        # 在 AstrBot 插件包里会抛 No module named 'prompt_gen'（用户实报
+        # 「生成头像报错」）。本地平铺调试（tests 把插件目录塞进 sys.path）
+        # 才回落绝对导入，口径与 webui_api / batch_fill 顶部一致。
+        try:
+            from . import prompt_gen
+        except ImportError:  # pragma: no cover - 本地平铺调试
+            import prompt_gen
 
         segs = ["best quality, highres, solo, portrait, close-up, face focus, "
                 "simple background, looking at viewer"]
@@ -170,7 +184,12 @@ class AvatarRunner:
         # webui_api 顶部不 import 本模块（避免循环依赖），这里延迟引用它的
         # 合成事件与落盘逻辑。
         try:
-            import webui_api
+            # v0.42.0：同 build_avatar_prompt——包内相对导入优先，
+            # 否则批量头像也会以 No module named 'webui_api' 整体失败。
+            try:
+                from . import webui_api
+            except ImportError:  # pragma: no cover - 本地平铺调试
+                import webui_api
 
             for i, e in enumerate(entries):
                 if self.stop_flag:

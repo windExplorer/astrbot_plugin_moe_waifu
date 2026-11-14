@@ -79,6 +79,10 @@ trashGroups trashBusy trashLoaded trashTotalFiles trashTotalSizeText
 trashPurgeText loadTrash doTrashRestoreOne doTrashRestoreGroup
 doTrashPurgeGroup doTrashPurgeAll
 dbgTabs dbgTab switchDbgTab
+ovVerifiedPct ovFullPct ovWithPortraitPct ovDrawSrcPct
+galActiveCount dbgQueries configDirty scrollToConfigSection
+galAvatarGenOpen openAvatarGen avatarGenMode avatarGenSrc avatarGenSrcLabel
+avatarGenResult avatarGenApplying applyAvatarResult discardAvatarResult
 """.split()
 
 ROUTES = """
@@ -99,14 +103,14 @@ ROUTES = """
 /pools/quote_save /quote_check
 /websearch/status
 /pools/profile_save /pools/profile_gen /char/summary
-/pools/avatar_set /pools/avatar_clear /avatar/generate
+/pools/avatar_set /pools/avatar_clear /avatar/generate /avatar/discard
 /avatars/batch /avatars/batch_status /avatars/batch_stop
 """.split()
 
 STORE_METHODS = """
 _migrate upsert_draw update_draw_card list_records record_detail list_events
 list_groups list_platforms list_users user_profile stats_range
-debug_log debug_recent debug_audit
+debug_log debug_recent debug_audit debug_queries reset_char_day
 """.split()
 
 

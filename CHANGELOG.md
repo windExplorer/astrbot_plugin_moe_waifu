@@ -2,6 +2,33 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.42.0 (2026-11-14)
+
+- **工坊改版 + 四个旧问题挖根因**（用户一轮提了 11 条：图生图默认图源 / 角色图库 / 头像生成报错与预览 / 立绘启用停用计数 / 顶部固定 / 速览与资料合并 / tab 与总览样式 / 配置悬浮保存 / 抽卡提示别提绘图 / 重置误删十几张立绘 / 调试搜索历史消失）。按「现象 → 根因 → 修复」分四条记，尤其第 ② 条是数据事故，别只当 UI 小改。
+
+- **① 生成头像报 `No module named 'prompt_gen'`；还要能选文生图/图生图、结果自己决定要不要替换、生成期间不能连点**：
+  - **根因**：`avatars.py` 的 `build_avatar_prompt` 在 qwen / natural 两分支写的是顶层绝对导入 `import prompt_gen`（批量队列 `AvatarRunner._run` 的 `import webui_api` 同病）。AstrBot 以包形式装载插件时 `sys.path` 上只有 `data.plugins.<名>.prompt_gen`，没有顶层模块；danbooru 分支不 import，所以只有部分底模风格会炸，看起来像「偶尔报错」。自检脚本一律 `sys.path.insert(0, 插件目录)` 平铺导入，把这条链路掩盖了整整一个版本。另：`doAvatarGenerate` 把 `galAvatarBusy.value = false` 写进 `finally`，而 `pollJob` 只是注册回调、并不 `await` —— API 一返回就解锁，loading 一闪而过，连点能堆出一串并发头像任务。
+  - **修复**：①三处绝对导入统一改成 `try: from . import X` + `except ImportError: import X`（包内相对优先，本地平铺调试仍能跑），与 `webui_api` / `batch_fill` 顶部口径一致；②新增**「AI 生成头像」弹窗**：默认图生图、默认用指定图源（出卡源 / 主参考，没有则第一张），可切文生图、可手选图源；③后端 `generate_avatar_for` 新增 `mode=i2i|t2i` / `ref` / `apply`，`apply=false` 时产物只落 `avatars/_pending_<id>_<ts>.png` **不写条目**，弹窗里先预览（当前 / 本次并排），由用户点「替换当前头像」（复用 `/pools/avatar_set`）或放弃，新增 `/avatar/discard` 只清 `_pending_*` 候选；强制文生图会把 img2img 条目临时切 `base`，否则 `generate_portrait` 按 `strategy_type` 会误走 `comfyui_img2img`；④busy 只在 `pollJob` 成功 / 失败回调里释放 + `settled` 防重，按钮同时 `:loading` + `:disabled`。批量头像队列仍 `apply=true`（没有预览环节）。
+
+- **② 调试页点「重置」把今日角色的十几张立绘一次删光（数据事故）**：
+  - **现象**：用户只想重置某个 QQ 的抽卡记录，结果该角色的立绘墙全空了，和 v0.19.5 那次「清空老婆立绘库」事故观感一样但入口完全不同。
+  - **根因**：两层叠加。前端 `doQuickAction('clear_today')` 删完签会「顺手」再调 `debug/reset_char_day`（v0.19.6 为了绕开「重置后仍当日复用立绘」加的）；后端 `store.reset_char_day` 的删除条件是 `DELETE FROM portraits WHERE char_id=? AND date=?` —— **按日期批量删**。批量补图 / 手工补图会让同一角色当天攒下十几张立绘（`date` 全是今天），一次「重置」全命中。文件被 `_trash_files` 移进回收站（没硬删，可还原），但库行全没、界面看起来就是「没了」。
+  - **修复**：①前端「重置」彻底解耦，只调 `debug/clear_draws`，**不碰任何立绘**；说明文案与成功提示同步改成「立绘库不受影响」，并给出「之前误删的图在回收站按时间戳还原」的找回路径；②`store.reset_char_day` 收敛成**按自增主键最多删一行**——优先删当日签 `draws.portrait_file` 指向的那张，取不到才退化为当日最后生成的一张，误调的破坏面钉死在一张图，服务「重试今日老婆立绘」本来的语义；③顺手修「高级」区清空立绘库漏传 `confirm: true`（后端必然拒绝，按钮一直无效）。守卫 `test_ui_v042` 用真 SQLite 造 5 张同日立绘验证只删 1 张、其余 4 张仍在。
+
+- **③ 抽卡提示抖出绘图细节 / 调试页搜索历史消失**：
+  - **根因**：`main.py` 的 `_I2I_LINES` 是给内部出图决策 `generate_i2i` 配的专属台词（「今日这一签要照着参考图画，稍等片刻～」等三句），`_summon_line` 按 decision 分支把它发到了群里；`_SUMMON_LINES` 里还有一句「画完马上发你～」。调试页的 `loadDebugHistory` 只在切到「操作审计」页签时调用，默认停在「状态与修签」时 `dbgRecent` 恒为空，且历史只有 8 个去重 uid 小标签、没有带时间的列表。
+  - **修复**：删除 `_I2I_LINES` 与按 decision 分支，抽卡播报统一走纯抽卡口径（守卫用 AST 抠出常量逐句扫「画/绘/参考图/出图/生图」）；后端 `h_debug_history` 补 `queries`（新增 `store.debug_queries`，带时间与 uid），前端新增「查询历史」卡、进调试页 / 首屏 / 查完状态都会拉历史（`Vue.watch(menu)` + `loadAll().then` 兜底）。
+
+- **④ 角色详情页与全站样式（其余 7 条）**：
+  - **图生图默认图源**：新增 `ensureDefaultGenSource()`，优先级 出卡源（`galDrawRefAbs`/`galDrawRef`）→ 主参考（`galMainRef`）→ `genSources` 第一张；在切模式 / 数据到位 / 开生成面板 / 提交四个入口兜底，用户主动清空后不会被立刻强行补回。
+  - **图库页签**：角色详情新增「图库」，一屏汇总头像 / 参考图 / 立绘（含停用置灰与封面标记），只读总览，管理操作仍留在各自页签避免两处抢状态。
+  - **立绘计数口径**：新增 `galActiveCount`，详情页头部 / 页签 / 速览 / 配额行全部改用启用中的数量，停用的单独标注「不占配额」；总览 `/overview` 的 `portraits` 也改成只数 `active=1`，并补 `chars_with_portrait` / `portraits_disabled` 供进度条使用。
+  - **速览并入资料**：删掉独立的「概览」页签，速览卡 + 头像 + 角色资料 + 印象语合并为「资料」页，默认页签改为 `profile`，旧的「去概览生成」文案改成「立绘」。
+  - **顶部固定**：滚动容器仍是 `.page-scroll`，新增 `.sticky-head`（角色详情头部+页签、调试页签、配置工具条+锚点，负 margin 撑满 + 不透明背景 + 底部阴影）与 `.sticky-tools`（角色库 / 作品库 / 试画台 / 抽签记录 / 数据统计 / 用户查询的工具行，只钉住不改 display）。
+  - **tab 与配色**：胶囊药丸（`border-radius: 999px`）换成顶部圆角分段 + 渐变下划线指示条，引入 `--wf-brand` / `--wf-brand-2`（粉→紫）/ `--wf-bg` / `--wf-surface` CSS 变量，暗色由 `html.is-dark` 切换。总览加渐变横幅、四张带图标与进度条的指标卡、配额/立绘/验证/出卡源四项完成度、卡片式快捷入口。
+  - **配置页**：分区加锚点跳转（`.cfg-sec` + `scroll-margin-top`）+ 左侧渐变色条；保存按钮移到右下角**悬浮固定条**（`position: fixed`），带 `configDirty` 未保存提示与「放弃修改」，改哪一项都不用滚回页首。
+  - 守卫：新增 `tests/test_ui_v042.py`（AST 抠抽卡常量、包内导入桩测、头像生成链路真跑桩测、reset 真 SQL、CRLF 行尾、11 条改动的静态断言），`test_webui_contract` 的 BINDINGS / ROUTES / STORE_METHODS 同步补齐。26 个脚本式自检全过（`uv run --no-project --python 3.12 --with aiohttp --with pillow`）。
+
 ## v0.41.0 (2026-11-14)
 
 - **新功能：完整场景主题包（scene_，整套构图手动选用）**（用户参考图「女仆踩凳穿高跟鞋 + 白蕾丝过膝袜 + 吊袜带」这类组合，维度池各自随机永远摇不出来）：
