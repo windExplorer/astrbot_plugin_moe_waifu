@@ -282,10 +282,9 @@ class MoeWaifuPlugin(Star):
         if existing:
             card_path = str(existing.get("card_path") or "")
             if card_path and Path(card_path).is_file():
-                yield event.chain_result([
-                    Image.fromFileSystem(card_path),
-                    Plain("这是你今天抽到的角色，明天可以再抽一位。"),
-                ])
+                # v0.51.1（用户）：重复抽只重发卡图，不带「明天可以再抽一位」
+                # 这类解释性文案——今天抽没抽过、要不要换老婆，用户自己清楚。
+                yield event.chain_result([Image.fromFileSystem(card_path)])
                 return
             # 卡图被清理过：立绘库里还有底图就重渲染一张（不重新生图）
             entry = pool.find_entry(self._load_packs(), existing["char_id"])
