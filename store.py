@@ -215,6 +215,12 @@ _MIGRATIONS = {
         "quote": "TEXT NOT NULL DEFAULT ''",
         "quotes_json": "TEXT NOT NULL DEFAULT '[]'",
         "color": "TEXT NOT NULL DEFAULT ''",
+        # v0.40.0：条目扩展字段兜底列（keep_headwear/keep_outerwear/
+        # keep_footwear 人设固装、profile、avatar、added_at 等）——固定列装
+        # 不下的字段整体进 JSON，读回时 overlay 回条目。此前「编辑保存 → 同步
+        # 入库 → 读回」会把非列字段整批丢掉（固装开关保存后重开是关的，根因
+        # 即此；profile / avatar / added_at 同样潜伏）。
+        "extra_json": "TEXT NOT NULL DEFAULT '{}'",
     },
     "draws": {
         "seed_hex": "TEXT NOT NULL DEFAULT ''",
@@ -657,11 +663,18 @@ class Store:
         single = str(raw.get("quote") or "").strip()
         if single and single not in quotes:
             quotes.insert(0, single)
+        # v0.40.0：非固定列字段（keep_* 人设固装 / profile / avatar / added_at
+        # / 未来的扩展字段）整体进 extra_json——固定列丢字段是固装开关保存
+        # 后重开即丢的根因
+        _char_known = ("id", "name", "series", "pack", "category", "tier",
+                       "tags_en", "verified", "strategy", "cover", "quote",
+                       "quotes", "color")
+        extra = {k: v for k, v in raw.items() if k not in _char_known}
         self._conn.execute(
             "INSERT INTO characters(char_id, pack_id, work_id, name, tags_en,"
             " verified, strategy_json, cover_path, category, tier, quote,"
-            " quotes_json, color, created_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            " quotes_json, color, extra_json, created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
             # 跨卷重复 id：先同步到的卷胜。game 卷按文件名排在 genshin /
             # wuthering_waves 等遗留卷之前，后到的旧卷不能把角色抢过去，
             # 否则异环 20 位会挂在遗留卷上、工坊卷筛选错乱（v0.25.1）。
@@ -671,7 +684,8 @@ class Store:
             " strategy_json=excluded.strategy_json,"
             " cover_path=excluded.cover_path, category=excluded.category,"
             " tier=excluded.tier, quote=excluded.quote,"
-            " quotes_json=excluded.quotes_json, color=excluded.color",
+            " quotes_json=excluded.quotes_json, color=excluded.color,"
+            " extra_json=excluded.extra_json",
             (cid, pack_id, work_id, name, str(raw.get("tags_en") or ""),
              1 if raw.get("verified") else 0,
              json.dumps(st, ensure_ascii=False),
@@ -680,7 +694,8 @@ class Store:
              str(raw.get("tier") or ""),
              single or (quotes[0] if quotes else ""),
              json.dumps(quotes, ensure_ascii=False),
-             str(raw.get("color") or ""), _now()))
+             str(raw.get("color") or ""),
+             json.dumps(extra, ensure_ascii=False), _now()))
         return cid
 
     def sync_pack_file(self, path, series_scope=None) -> dict:
@@ -771,6 +786,16 @@ class Store:
                      "verified": bool(r["verified"]),
                      "strategy": st,
                      "color": r["color"] or "#E8B4C8"}
+                # v0.40.0：扩展字段（keep_* 人设固装 / profile / avatar /
+                # added_at…）从 extra_json overlay 回条目——固定列只装核心
+                # 字段，其余字段「同步写 extra、读回 overlay」，与卷 JSON 同构
+                try:
+                    extra = json.loads(r["extra_json"] or "{}")
+                except Exception:
+                    extra = {}
+                if isinstance(extra, dict):
+                    for k, v in extra.items():
+                        e.setdefault(k, v)
                 if r["quote"]:
                     e["quote"] = r["quote"]
                 if quotes:

@@ -56,6 +56,26 @@ check("未绑定群返回 None", pool.series_for_group(bound, "999") is None)
 check("绑定群返回作品集合", pool.series_for_group(bound, "123") == {"a", "b"})
 check("私聊(空gid)返回 None", pool.series_for_group(bound, "") is None)
 
+# v0.40.0：tags 卫生——剥离背景设定类杂质（S-rank / E.T.D），幂等、保序
+check("剥离 rank 杂质", pool.strip_lore_tags("jean, knight, S-rank") == "jean, knight")
+check("剥离 E.T.D（含称谓变体）",
+      pool.strip_lore_tags("elyms, black wings, E.T.D vice-captain, S-rank")
+      == "elyms, black wings")
+check("大小写不敏感", pool.strip_lore_tags("a-rank, witch") == "witch")
+check("幂等", pool.strip_lore_tags(pool.strip_lore_tags("x, S-rank"))
+      == pool.strip_lore_tags("x"))
+check("外观词不受影响", pool.strip_lore_tags("witch hat, cape")
+      == "witch hat, cape")
+# 种子源守卫：包内 seed_pool.json 不得再混入背景设定杂质
+import re as _re  # noqa: E402
+_seed_path = Path(__file__).resolve().parent.parent / "seed_pool.json"
+_seed = json.loads(_seed_path.read_text(encoding="utf-8"))
+_seed_bad = [e.get("id") for pk in _seed.get("packs", [])
+             for e in pk.get("entries", [])
+             if _re.search(r"\b[sSABC]-rank\b|\bE\.T\.D\b",
+                           str(e.get("tags_en") or ""))]
+check("种子源无 rank / E.T.D 杂质", not _seed_bad)
+
 # 条目归一化
 good = {"id": "x", "name": "名", "tags_en": "t", "strategy": {"type": "LORA"}, "category": "xxx"}
 n = pool.normalize_entry(good, "p")

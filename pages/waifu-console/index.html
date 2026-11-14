@@ -2529,7 +2529,8 @@
           <n-tag size="small" :bordered="false" type="info" v-if="galDetail.theme">
             {{ themeLabel(galDetail.theme) }}
           </n-tag>
-          <span v-else class="bind-tip" style="margin-top: 0;">抽卡链未套主题（变化维度纯随机）</span>
+          <!-- v0.40.0：空主题的诚实文案——画师直出/手动提示词不记预设主题 -->
+          <span v-else class="bind-tip" style="margin-top: 0;">未套预设主题（画师直出 / 手动提示词 / 抽卡链不套主题）</span>
         </div>
         <div v-if="galDetail.dimsList && galDetail.dimsList.length > 0">
           <div class="bind-tip" style="margin-top: 4px;">本轮变化维度</div>
@@ -4403,6 +4404,7 @@
       async function generatePromptPreview() {
         if (!tryCharId.value) return;
         tryPromptLoading.value = true;
+        tryArtistMade.value = false;   // v0.40.0：重新走池子预览 = 不再是画师产出
         try {
           var res = await apiPost("prompt/preview", {
             id: tryCharId.value,
@@ -4424,6 +4426,7 @@
       // ---- v0.38.0：AI 画师模式——不经预设维度池，LLM 以画师身份整体创作，
       //      产出落回提示词框，走既有「确认后 prompt 直通」出图链路 ----
       var tryArtistLoading = Vue.ref(false);
+      var tryArtistMade = Vue.ref(false);   // v0.40.0：当前提示词是画师产出的
       async function tryArtistPrompt() {
         if (!tryCharId.value || tryArtistLoading.value) return;
         tryArtistLoading.value = true;
@@ -4439,6 +4442,7 @@
           tryBodyZh.value = "";
           tryStyle.value = "";
           tryAttempt.value = 0;
+          tryArtistMade.value = true;   // v0.40.0：随档不记预设主题
         } catch (e) { /* 已提示 */ } finally {
           tryArtistLoading.value = false;
         }
@@ -4591,7 +4595,7 @@
         try {
           var payload = { kind: "try", id: tryCharId.value,
                           prompt: String(tryPrompt.value || "").trim(),
-                          theme: tryTheme.value || "" };
+                          theme: (tryArtistMade.value ? "" : (tryTheme.value || "")) };
           // v0.21.0：维度随提示词直通（试画台预览展示的那份；体型单独展示在此合并）
           var _td = (tryDims.value || []).map(function (d) { return [d.label, d.zh]; });
           if (String(tryBodyZh.value || "").trim()) _td.push(["体型", tryBodyZh.value]);
@@ -5686,6 +5690,7 @@
       async function genPromptPreview() {
         if (!galCharId.value) return;
         galPromptLoading.value = true;
+        galArtistMade.value = false;   // v0.40.0：重新走池子预览 = 不再是画师产出
         try {
           var res = await apiPost("prompt/preview", {
             id: galCharId.value, theme: galTheme.value, outfit: galOutfit.value,
@@ -5706,6 +5711,7 @@
       // ---- v0.38.0：AI 画师模式——不经预设维度池，LLM 以画师身份整体创作，
       //      产出落回提示词框，走既有「确认后 prompt 直通」出图链路 ----
       var galArtistLoading = Vue.ref(false);
+      var galArtistMade = Vue.ref(false);   // v0.40.0：当前提示词是画师产出的
       async function galArtistPrompt() {
         if (!galCharId.value || galArtistLoading.value) return;
         galArtistLoading.value = true;
@@ -5720,6 +5726,7 @@
           galDims.value = [];          // 画师整段创作，没有预设维度可记
           galAttempt.value = 0;
           galPromptConfirmed.value = false;
+          galArtistMade.value = true;  // v0.40.0：随档不记预设主题
           galPromptKey = galPromptKeyNow();   // 重开弹窗不覆盖画师产出
         } catch (e) { /* 已提示 */ } finally {
           galArtistLoading.value = false;
@@ -5752,7 +5759,9 @@
       async function doDetailGenerate() {
         if (!galCharId.value) return;
         // v0.15.0：主题随任务下发，归档时写进立绘行（详情弹窗展示）
-        var payload = { kind: "refill", id: galCharId.value, theme: galTheme.value || "" };
+        // v0.40.0：画师直出的提示词不随档预设主题（题材只是灵感，记录了会误导）
+        var payload = { kind: "refill", id: galCharId.value,
+                        theme: (galArtistMade.value ? "" : (galTheme.value || "")) };
         if (galAsRef.value) { payload.no_archive = true; }   // v0.7.5：只生成不归档
         if (galMode.value === "img2img") {
           if (!galRefsSel.value.length) {

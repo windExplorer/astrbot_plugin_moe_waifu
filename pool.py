@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 CATEGORY_LABELS = {
@@ -170,12 +171,53 @@ def _load_packs_json(pools_dir: Path, logger=None) -> list:
     return packs
 
 
+# ---------- tags 卫生（v0.40.0）：剥离背景设定类杂质 tag ----------
+# 种子卷生成的 tags_en 混进了对绘图无用甚至有害的「背景设定词」：角色稀有度
+# （S-rank ×64 / A-rank ×34）、组织设定（异环 E.T.D）。它们每次都拼进
+# danbooru 提示词——底模不认识这些词，轻则无效，重则召唤奇怪概念（用户实测
+# base 直出提示词里出现 S-rank / E.T.D）。剥离只针对下列已知杂质 token
+# （整段精确匹配、幂等），不动用户的任何其他编辑。
+_LORE_TAG_RES = (
+    re.compile(r"^[sabc]-rank$", re.IGNORECASE),
+    re.compile(r"^E\.T\.D(\s+vice-captain)?$", re.IGNORECASE),
+)
+
+
+def strip_lore_tags(tags_en: str) -> str:
+    """从 tags 串剥离已知背景设定类杂质 token（纯函数，幂等，保序）。"""
+    out = []
+    for seg in str(tags_en or "").split(","):
+        s = seg.strip()
+        if not s:
+            continue
+        if any(rx.match(s) for rx in _LORE_TAG_RES):
+            continue
+        out.append(s)
+    return ", ".join(out)
+
+
+def _hygiene_pack(pack: dict) -> int:
+    """对整卷条目做 tags 卫生（原地改），返回被清理的条数。"""
+    cleaned = 0
+    for raw in pack.get("entries", []) if isinstance(pack.get("entries"), list) else []:
+        if not isinstance(raw, dict):
+            continue
+        tags = str(raw.get("tags_en") or "")
+        fixed = strip_lore_tags(tags)
+        if fixed != tags:
+            raw["tags_en"] = fixed
+            cleaned += 1
+    return cleaned
+
+
 def install_seed_pool(pools_dir: Path, bundled_json: Path, logger=None) -> list:
     """把包内种子卷落到 pools/：缺失的卷整卷安装；已存在的卷按 id 合并新条目。
 
     合并语义（v0.3.1）：种子卷里 id 在用户卷中不存在 → 追加（verified 默认 false，
     走试画验证流程）；id 已存在 → 一律以用户卷为准，**绝不覆盖**——
     data 目录是唯一真源，种子卷只是播种机。
+    v0.40.0：安装 / 合并前对整卷条目做 tags 卫生（strip_lore_tags，剥离
+    S-rank / E.T.D 等背景设定杂质，幂等）——历史装机卷里已嵌入的杂质一并清。
     返回 {"installed": [新装卷名], "merged": {卷名: 追加条数}}。
     """
     pools_dir = Path(pools_dir)
@@ -192,6 +234,7 @@ def install_seed_pool(pools_dir: Path, bundled_json: Path, logger=None) -> list:
         name = str(pack.get("pack") or "").strip()
         if not name or not isinstance(pack.get("entries"), list):
             continue
+        _hygiene_pack(pack)
         target = pools_dir / f"{name}.json"
         if not target.exists():
             try:
@@ -223,7 +266,10 @@ def install_seed_pool(pools_dir: Path, bundled_json: Path, logger=None) -> list:
                 entries.append(e)
                 have_ids.add(e["id"])
                 appended += 1
-        if appended:
+        # v0.40.0：历史装机卷里已嵌入的杂质 tag 一并清理（幂等；有清理 /
+        # 有追加才写回，不动用户其他编辑）
+        cleaned = _hygiene_pack(current)
+        if appended or cleaned:
             current["entries"] = entries
             try:
                 target.write_text(
@@ -233,6 +279,8 @@ def install_seed_pool(pools_dir: Path, bundled_json: Path, logger=None) -> list:
             except Exception as exc:
                 if logger is not None:
                     logger.error(f"[moe_waifu] 卷 {name} 合并写回失败: {exc}")
+            if cleaned and logger is not None:
+                logger.info(f"[moe_waifu] 卷 {name} tags 卫生：清理 {cleaned} 条背景设定杂质")
     if installed and logger is not None:
         logger.info(f"[moe_waifu] 已安装种子卷：{', '.join(installed)}")
     if merged and logger is not None:

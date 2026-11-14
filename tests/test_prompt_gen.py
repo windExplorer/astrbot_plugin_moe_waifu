@@ -1302,8 +1302,11 @@ check("画师 system：三格式都带创作守则与红线",
           for s in ("danbooru", "natural", "qwen")))
 check("画师 system：danbooru 格式要求 1girl, solo 开头",
       "1girl, solo, best quality" in prompt_gen.artist_system_prompt("danbooru"))
-check("画师 system：img2img 口径追加编辑说明",
-      "图生图编辑指令" in prompt_gen.artist_system_prompt("qwen", img2img=True)
+check("画师 system：img2img 整体切编辑指令口径（v0.40.0）",
+      "以参考图中的人物为基准重绘" in prompt_gen.artist_system_prompt("qwen", img2img=True)
+      and "完全替换参考图服装" in prompt_gen.artist_system_prompt("qwen", img2img=True)
+      and "300 字" in prompt_gen.artist_system_prompt("qwen", img2img=True)
+      and "1girl, solo" not in prompt_gen.artist_system_prompt("qwen", img2img=True)
       and "图生图编辑指令" not in prompt_gen.artist_system_prompt("qwen"))
 
 
@@ -1343,6 +1346,23 @@ check("画师模式：产出落 source=artist 且喂了角色与创作编号",
       and "创作编号" in _prov.calls[0]["prompt"]
       and "黑色泳装" in _prov.calls[0]["prompt"]
       and _atext.startswith("一位绿发少女"))
+# v0.40.0：img2img 条目 → system 整体切编辑指令口径（文生图描述会让编辑
+# 模型自由重绘角色，用户实测「角色都变了」）
+async def _run_artist_i2i():
+    prov = _ArtistProvider()
+    await prompt_gen.build_artist_prompt(
+        _ArtistCtx(prov), {}, {"id": "x", "name": "魔女", "series": "d",
+                               "tags_en": "witch hat",
+                               "strategy_type": "img2img",
+                               "strategy": {"ref": "refs/x.png"}},
+        777)
+    return prov.calls[0]["system_prompt"]
+
+
+_i2i_sys = asyncio.run(_run_artist_i2i())
+check("画师模式：img2img 条目喂编辑指令口径 system",
+      "以参考图中的人物为基准重绘" in _i2i_sys
+      and "完全替换参考图服装" in _i2i_sys)
 
 
 class _NoProvCtx:
