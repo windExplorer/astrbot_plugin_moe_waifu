@@ -176,6 +176,22 @@ office = prompt_gen.get_theme("office")
 _of_outfits = [it for it in prompt_gen.OUTFITS
                if any(kw in str(it.get("zh") or "") for kw in office["outfit_kw"])]
 check("职场子集无 JK 泄漏", not any("JK" in str(it.get("zh") or "") for it in _of_outfits))
+# v0.53.0 半身裙套装主题：outfit_kw 必须恰好命中 v0.52.0 的 12 条裙型组合，
+# 不得混入旧条目（鱼尾婚纱 / 蝴蝶结舞台连衣裙 / JK 格纹百褶裙…）
+skirt = prompt_gen.get_theme("skirt")
+check("半身裙套装主题存在", skirt is not None)
+if skirt:
+    _sk_outfits = [it for it in prompt_gen.OUTFITS
+                   if any(kw in str(it.get("zh") or "") for kw in skirt["outfit_kw"])]
+    _sk_zh = [str(it.get("zh") or "") for it in _sk_outfits]
+    check("半身裙套装子集恰好 12 款", len(_sk_outfits) == 12)
+    check("半身裙套装子集全为裙型组合",
+          all(("裙" in z and ("上衣" in z or "衬衫" in z or "毛衣" in z))
+              for z in _sk_zh))
+    check("半身裙套装子集无旧条目泄漏",
+          not any(("婚纱" in z or "连衣裙" in z or "JK" in z or "水手" in z) for z in _sk_zh))
+    check("半身裙套装 200 种子款式 >= 8 种",
+          len({prompt_gen.pick_variations(s, skirt)["outfit"]["zh"] for s in range(200)}) >= 8)
 # 泳装主题换一版分布：200 种子里款式 >= 5 种（原来 3 款二选一）
 _sw_zh = set()
 for s in range(200):
