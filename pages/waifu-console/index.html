@@ -1259,13 +1259,21 @@
                                    placeholder="未评级"></n-select></div>
                     <template v-for="f in profileFields" :key="f.key">
                       <div class="prof-label">{{ f.label }}</div>
-                      <n-input v-if="f.type === 'textarea'" v-model:value="galProfile[f.key]"
+                      <!-- v0.45.1：一句话简介（卡面那行）单独给个「AI 写一句」，
+                           只跑一次 LLM 取 tagline，不动其它字段 -->
+                      <div v-if="f.key === 'tagline'" class="av-mode-row">
+                        <n-input v-model:value="galProfile[f.key]" size="small"
+                                 :placeholder="f.ph"></n-input>
+                        <n-button size="tiny" :loading="galTaglineBusy"
+                                  @click="genGalTagline">AI 写一句</n-button>
+                      </div>
+                      <n-input v-else-if="f.type === 'textarea'" v-model:value="galProfile[f.key]"
                                type="textarea" :rows="3" size="small" :placeholder="f.ph"></n-input>
                       <n-input v-else v-model:value="galProfile[f.key]" size="small"
                                :placeholder="f.ph"></n-input>
                     </template>
                   </div>
-                  <div class="bind-tip">评级与资料一起随「保存资料」写库；「AI 获取」只把建议填进表单，检查后再保存，绝不自动覆盖。手上有整理好的档案时，用「从 JSON 导入资料」一次灌进来（连带印象语 / 评级）。</div>
+                  <div class="bind-tip">评级与资料一起随「保存资料」写库；「AI 获取」只把建议填进表单，检查后再保存，绝不自动覆盖。卡面那一行印的是「一句话简介」，没填才退到简介 / 身份。手上有整理好的档案时，用「从 JSON 导入资料」一次灌进来（连带印象语 / 评级）。</div>
                   <n-space align="center" :wrap="true" size="small">
                     <n-button size="small" type="primary" :loading="galProfileSaving"
                               @click="saveGalProfile">保存资料</n-button>
@@ -1295,9 +1303,10 @@
                   该角色没填「作品名」——联网检索只能按名字搜，同名角色很容易串台。
                   建议先「编辑条目」补上作品，再来补写 / 校对。
                 </n-alert>
-                <n-input v-model:value="galQuotes" type="textarea" :rows="4"
+                <n-input v-model:value="galQuotes" type="textarea" :rows="6"
                          placeholder="每行一句，如：初次见面，我是初音未来！从今天起，就是你的专属歌姬了哦。"
                          @update:value="markQuotesDirty"></n-input>
+                <div class="bind-tip" style="margin-top: 0;">当前 {{ galQuoteCount }} 句</div>
                 <n-space align="center" :wrap="true">
                   <n-button size="small" type="primary" :loading="galQuotesSaving"
                             @click="saveGalQuotes">保存印象语</n-button>
@@ -6773,7 +6782,11 @@
         // v0.42.0：页签回「资料」（已合并速览 / 头像 / 资料表单）
         galTab.value = "profile";
         galSummary.value = null; galAvatarThumb.value = "";
-        galProfileMsg.value = ""; galProfile.value = {}; galTier.value = "";
+        // v0.45.1：换角色后**立刻**按新条目填资料表单。旧版只清空、等用户去点
+        // 「资料」页签才填——而页签本来就是资料，于是进详情页看到的是空表单
+        // （印象语因为另有 watch 才会显示），导入资料后更明显。
+        galProfileMsg.value = "";
+        fillGalProfileFromEntry(true);   // 换角色一定重填（force 绕过「用户改过」保护）
         if (!cid) { galSwitching.value = false; return; }
         galSwitching.value = true;
         loadGalSummary();
@@ -7000,8 +7013,11 @@
         finally { galSummaryLoading.value = false; }
       }
       // 资料表单：本地可编辑，保存才写库；AI 建议填进表单、绝不直接落库
+      // v0.45.1：tagline（一句话简介）放最前——它是卡面实际显示的那一行，
+      // bio 是百科式长简介（卡面只在没 tagline 时退用它）。
       var profileFields = [
-        { key: "bio", label: "简介", type: "textarea", ph: "一句话简介" },
+        { key: "tagline", label: "一句话简介", ph: "卡面显示的一句（≤24 字），留空则用简介 / 身份" },
+        { key: "bio", label: "简介", type: "textarea", ph: "百科式简介，可长一些" },
         { key: "birthday", label: "生日", ph: "如 8月31日" },
         { key: "height", label: "身高", ph: "如 157cm" },
         { key: "cv", label: "声优 / 配音", ph: "声优名" },
@@ -7019,7 +7035,14 @@
       var galProfileBusy = Vue.ref(false);
       var galProfileMsg = Vue.ref("");
       var galProfileMsgType = Vue.ref("info");
-      function fillGalProfileFromEntry() {
+      // v0.45.1：回填前先比对「表单内容是否还等于上次回填的内容」——不等说明
+      // 用户改过（或 AI 刚填了建议），此时绝不能被后台刷新（refreshAll / 轮询）
+      // 冲掉。用内容指纹而不是 dirty 标志：不用给每个输入框挂 @update:value
+      // （n-input 上 v-model:value 与 @update:value 同时写会互相顶掉监听）。
+      var galProfileBaseline = "";
+      function fillGalProfileFromEntry(force) {
+        var cur = JSON.stringify(galProfile.value || {});
+        if (!force && galProfileBaseline && cur !== galProfileBaseline) { return; }
         var e = detailEntry.value || {};
         var p = (e.profile && typeof e.profile === "object") ? e.profile : {};
         var out = {};
@@ -7027,7 +7050,12 @@
         galProfile.value = out;
         galTier.value = String(e.tier || "");
         galProfileMsg.value = "";
+        galProfileBaseline = JSON.stringify(out);
       }
+      // 数据刷新（导入资料、AI 获取后落库、别处改条目）时同步表单
+      Vue.watch([galCharId, detailEntry], function () {
+        fillGalProfileFromEntry();
+      });
       async function saveGalProfile() {
         if (!galCharId.value) return;
         galProfileSaving.value = true;
@@ -7035,9 +7063,31 @@
           await apiPost("pools/profile_save", { id: galCharId.value,
             profile: Object.assign({}, galProfile.value), tier: galTier.value || "" });
           message.success("资料已保存");
+          galProfileBaseline = "";   // 落库了，之后允许重新回填（不再当作「用户改动」）
           await fetchPools();       // detailEntry 重建（profile/avatar/tier 同源）
         } catch (e) { /* 已提示 */ }
         finally { galProfileSaving.value = false; }
+      }
+      // v0.45.1：单独给卡面写一句简介——只跑一次 LLM、只取 tagline，不动其它
+      // 字段（用户只想补这一行时不该让整张表单被 AI 建议洗一遍）
+      var galTaglineBusy = Vue.ref(false);
+      async function genGalTagline() {
+        if (!galCharId.value || galTaglineBusy.value) return;
+        galTaglineBusy.value = true;
+        galProfileMsg.value = "";
+        try {
+          var res = await apiPost("pools/profile_gen", { id: galCharId.value, web: false });
+          var line = String(((res && res.profile) || {}).tagline || "").trim();
+          if (!line) {
+            galProfileMsgType.value = "warning";
+            galProfileMsg.value = "模型没给出可用的一句话简介，请重试或手写一句。";
+            return;
+          }
+          galProfile.value.tagline = line;
+          galProfileMsgType.value = "success";
+          galProfileMsg.value = "已写入一句话简介（未保存）：" + line;
+        } catch (e) { /* 已提示 */ }
+        finally { galTaglineBusy.value = false; }
       }
       async function genGalProfile(web) {
         if (!galCharId.value || galProfileBusy.value) return;
@@ -7124,6 +7174,7 @@
         '  "name": "薄荷",',
         '  "series": "异环",',
         '  "profile": {',
+        '    "tagline": "收容二组的开心果，海特洛没有她聊不起来的人",',
         '    "bio": "异象管理局收容二组预备骨干，海特洛市平价美食活地图。",',
         '    "birthday": "6月1日",',
         '    "cv": "陈雨（中）／鬼头明里（日）",',
@@ -7213,7 +7264,7 @@
             { name: "profile.traits", type: "字符串", required: false, desc: "萌点 / 标志性特征，顿号分隔。" },
             { name: "profile.memo", type: "字符串", required: false, desc: "其他想展示的备注。" },
             { name: "quotes", type: "数组 / 按行文本", required: false,
-              desc: "印象语，每行（每个元素）一句；卡片按种子随机取一句。" },
+              desc: "印象语，每行（每个元素）一句，建议 10 句、最多 20 句；卡片按种子随机取一句。" },
             { name: "tier", type: "枚举", required: false, desc: "评级 S / A / B / C / D。" },
             { name: "tags_en", type: "字符串", required: false,
               desc: "仅「未匹配 + 勾了新建」时用：没有它建不出角色，只能跳过。" }
@@ -7222,7 +7273,8 @@
           exampleNote: "第一条按名字匹配，第二条按 id 匹配",
           notes: [
             "匹配顺序：id → 名字+作品 → 全库唯一的名字。三档都没匹到才算未匹配（才会走新建 / 跳过）。",
-            "冲突策略二选一：**跳过**（只补空，已有内容的字段一个字都不改）／**覆盖**（用 JSON 的值替换）。",
+            "冲突策略二选一：跳过（只补空，已有内容的字段一个字都不改）／覆盖（用 JSON 的值替换）。",
+            "「一句话简介」（tagline）就是卡面印的那一行：填了就印它，没填才退到简介 / 身份 / 称号。",
             "维度开关是整维生效：只想补印象语，就把其它维度全关，其他内容绝不会被动。",
             "「已有内容」的判定：资料字段非空串、印象语非空数组、评级非空。空值才叫空缺。",
             "只写资料：strategy（参考图 / 画法）、cover、avatar、verified、added_at 一概不碰。",
@@ -9697,6 +9749,8 @@
         loadGalSummary: loadGalSummary,
         profileFields: profileFields, tierOpts: tierOpts, galTier: galTier,
         galProfile: galProfile, saveGalProfile: saveGalProfile,
+        galTaglineBusy: galTaglineBusy, genGalTagline: genGalTagline,
+        galQuoteCount: galQuoteCount,
         galProfileSaving: galProfileSaving, galProfileBusy: galProfileBusy,
         galProfileMsg: galProfileMsg, galProfileMsgType: galProfileMsgType,
         genGalProfile: genGalProfile,

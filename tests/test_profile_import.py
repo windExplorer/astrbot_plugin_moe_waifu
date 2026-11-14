@@ -91,6 +91,23 @@ arr_items, _, _, _ = webui_api._profile_import_parse(json.dumps(
     [{"name": "A", "bio": "x"}, {"name": "B", "bio": "y"}], ensure_ascii=False))
 check("数组解析出 2 条", len(arr_items) == 2)
 
+# v0.45.1：tagline（一句话简介，卡面用）
+check("导入维度含 tagline", "tagline" in webui_api.PROFILE_IMPORT_FIELDS)
+t_items, _, _, _ = webui_api._profile_import_parse(json.dumps(
+    {"name": "薄荷", "一句话简介": "平铺的一句", "profile": {"tagline": "资料块里的"}},
+    ensure_ascii=False))
+check("中文键「一句话简介」映射到 tagline（profile 块优先）",
+      t_items[0]["incoming"].get("tagline") == "资料块里的",
+      str(t_items[0]["incoming"]))
+long_items, _, _, _ = webui_api._profile_import_parse(json.dumps(
+    [{"name": "X", "tagline": "字" * 200}], ensure_ascii=False))
+check("tagline 按 60 字截断（卡面排版兜底）",
+      len(long_items[0]["incoming"]["tagline"]) == 60,
+      str(len(long_items[0]["incoming"].get("tagline") or "")))
+check("「简介」仍然映射到 bio（没被 tagline 抢走）",
+      webui_api._imp_field_key("简介") == "bio"
+      and webui_api._imp_field_key("一句话简介") == "tagline")
+
 env_items, hint_pack, hint_series, _ = webui_api._profile_import_parse(json.dumps({
     "pack": "异环卷", "series": "异环", "entries": [{"name": "A", "bio": "x"}],
 }, ensure_ascii=False))
@@ -128,7 +145,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         E("nanally", "娜娜莉", "异环"),
     ])
     payload = json.dumps({"entries": [
-        {"id": "mint", "bio": "新简介", "height": "152cm",
+        {"id": "mint", "bio": "新简介", "height": "152cm", "tagline": "卡面一句",
          "quotes": "新台词一\n新台词二", "tier": "S"},
         {"name": "娜娜莉", "series": "异环", "cv": "宋媛媛"},
         {"name": "早雾", "series": "异环", "tags_en": "1girl, twintails",
@@ -154,7 +171,8 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
           and by_name["薄荷"]["current"].get("quotes") == ["旧台词"])
     fcnt = {f["key"]: f["count"] for f in d["fields"]}
     check("维度命中条数正确", fcnt["bio"] == 3 and fcnt["quotes"] == 1
-          and fcnt["height"] == 1 and fcnt["tier"] == 1, str(fcnt))
+          and fcnt["height"] == 1 and fcnt["tier"] == 1
+          and fcnt["tagline"] == 1, str(fcnt))
     check("预览不写盘", _entry(game_path, "mint").get("profile") == {"bio": "旧简介"})
 
     # ---------- 3) skip：只补空 ----------
@@ -165,6 +183,8 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
     mint = _entry(game_path, "mint")
     check("skip 不动已有简介", mint["profile"]["bio"] == "旧简介", str(mint))
     check("skip 补上空的身高", mint["profile"]["height"] == "152cm")
+    check("skip 补上空的 tagline（卡面一句话简介）",
+          mint["profile"]["tagline"] == "卡面一句", str(mint["profile"]))
     check("skip 不动已有印象语", mint.get("quotes") == ["旧台词"])
     check("skip 不动已有评级", mint.get("tier") == "A")
     check("资产字段原样保留",

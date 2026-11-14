@@ -80,6 +80,22 @@ with tempfile.TemporaryDirectory() as td:
                      date_str="2026-11-11", out_path=with_bio)
     check("profile.bio 参与排版", plain.read_bytes() != with_bio.read_bytes())
 
+    # v0.45.1：一句话简介（profile.tagline）优先于 bio——两者同时给时，卡面
+    # 必须是 tagline 那一行（bio 只在没 tagline 时兜底）
+    tag_line = td / "tagline.png"
+    card.render_card(portrait, dict(ENTRY, profile={
+        "tagline": "卡面专用的一句话。", "bio": "百科式简介，不该出现在这张卡上。"}),
+        date_str="2026-11-11", out_path=tag_line)
+    only_tag = td / "tagline_only.png"
+    card.render_card(portrait, dict(ENTRY, profile={"tagline": "卡面专用的一句话。"}),
+                     date_str="2026-11-11", out_path=only_tag)
+    only_bio = td / "bio_only.png"
+    card.render_card(portrait, dict(ENTRY, profile={"bio": "百科式简介，不该出现在这张卡上。"}),
+                     date_str="2026-11-11", out_path=only_bio)
+    check("profile.tagline 优先于 bio",
+          tag_line.read_bytes() == only_tag.read_bytes()
+          and tag_line.read_bytes() != only_bio.read_bytes())
+
     # 漫画体缺字回落：生僻日文汉字没有字形，必须回落而不是豆腐块
     comic = card.load_font(40, style="comic")
     body = card.load_font(40, style="name")

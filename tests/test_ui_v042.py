@@ -350,6 +350,24 @@ check("index.html 全文件仍是 CRLF（v0.34.1 / v0.39.1 事故）",
       PAGE_BYTES.count(b"\n") > 7000
       and PAGE_BYTES.count(b"\r\n") == PAGE_BYTES.count(b"\n"))
 
+# ---------- ⑨ v0.45.1：资料表单进页即回填 / 卡面一句话简介 ----------
+# 事故：换角色时只清空 galProfile、等用户点「资料」页签才填，而页签本来
+# 就是资料 → 进详情页看到空表单；印象语另有 watch 所以只有它显示（用户
+# 实报「导入成功但只有印象语渲染出来，其他资料都是空的」）。
+check("换角色时立刻回填资料表单（不等点页签）",
+      "fillGalProfileFromEntry(true);" in PAGE)
+check("资料表单跟随 detailEntry 同步（导入 / AI 落库后能看到）",
+      "Vue.watch([galCharId, detailEntry], function () {" in PAGE
+      and "fillGalProfileFromEntry();" in PAGE)
+check("回填带内容指纹保护（不冲掉用户正在改的字）",
+      "galProfileBaseline" in PAGE
+      and "JSON.stringify(galProfile.value || {})" in PAGE)
+check("卡面一句话简介字段（tagline）在资料表单里",
+      'key: "tagline", label: "一句话简介"' in PAGE
+      and "genGalTagline" in PAGE)
+check("印象语给到 10 句量级（rows 6 + 实时句数）",
+      "galQuoteCount" in PAGE and ':rows="6"' in PAGE)
+
 if FAILURES:
     print(f"test_ui_v042: {len(FAILURES)} FAILED")
     sys.exit(1)

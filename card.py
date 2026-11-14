@@ -10,8 +10,8 @@
   一眼分辨，但只在名字右侧出现一次。
 - **排版分层**（用户：现在没有层次感）。自上而下字重与透明度逐级递减：
   作品眉标（小字 + 档位色竖线）→ 角色名（漫画体大标题）→ 一句话简介
-  （profile.bio，柔和小字）→ 档位色分隔短线 → 印象语（左侧引文竖线）→
-  统计行（档位色圆点）→ 日期（最淡）。
+  （profile.tagline → bio → title，柔和小字）→ 档位色分隔短线 →
+  印象语（左侧引文竖线）→ 统计行（档位色圆点）→ 日期（最淡）。
 - **去掉左上角「今日老婆」胶囊**（用户：好像不要会更好）。
 - **漫画体**（用户：字体不太好看，能用漫画体吗）：随包 `fonts/` 分发一款开源
   漫画体（站酷快乐体，SIL OFL 1.1），名字 / 档位字母 / 印象语优先用它；用户也
@@ -479,9 +479,12 @@ def render_card(portrait_path, entry: dict, *, date_str: str, same_count: int = 
                            radius=2, fill=(*t_rgb, 215))
     bottom -= 26
 
-    # ---- 第 3 层：一句话简介（profile.bio；没填简介时退到身份/称号） ----
+    # ---- 第 3 层：一句话简介（profile.tagline 优先 → bio → 身份/称号） ----
+    # v0.45.1：新增 tagline——卡面专用的一行字（bio 常常是百科式长句，印上去会
+    # 挤成两行小字）。没填就退回原来的 bio / title，旧数据渲染不变。
     profile = entry.get("profile") if isinstance(entry.get("profile"), dict) else {}
-    bio = str(profile.get("bio") or profile.get("title") or "").strip()
+    bio = str(profile.get("tagline") or profile.get("bio")
+              or profile.get("title") or "").strip()
     if bio:
         blines = _wrap(bio, bio_f, CARD_W - _PAD_X * 2, max_lines=2)
         step = int(bio_f.size * 1.48)

@@ -56,6 +56,7 @@ trendDurChart fmtDur
 galTabs galTab switchGalTab galSummary galSummaryLoading
 profileFields tierOpts galTier galProfile saveGalProfile galProfileSaving
 galProfileBusy galProfileMsg galProfileMsgType genGalProfile
+galTaglineBusy genGalTagline galQuoteCount
 galAvatarThumb galAvatarBusy galAvatarUploadOpen galAvatarNote
 galAvatarPickOpen openAvatarPick doAvatarSet avatarClear doAvatarGenerate
 onAvatarPanelFiles galAvBatchOpen galAvBatch startAvatarBatch stopAvatarBatch

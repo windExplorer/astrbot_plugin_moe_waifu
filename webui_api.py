@@ -4425,8 +4425,10 @@ async def h_quote_save(plugin) -> dict:
 # ---------- 角色资料 / 评级 / 首次日期（v0.31.0） ----------
 
 # 资料字段白名单（值统一字符串、逐字段限长；LLM/前端都按这份清单走）
-_PROFILE_KEYS = ("bio", "birthday", "height", "cv", "title", "personality",
-                 "traits", "memo")
+# v0.45.1：新增 tagline（一句话简介）——专门给卡面用的一行字，卡面优先它，
+# 没填才退到 bio / title。bio 往往写得像百科条目，印在卡上太长。
+_PROFILE_KEYS = ("tagline", "bio", "birthday", "height", "cv", "title",
+                 "personality", "traits", "memo")
 
 
 def _sanitize_profile(raw) -> dict:
@@ -4519,7 +4521,9 @@ async def h_profile_save(plugin) -> dict:
 _PROFILE_SYSTEM = (
     "你为「萌萌今日老婆」插件补全二次元女性角色的百科资料。只输出一个 JSON 对象"
     "——不要 markdown 围栏、不要解释文字。字段（拿不准就留空字符串，宁缺勿编）："
-    "bio（一句话简介，不超过 80 字）、birthday（生日，如「8月31日」，不知道留空）、"
+    "tagline（卡面用的一句话简介，不超过 24 字，要有画面感与角色味道，"
+    "不要复述身份头衔、不要书名号、不要句末感叹号的堆砌）、"
+    "bio（百科式简介，不超过 80 字）、birthday（生日，如「8月31日」，不知道留空）、"
     "height（身高，含单位）、cv（声优/配音演员中文名）、"
     "title（作品内身份/称号，不超过 30 字）、personality（性格关键词，不超过 60 字）、"
     "traits（萌点/标志性特征，顿号分隔，不超过 40 字）、"
@@ -4601,6 +4605,8 @@ PROFILE_IMPORT_FIELDS = tuple(_PROFILE_KEYS) + ("quotes", "tier")
 # 用户多半是照着角色页手抄或让别家 AI 生成，不该强迫他们记住英文键名。
 _PROFILE_KEY_ALIASES = {
     "简介": "bio", "介绍": "bio", "角色简介": "bio", "角色介绍": "bio", "bio": "bio",
+    "一句话简介": "tagline", "一句话": "tagline", "卡面简介": "tagline",
+    "一句话介绍": "tagline", "tagline": "tagline", "slogan": "tagline",
     "生日": "birthday", "出生日期": "birthday", "birthday": "birthday",
     "身高": "height", "height": "height",
     "声优": "cv", "配音": "cv", "声优/配音": "cv", "cv": "cv",
@@ -4636,13 +4642,15 @@ def _imp_field_key(key) -> str:
 
 
 def _imp_field_value(key: str, value):
-    """维度取值清洗：quotes 去重成列表、tier 限定评级、其余转字符串。"""
+    """维度取值清洗：quotes 去重成列表、tier 限定评级、tagline 限 60 字。"""
     if key == "quotes":
         return _clean_quote_lines(value)
     if key == "tier":
         t = _imp_str(value, 2).upper()
         return t if t in ("S", "A", "B", "C", "D") else ""
-    return _imp_str(value, 500)
+    # 卡面一句话简介印在卡上，超长排版会挤成一团——按 60 字截断（卡面自己
+    # 还有 2 行折行 + 省略号兜底）。
+    return _imp_str(value, 60 if key == "tagline" else 500)
 
 
 def _profile_import_item(raw) -> tuple:
