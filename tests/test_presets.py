@@ -156,6 +156,39 @@ check("dim_custom 只保留已知维度并去重",
 check("dim_disabled 只保留已知维度",
       list(n["dim_disabled"]) == ["pose"])
 
+# ---------- 4b. v0.43.3：固定短语（fixed_dims）= 可编辑的提示词 ----------
+# 旧版只认 zh，纯英文（danbooru 串）写的自定义固定短语会被静默丢掉。
+n2 = webui_api._normalize_presets({
+    "themes": [{
+        "id": "usr_fd", "label": "固定短语",
+        "fixed_dims": {
+            "outfit": {"zh": "白色围裙", "en": "white apron"},
+            "pose": {"zh": "", "en": "sitting on floor"},
+            "bg": {"zh": "", "en": ""},
+            "BAD_DIM": {"zh": "x", "en": "y"},
+        },
+    }],
+})
+_fd = n2["themes"][0]["fixed_dims"]
+check("fixed_dims 中英任一非空即保留（英文工作流不再被丢）",
+      (_fd.get("pose") or {}).get("en") == "sitting on floor", str(_fd))
+check("fixed_dims 保留中文短语", (_fd.get("outfit") or {}).get("zh") == "白色围裙")
+check("fixed_dims 中英都空 / 未知维度被丢弃",
+      "bg" not in _fd and "BAD_DIM" not in _fd, str(_fd))
+# 前端：固定短语从「手写 JSON」改成逐条编辑（维度 + 中文 + 英文）
+check("素材库编辑器有固定短语逐行编辑",
+      "presetsFixedRows" in PAGE and "addFixedRow" in PAGE
+      and "removeFixedRow" in PAGE and "fixed_dims_text" not in PAGE)
+check("内置主题也能编辑（编辑自动复制为自定义副本）",
+      "function editPresetTheme" in PAGE and "editPresetTheme(t)" in PAGE)
+check("主题表展示提示词概况（固定几维 / 关键词几组）", "promptText" in PAGE)
+
+# ---------- 4c. v0.43.3：详情页生成面板默认「图生图重绘」 ----------
+check("详情页默认图生图重绘（无源时回落补一张）",
+      "function applyDefaultGalMode" in PAGE
+      and 'genSources.value.length > 0 ? "img2img" : "refill"' in PAGE
+      and "applyDefaultGalMode();" in PAGE)
+
 # ---------- 5. handler 真跑：写盘 → reload → provider 生效 ----------
 class Plugin:
     def __init__(self, data_dir):

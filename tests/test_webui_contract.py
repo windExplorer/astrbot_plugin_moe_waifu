@@ -90,7 +90,8 @@ presetsEditorOpen presetsEditorIsNew presetsEditor presetsKwFields
 presetsGroupOpts presetsEditorGroupOpts presetsDimOpts presetsDimWords
 presetsCustomWordCount
 loadPresets openPresetTheme savePresetTheme deletePresetTheme
-duplicatePresetTheme toggleBuiltinTheme toggleCustomTheme
+editPresetTheme addFixedRow removeFixedRow presetsFixedRows presetsEditorTitle
+toggleBuiltinTheme toggleCustomTheme
 addPresetWord removePresetWord togglePresetBuiltinWord
 scrollToPresetSection
 """.split()

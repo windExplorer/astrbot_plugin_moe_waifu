@@ -2068,6 +2068,8 @@ def _normalize_presets(data) -> dict:
             item[k] = _clean_str_list(t.get(k))
         item["plain_dims"] = [x for x in _clean_str_list(t.get("plain_dims"), 20)
                               if x in _DIM_KEYS]
+        # v0.43.3：固定短语只要中英任一非空就保留——旧版只认 zh，纯英文工作流
+        # （danbooru 串）写的自定义固定短语会被静默丢掉。
         fd = t.get("fixed_dims")
         if isinstance(fd, dict):
             item["fixed_dims"] = {
@@ -2075,7 +2077,8 @@ def _normalize_presets(data) -> dict:
                     "en": str(v.get("en") or "")[:120]}
                 for k, v in list(fd.items())[:20]
                 if k in _DIM_KEYS and isinstance(v, dict)
-                and str(v.get("zh") or "").strip()}
+                and (str(v.get("zh") or "").strip()
+                     or str(v.get("en") or "").strip())}
         themes[tid] = item
     dim_custom, dim_disabled = {}, {}
     dc = d.get("dim_custom") if isinstance(d.get("dim_custom"), dict) else {}

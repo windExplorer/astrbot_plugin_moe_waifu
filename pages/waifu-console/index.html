@@ -409,26 +409,31 @@
      页签、以及各页的标题/筛选行都套它，滚多长都不用回头找切换入口。 */
   /* v0.43.2：固定头的下沿留白加大——页签下划线紧贴内容区，切换完一眼看过去
      像「标题压在正文上」。并注意 .stack > * + * 的 12px margin-top 会与本条
-     margin-bottom 取 max 折叠，所以这里必须写到比 12 大才有实际效果。 */
+     margin-bottom 取 max 折叠，所以这里必须写到比 12 大才有实际效果。
+     v0.43.3：三种固定条（整页头 / 分区头 / 工具行）统一处理——旧版只有整页头
+     有下沿留白，工具行是 0、分区头 12px，钉住后正文直接贴着条的底边滑（用户
+     实报「其他页面一样有问题，顶部悬浮固定导致下面内容没有间距」）。现在三者
+     都带下沿留白 + 略强的下投影，钉住时正文从阴影下「滑过」而不是贴边。 */
+  .sticky-head, .sticky-sec, .sticky-tools {
+    background: var(--wf-bg);
+    box-shadow: 0 10px 14px -14px rgba(80,40,70,.9); }
   .sticky-head { position: sticky; top: 0; z-index: 20;
-    margin: -16px -22px 22px; padding: 14px 22px 14px;
-    background: var(--wf-bg); border-bottom: 1px solid var(--wf-line);
-    box-shadow: 0 8px 16px -14px rgba(80,40,70,.8); }
+    margin: -16px -22px 20px; padding: 14px 22px 16px;
+    border-bottom: 1px solid var(--wf-line); }
   .sticky-head > * + * { margin-top: 10px; }
   .sticky-head .gal-tabs, .sticky-head .dbg-tabs,
   .sticky-head .sec-title { margin-bottom: 0; }
   /* 页签这一行自身再补 2px 下沿，避免下划线裁到固定区边框上 */
   .sticky-head .gal-tabs, .sticky-head .dbg-tabs { padding-bottom: 2px; }
   .sticky-sec { position: sticky; top: 0; z-index: 15;
-    margin: -16px -22px 12px; padding: 14px 22px 10px;
-    background: var(--wf-bg); border-bottom: 1px solid var(--wf-line);
-    box-shadow: 0 8px 16px -14px rgba(80,40,70,.8); }
+    margin: -16px -22px 18px; padding: 14px 22px 14px;
+    border-bottom: 1px solid var(--wf-line); }
   .sticky-sec .sec-title { margin-bottom: 0; }
   /* 轻量变体：直接贴在已有工具行 / 标题上，不改 display 与宽度（n-space
      组件也能挂），只负责钉住 + 不透明背景遮住下面滚上来的内容。 */
   .sticky-tools { position: sticky; top: 0; z-index: 12;
-    background: var(--wf-bg); padding: 8px 0;
-    box-shadow: 0 6px 12px -12px rgba(80,40,70,.8); }
+    margin-bottom: 16px; padding: 10px 0 12px;
+    border-bottom: 1px solid var(--wf-line); }
 
   /* 总览：横幅 + 卡片式快捷入口 */
   .ov-hero { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
@@ -519,6 +524,8 @@
   .preset-kw-grid { display: grid; gap: 10px;
     grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .preset-kw-grid .lab { font-size: 12px; opacity: .7; margin-bottom: 3px; }
+  /* v0.43.3：固定短语一行 = 维度 + 中文 + 英文 + 删（替代原来的 JSON 文本框） */
+  .preset-fix-row { display: flex; gap: 6px; align-items: center; }
 </style>
 </head>
 <body>
@@ -2623,10 +2630,14 @@
             </div>
             <div class="stack">
               <div class="bind-tip" style="margin-top:0;">
-                内置项是插件自带的 50 个主题与 11 个维度词池，<b>源码只读</b>：可停用、可「复制」成自定义再改。
+                内置项是插件自带的 50 个主题与 11 个维度词池，<b>源码只读</b>：点「编辑」会
+                自动<b>复制成自定义副本</b>再打开弹窗（想彻底替换就把原内置项停用）。
                 自定义项可增删改，id 自动用 <code>usr_</code> 前缀，不会撞内置的
                 <code>tpl_ / art_ / scene_</code> 分类语义。数据存在插件数据目录的
-                <code>waifu_presets.json</code>，升级插件不丢。
+                <code>waifu_presets.json</code>，升级插件不丢。<br>
+                主题的提示词由两部分组成：<b>关键词</b>（只从维度池筛素材）与
+                <b>固定短语</b>（原样写进提示词，中文 + 英文 tag 各一份）——场景包的
+                穿搭 / 鞋袜 / 姿势 / 取景都在固定短语里，直接在弹窗里逐条改即可。
               </div>
 
               <div id="preset-sec-themes" class="chart-card cfg-sec">
@@ -2640,21 +2651,24 @@
                            placeholder="搜名称 / id" style="width:180px;"></n-input>
                 </div>
                 <table class="rec-table" v-if="presetsThemeRows.length">
-                  <thead><tr><th>名称</th><th>ID</th><th>分类</th><th>来源</th><th>状态</th><th>操作</th></tr></thead>
+                  <thead><tr><th>名称</th><th>ID</th><th>分类</th><th>提示词</th><th>来源</th><th>状态</th><th>操作</th></tr></thead>
                   <tbody>
                     <tr v-for="t in presetsThemeRows" :key="'pt:' + t.id">
                       <td>{{ t.label }}</td>
                       <td style="opacity:.6;">{{ t.id }}</td>
                       <td>{{ presetsGroupLabels[t.group] || t.group }}</td>
+                      <!-- v0.43.3：一眼看出这个主题是不是「固定提示词」（场景包/模板） -->
+                      <td style="opacity:.75;">{{ t.promptText }}</td>
                       <td>{{ t.builtin ? "内置" : "自定义" }}</td>
                       <td>{{ t.enabled ? "启用" : "停用" }}</td>
                       <td>
                         <div class="av-mode-row">
-                          <n-button size="tiny" @click="duplicatePresetTheme(t)">复制为自定义</n-button>
+                          <!-- v0.43.3：内置项也可「编辑」——自动复制成自定义副本再打开弹窗
+                               （内置是源码常量，改不了原件；复制后改副本即可生效） -->
+                          <n-button size="tiny" @click="editPresetTheme(t)">编辑</n-button>
                           <n-button v-if="t.builtin" size="tiny"
                                     @click="toggleBuiltinTheme(t)">{{ t.enabled ? "停用" : "恢复" }}</n-button>
                           <template v-else>
-                            <n-button size="tiny" @click="openPresetTheme(t)">编辑</n-button>
                             <n-button size="tiny" type="error" secondary
                                       @click="deletePresetTheme(t)">删除</n-button>
                             <n-button size="tiny" @click="toggleCustomTheme(t)">{{ t.enabled ? "停用" : "启用" }}</n-button>
@@ -2709,13 +2723,18 @@
               </div>
             </div>
 
-            <!-- 新建 / 编辑主题弹窗 -->
+            <!-- 新建 / 编辑主题弹窗（v0.43.3：固定短语从 JSON 文本框改成逐条可编辑的
+                 提示词行——用户口径「主题、场景那些没办法编辑提示词吗」；内置项点
+                 「编辑」会自动复制成自定义副本再进本弹窗，因为内置是源码） -->
             <n-modal v-model:show="presetsEditorOpen" preset="dialog"
-                     :title="presetsEditorIsNew ? '新建主题' : '编辑主题'" style="width: 620px;">
+                     :title="presetsEditorTitle" style="width: 700px;">
               <div class="stack">
                 <div class="bind-tip" style="margin-top:0;">
-                  <code>*_kw</code> 是「按中文子串从该维度池里筛子集」，不是直接写进提示词的短语；
-                  留空 = 该维度不约束。一行一个或逗号分隔。
+                  提示词是三层拼出来的：<b>关键词</b>（<code>*_kw</code>）只做「从维度池里筛子集」，
+                  不直接进提示词；<b>固定短语</b>（<code>fixed_dims</code>）<b>原样写进提示词</b>
+                  （中文走图生图编辑指令与中文描述、英文 tag 走文生图串）——完整场景包就是靠它
+                  把穿搭 / 鞋袜 / 姿势 / 取景锁死；<b>置空维度</b>（<code>plain_dims</code>）让提示词
+                  完全不提这一维。
                 </div>
                 <div class="preset-kw-grid">
                   <div>
@@ -2738,9 +2757,9 @@
                 </div>
                 <div class="preset-kw-grid">
                   <div v-for="f in presetsKwFields" :key="'pk:' + f.key">
-                    <div class="lab">{{ f.label }}（{{ f.key }}）</div>
+                    <div class="lab">{{ f.label }}筛选词（{{ f.key }}）</div>
                     <n-input v-model:value="presetsEditor[f.key]" type="textarea" :rows="2"
-                             size="small" placeholder="一行一个关键词"></n-input>
+                             size="small" placeholder="一行一个关键词，留空=该维度不约束"></n-input>
                   </div>
                 </div>
                 <div>
@@ -2749,9 +2768,27 @@
                             :options="presetsDimOpts" size="small"></n-select>
                 </div>
                 <div>
-                  <div class="lab">固定短语 fixed_dims（JSON，可选；完整场景包用）</div>
-                  <n-input v-model:value="presetsEditor.fixed_dims_text" type="textarea" :rows="3"
-                           size="small" placeholder='{"outfit": {"zh": "白色围裙", "en": "white apron"}}'></n-input>
+                  <div class="lab">固定短语 fixed_dims（直接写进提示词，逐维一条；英文可留空）</div>
+                  <div class="stack" style="margin-top: 6px;" v-if="presetsFixedRows.length">
+                    <div v-for="(row, ri) in presetsFixedRows" :key="'fx:' + ri"
+                         class="preset-fix-row">
+                      <n-select v-model:value="presetsFixedRows[ri].dim"
+                                :options="presetsDimOpts" size="small"
+                                style="width: 132px; flex: none;"></n-select>
+                      <n-input v-model:value="presetsFixedRows[ri].zh" size="small"
+                               placeholder="中文短语（图生图编辑指令 / 中文描述）"></n-input>
+                      <n-input v-model:value="presetsFixedRows[ri].en" size="small"
+                               placeholder="英文 tag（danbooru 串，可留空）"></n-input>
+                      <n-button size="tiny" type="error" secondary
+                                @click="removeFixedRow(ri)">删</n-button>
+                    </div>
+                  </div>
+                  <div class="av-mode-row" style="margin-top: 8px;">
+                    <n-button size="small" @click="addFixedRow">+ 添加固定短语</n-button>
+                    <span class="bind-tip" style="margin-top:0;">
+                      例：女仆场景给 outfit / footwear / pose / framing 各写一条就锁成固定构图
+                    </span>
+                  </div>
                 </div>
               </div>
               <template #action>
@@ -5703,7 +5740,19 @@
       }
 
       // 生成面板：补一张（跟随条目） / 图生图（选参考图或立绘做源）
+      // v0.43.3：默认改成「图生图重绘」——进详情页就有参考图/立绘可用，直接重绘
+      // 比「跟随条目画法」更符合预期（用户口径）。没有可用生成源的角色仍回落
+      // 「补一张」，否则会对着空生成源点不出图。用户手动切过画法后不再自动改。
       var galMode = Vue.ref("refill");
+      // 最近一次「自动选定」的画法：当前值一旦与它不同，说明用户手动点过，
+      // 之后数据再怎么变都不再替他改（比"标志位 + watch"更稳，不必猜调度顺序）
+      var galModeAutoPick = "refill";
+      function applyDefaultGalMode() {
+        if (galMode.value !== galModeAutoPick) { return; }   // 用户手动指定过
+        var want = genSources.value.length > 0 ? "img2img" : "refill";
+        galModeAutoPick = want;
+        if (galMode.value !== want) { galMode.value = want; }
+      }
       var galRefsSel = Vue.ref([]);  // 图生图源（多选，绝对路径数组；顺序=点选顺序）
       var galWf = Vue.ref(null);     // 图生图工作流（空=全局配置）
       // v0.7.2：补一张的工作流覆盖（txt+img 合并下拉；base/lora→workflow、
@@ -5779,6 +5828,8 @@
       // 自动选源：只在「还没选」或「当前值是上次自动填的」时才动手；
       // 用户手动选过（多选 / 选的是别张）就完全不动。
       function ensureDefaultGenSource() {
+        // v0.43.3：先把画法定成默认值（有源→图生图重绘），再考虑选源
+        applyDefaultGalMode();
         if (galMode.value !== "img2img") { return; }
         var cur = galRefsSel.value || [];
         var isAuto = cur.length === 1 && !!galSrcAutoPicked
@@ -6525,6 +6576,9 @@
         galItems.value = [];
         clearGalRefsState();
         galRefsSel.value = [];
+        // v0.43.3：换角色后画法回到「自动」——默认图生图重绘（有源时），
+        // 上一位用户手动选过的画法不跨角色沿用（把当前值记为自动值即可）
+        galModeAutoPick = galMode.value;
         galPrompt.value = ""; galPromptSource.value = ""; galDims.value = [];
         galAttempt.value = 0; galPromptConfirmed.value = false;
         // v0.42.0：页签回「资料」（已合并速览 / 头像 / 资料表单）
@@ -8289,16 +8343,37 @@
       var presetsCustomThemes = Vue.computed(function () {
         return presetsData.value.themes || [];
       });
+      // v0.43.3：主题行带一句「提示词概况」——固定几维 / 关键词几组 / 置空几维，
+      // 让用户一眼分出「固定提示词的场景包」与「只筛子集的普通主题」。
+      function _promptSummary(t) {
+        var fd = (t && t.fixed_dims) || {};
+        var n = 0;
+        Object.keys(fd).forEach(function (k) {
+          var v = fd[k] || {};
+          if (String(v.zh || "").trim() || String(v.en || "").trim()) { n += 1; }
+        });
+        var kw = 0;
+        presetsKwFields.forEach(function (f) {
+          if (((t || {})[f.key] || []).length) { kw += 1; }
+        });
+        var pd = ((t || {}).plain_dims || []).length;
+        var parts = [];
+        if (n) { parts.push("固定 " + n + " 维"); }
+        if (kw) { parts.push("关键词 " + kw + " 组"); }
+        if (pd) { parts.push("置空 " + pd + " 维"); }
+        return parts.length ? parts.join(" · ") : "全随机";
+      }
       var presetsThemeRows = Vue.computed(function () {
         var off = {};
         (presetsData.value.disabled_builtin || []).forEach(function (x) { off[x] = true; });
         var rows = (presetsBuiltin.value || []).map(function (t) {
           return { id: t.id, label: t.label, group: t.group, builtin: true,
-                   enabled: !off[t.id] };
+                   enabled: !off[t.id], promptText: _promptSummary(t) };
         });
         (presetsData.value.themes || []).forEach(function (t) {
           rows.push({ id: t.id, label: t.label, group: t.group, builtin: false,
-                      enabled: t.enabled !== false });
+                      enabled: t.enabled !== false,
+                      promptText: _promptSummary(t) });
         });
         var g = presetsGroupFilter.value;
         var kw = String(presetsKeyword.value || "").trim().toLowerCase();
@@ -8377,37 +8452,86 @@
                Math.floor(Math.random() * 1000).toString(36);
       }
       function _editorFrom(t) {
+        var plain = (t.plain_dims || []).slice();
+        var rows = [];
+        var fd = (t && t.fixed_dims) || {};
+        Object.keys(fd).forEach(function (dim) {
+          var v = fd[dim] || {};
+          var zh = String(v.zh || "");
+          var en = String(v.en || "");
+          if (!zh.trim() && !en.trim()) {
+            // v0.43.3：内置场景里「zh/en 都空」的固定维（如沙滩包的鞋袜）语义是
+            // 「该维度不提」。后端规范化会丢掉空条目，所以这里转成 plain_dims
+            // 保住原意（两者在 pick_variations 里效果一致）。
+            if (plain.indexOf(dim) < 0) { plain.push(dim); }
+            return;
+          }
+          rows.push({ dim: dim, zh: zh, en: en });
+        });
         var e = { id: t.id || _nextThemeId(), label: t.label || "",
                   group: t.group || "content", enabled: t.enabled !== false,
-                  plain_dims: (t.plain_dims || []).slice(),
-                  fixed_dims_text: JSON.stringify(t.fixed_dims || {}, null, 2) };
+                  plain_dims: plain };
         presetsKwFields.forEach(function (f) {
           e[f.key] = (t[f.key] || []).join("\n");
         });
-        return e;
+        return { editor: e, rows: rows };
+      }
+      var presetsFixedRows = Vue.ref([]);
+      var presetsEditorTitle = Vue.computed(function () {
+        return presetsEditorIsNew.value ? "新建主题" : "编辑主题";
+      });
+      function addFixedRow() {
+        var rows = (presetsFixedRows.value || []).slice();
+        var used = {};
+        rows.forEach(function (r) { used[r.dim] = 1; });
+        var pool = presetsDimKeys.value || [];
+        var free = pool.filter(function (k) { return !used[k]; });
+        rows.push({ dim: (free.length ? free[0] : (pool[0] || "outfit")),
+                    zh: "", en: "" });
+        presetsFixedRows.value = rows;
+      }
+      function removeFixedRow(i) {
+        var rows = (presetsFixedRows.value || []).slice();
+        if (i < 0 || i >= rows.length) { return; }
+        rows.splice(i, 1);
+        presetsFixedRows.value = rows;
+      }
+      function _openEditor(src, isNew) {
+        var built = _editorFrom(src || {});
+        presetsEditorIsNew.value = !!isNew;
+        presetsEditor.value = built.editor;
+        presetsFixedRows.value = built.rows;
+        presetsEditorOpen.value = true;
       }
       function openPresetTheme(t) {
-        presetsEditorIsNew.value = !t;
-        presetsEditor.value = _editorFrom(t || {});
-        presetsEditorOpen.value = true;
+        // 传进来的可能是列表行（只有 id/label/group 等展示字段），必须回表取
+        // 完整定义——否则关键词与固定短语会被清空（保存就等于丢配置）
+        _openEditor(t ? _fullThemeOf(t) : {}, !t);
+      }
+      function _fullThemeOf(t) {
+        var list = t && t.builtin ? (presetsBuiltin.value || [])
+                                  : (presetsData.value.themes || []);
+        var hit = list.filter(function (x) { return x.id === (t || {}).id; })[0];
+        return hit || t || {};
       }
       function duplicatePresetTheme(t) {
-        var src = t;
-        if (t.builtin) {
-          src = (presetsBuiltin.value || []).filter(function (x) {
-            return x.id === t.id;
-          })[0] || t;
-        } else {
-          src = (presetsData.value.themes || []).filter(function (x) {
-            return x.id === t.id;
-          })[0] || t;
-        }
-        var copy = _editorFrom(src);
-        copy.id = _nextThemeId();
-        copy.label = String(src.label || "") + "（副本）";
+        var src = _fullThemeOf(t);
+        var built = _editorFrom(src);
+        built.editor.id = _nextThemeId();
+        built.editor.label = String(src.label || "") + "（副本）";
         presetsEditorIsNew.value = true;
-        presetsEditor.value = copy;
+        presetsEditor.value = built.editor;
+        presetsFixedRows.value = built.rows;
         presetsEditorOpen.value = true;
+      }
+      // v0.43.3：内置主题也能「编辑」——源码常量改不了，自动复制成自定义副本再开
+      // 弹窗（用户口径「主题、场景那些没办法编辑提示词吗」）。想「替换」原内置项，
+      // 保存后在列表里把原内置项停用即可。
+      function editPresetTheme(t) {
+        if (!t || !t.builtin) { openPresetTheme(t); return; }
+        duplicatePresetTheme(t);
+        message.info("内置项是源码只读，已复制成自定义副本：改完保存即生效；"
+                     + "想彻底替换，把原内置项停用即可");
       }
       async function savePresetTheme() {
         var e = presetsEditor.value;
@@ -8430,15 +8554,17 @@
             .map(function (s) { return s.trim(); })
             .filter(function (s) { return !!s; }).slice(0, 40);
         });
+        // v0.43.3：固定短语改成逐行输入（维度 + 中文 + 英文），这里拼回矩阵。
+        // 中英都空的行视为「没填」，直接丢弃；维度重复时后者覆盖前者（与后端
+        // dict 语义一致）。
         var fd = {};
-        var raw = String(e.fixed_dims_text || "").trim();
-        if (raw) {
-          try { fd = JSON.parse(raw); }
-          catch (err) { message.warning("fixed_dims 不是合法 JSON"); return; }
-          if (!fd || typeof fd !== "object" || Array.isArray(fd)) {
-            message.warning("fixed_dims 必须是 JSON 对象"); return;
-          }
-        }
+        (presetsFixedRows.value || []).forEach(function (row) {
+          var dim = String((row || {}).dim || "").trim();
+          var zh = String((row || {}).zh || "").trim();
+          var en = String((row || {}).en || "").trim();
+          if (!dim || (!zh && !en)) { return; }
+          fd[dim] = { zh: zh, en: en };
+        });
         item.fixed_dims = fd;
         var idx = -1;
         arr.forEach(function (x, i) { if (x.id === id) { idx = i; } });
@@ -9019,13 +9145,19 @@
         presetsDim: presetsDim, presetsNewWord: presetsNewWord,
         presetsEditorOpen: presetsEditorOpen, presetsEditorIsNew: presetsEditorIsNew,
         presetsEditor: presetsEditor, presetsKwFields: presetsKwFields,
+        presetsEditorTitle: presetsEditorTitle,
+        presetsFixedRows: presetsFixedRows,
+        addFixedRow: addFixedRow, removeFixedRow: removeFixedRow,
+        editPresetTheme: editPresetTheme,
         presetsGroupOpts: presetsGroupOpts, presetsEditorGroupOpts: presetsEditorGroupOpts,
         presetsDimOpts: presetsDimOpts, presetsCustomThemes: presetsCustomThemes,
         presetsThemeRows: presetsThemeRows, presetsDimWords: presetsDimWords,
         presetsCustomWordCount: presetsCustomWordCount,
         loadPresets: loadPresets, savePresets: savePresets,
         openPresetTheme: openPresetTheme, savePresetTheme: savePresetTheme,
-        deletePresetTheme: deletePresetTheme, duplicatePresetTheme: duplicatePresetTheme,
+        // v0.43.3：duplicatePresetTheme 不再暴露——内置项的「编辑」已自动复制副本，
+        // 模板里没有第二个入口（契约守卫要求暴露的键必须被模板用到）
+        deletePresetTheme: deletePresetTheme,
         toggleBuiltinTheme: toggleBuiltinTheme, toggleCustomTheme: toggleCustomTheme,
         addPresetWord: addPresetWord, removePresetWord: removePresetWord,
         togglePresetBuiltinWord: togglePresetBuiltinWord,
