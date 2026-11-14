@@ -2,6 +2,20 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.43.0 (2026-11-15)
+
+- **新增「素材库」页签：主题 / 模板 / 场景 / 维度词表可视化增删改**（用户：「找个地方可以配置主题，模板，场景那些，专门搞个页面做这些事情，增删改」）。
+  - **现状调研结论**：这几类数据**全是 `prompt_gen.py` 里的硬编码常量，全仓零 CRUD**。`THEMES` 共 50 条（`random` 1 + `tpl_` 立绘模板 4 + 内容主题 10 + `art_` 纯画风 25 + `scene_` 完整场景包 10），`DIMS` 11 个维度词池；`/themes` 只吐 `{id,label}`，前端只有三处只读下拉，要改只能改源码重打包。配置项 25 个键类型只有 `string/int/float/bool`，`_coerce` 会把 list 强转成 str，**不能**塞进 `_conf_schema.json`。工作流列表真源在外部萌绘 `config.workflows`，本插件只读选用。
+  - **方案**：用户数据独立落 `data_dir/waifu_presets.json`（不进包、升级不丢、不进 SQLite），结构为 `{themes[], disabled_builtin[], dim_custom{}, dim_disabled{}}`。`prompt_gen` 增加 `set_custom_presets(provider)` / `all_themes()` / `_pool_for(dim)`，由 `webui_api.register()` 挂一个「读内存缓存」的 lambda（每次出图都会问，不能读盘）；保存 handler 落盘后 `reload_presets()` 换缓存，下一张图就吃到新数据。**无自定义时返回的列表与内置常量逐项相同，抽签结果逐位不变**（守卫验过）。
+  - **页面**：固定头部 + 三个分区锚点。①「主题 / 模板 / 场景」表格：内置 50 条源码只读、可停用/恢复、可「复制为自定义」；自定义项可新建 / 编辑 / 删除 / 停用，编辑弹窗支持 `label`、`group`、6 个 `*_kw` 关键词、`plain_dims` 置空维度、`fixed_dims` 固定短语（完整场景包用）。②「维度词表」：11 个池切换，内置短语可禁用/恢复，自定义短语可增删（以中等权重参与随机抽取，也能被主题关键词筛中）。③「工作流（只读）」：列出萌绘提供的工作流，文案明确「本插件没有写权限」，指到配置页与角色编辑抽屉去选用。
+  - **交互**：所有增删改走**整体 POST 即时保存**（不用滚回顶部点保存），并用 `_presetsSaveChain` 串行化请求——每次 POST 带完整 state，若不串行，A 先发后到会用旧 state 覆盖 B。保存后自动 `loadThemes()` 刷新三处主题下拉。
+  - **数据护栏**：自定义主题 id 强制 `usr_` 前缀（`random/tpl_/art_/scene_` 都承载业务语义：轮换池排除、`themeOpts` 分组、`fillThemePool`，撞前缀会搞乱内置逻辑）；`_normalize_presets` 做白名单 + 去重 + 长度/数量上限，`disabled_builtin` 只允许内置 id，`dim_custom`/`dim_disabled` 只认 11 个已知维度，`plain_dims` 只认维度名。
+  - **全链路接线**：`get_theme` / `content_theme_ids` / `resolve_theme` / `apply_theme` 的关键词子集 / `_pick_dim` / `_fixed_item` / `dim_pool_options` / `h_themes` / 批量补图的 4 处标签映射全部改走合并后的数据；`batch_fill.content_theme_ids()` 用 `getattr` 兜底，保持测试桩只给 `THEMES` 时仍可独立跑。
+  - **顺手修**：配置页 `CONFIG_SECTIONS` 漏收录 `batch_require_ref`（`_conf_schema.json` 里有这个开关，但工坊配置页根本看不到）——已补进「萌绘生图」分区。
+
+- **验证**：新增 `tests/test_presets.py`（44 项）：无 provider 时行为逐位不变、自定义主题进 `get_theme`/轮换池/`resolve_theme` 随机摇池、内置主题停用、自定义短语进抽签池与下拉、内置短语禁用、`_fixed_item` 兜底、`_normalize_presets` 脏数据白名单、以及**真跑 asyncio + 临时目录**验 `GET/POST /presets` 写盘 → reload → provider 立刻生效 → `h_themes` 返回合并列表。`test_webui_contract` 的页签数量守卫 10 → 11、BINDINGS / ROUTES 同步补齐。**28 个脚本式自检全过**（含 `Vue.compile` / `node --check` / 标签配对 / CRLF）。
+  - 额外做了**无头 Chrome 真渲染**：注入桩桥切到素材库页截图 + `getBoundingClientRect()` 量各区块，确认固定头部、主题表、维度词表、工作流三区无重叠。这一步抓到一个静态检查抓不到的白屏：`workflows` ref 一直没暴露给 `setup return`，模板里 `workflows.length` 抛 `TypeError` 让右侧整片空白；已补暴露并写进 `test_presets` 守卫。
+
 ## v0.42.2 (2026-11-15)
 
 - **总览页区块重叠修复**（用户实报「总览页面样式有问题，有区块重叠了」）。

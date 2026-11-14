@@ -499,6 +499,21 @@
   .dbg-query-row .uid { color: var(--wf-brand); cursor: pointer; font-weight: 600; }
   .dbg-query-row .uid:hover { text-decoration: underline; }
   .dbg-query-row .ts { opacity: .6; flex: none; }
+
+  /* 素材库（v0.43.0）：主题表 + 维度词 chip */
+  .word-list { display: flex; flex-wrap: wrap; gap: 6px; max-height: 300px;
+    overflow-y: auto; padding: 8px 2px; }
+  .word-chip { display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 9px; border-radius: 8px; font-size: 12px;
+    border: 1px solid var(--wf-line); background: var(--wf-surface); }
+  .word-chip.custom { border-color: var(--wf-brand); color: var(--wf-brand); }
+  .word-chip.off { opacity: .42; text-decoration: line-through; }
+  .word-chip b, .word-chip i { cursor: pointer; font-style: normal;
+    font-weight: 600; opacity: .7; }
+  .word-chip b:hover, .word-chip i:hover { opacity: 1; }
+  .preset-kw-grid { display: grid; gap: 10px;
+    grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .preset-kw-grid .lab { font-size: 12px; opacity: .7; margin-bottom: 3px; }
 </style>
 </head>
 <body>
@@ -2583,6 +2598,162 @@
             </n-card>
           </div>
 
+          <!-- ============ 素材库（v0.43.0：主题 / 模板 / 场景 / 维度词表增删改） ============ -->
+          <div v-if="menu === 'presets'">
+            <div class="sticky-head">
+              <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <span style="font-weight:600; font-size:15px;">素材库</span>
+                <span class="bind-tip" style="margin-top:0;">主题 / 模板 / 场景 / 维度词表，改动即时保存，试画与批量补图同步生效</span>
+                <n-button size="small" :loading="presetsBusy" @click="loadPresets">刷新</n-button>
+                <span class="bind-tip" style="margin-top:0;">{{ presetsMsg }}</span>
+              </div>
+              <div class="cfg-anchor">
+                <span @click="scrollToPresetSection('themes')">主题 / 场景</span>
+                <span @click="scrollToPresetSection('dims')">维度词表</span>
+                <span @click="scrollToPresetSection('wf')">工作流（只读）</span>
+              </div>
+            </div>
+            <div class="stack">
+              <div class="bind-tip" style="margin-top:0;">
+                内置项是插件自带的 50 个主题与 11 个维度词池，<b>源码只读</b>：可停用、可「复制」成自定义再改。
+                自定义项可增删改，id 自动用 <code>usr_</code> 前缀，不会撞内置的
+                <code>tpl_ / art_ / scene_</code> 分类语义。数据存在插件数据目录的
+                <code>waifu_presets.json</code>，升级插件不丢。
+              </div>
+
+              <div id="preset-sec-themes" class="chart-card cfg-sec">
+                <div class="lib-head">主题 / 模板 / 场景
+                  <span class="cnt">内置 {{ presetsBuiltin.length }} · 自定义 {{ presetsCustomThemes.length }} · 当前显示 {{ presetsThemeRows.length }}</span></div>
+                <div class="av-mode-row" style="margin-bottom:10px;">
+                  <n-button size="small" type="primary" @click="openPresetTheme(null)">+ 新建主题</n-button>
+                  <n-select v-model:value="presetsGroupFilter" :options="presetsGroupOpts"
+                            size="small" style="width:150px;"></n-select>
+                  <n-input v-model:value="presetsKeyword" size="small" clearable
+                           placeholder="搜名称 / id" style="width:180px;"></n-input>
+                </div>
+                <table class="rec-table" v-if="presetsThemeRows.length">
+                  <thead><tr><th>名称</th><th>ID</th><th>分类</th><th>来源</th><th>状态</th><th>操作</th></tr></thead>
+                  <tbody>
+                    <tr v-for="t in presetsThemeRows" :key="'pt:' + t.id">
+                      <td>{{ t.label }}</td>
+                      <td style="opacity:.6;">{{ t.id }}</td>
+                      <td>{{ presetsGroupLabels[t.group] || t.group }}</td>
+                      <td>{{ t.builtin ? "内置" : "自定义" }}</td>
+                      <td>{{ t.enabled ? "启用" : "停用" }}</td>
+                      <td>
+                        <div class="av-mode-row">
+                          <n-button size="tiny" @click="duplicatePresetTheme(t)">复制为自定义</n-button>
+                          <n-button v-if="t.builtin" size="tiny"
+                                    @click="toggleBuiltinTheme(t)">{{ t.enabled ? "停用" : "恢复" }}</n-button>
+                          <template v-else>
+                            <n-button size="tiny" @click="openPresetTheme(t)">编辑</n-button>
+                            <n-button size="tiny" type="error" secondary
+                                      @click="deletePresetTheme(t)">删除</n-button>
+                            <n-button size="tiny" @click="toggleCustomTheme(t)">{{ t.enabled ? "停用" : "启用" }}</n-button>
+                          </template>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <n-empty v-else description="没有匹配的主题" size="small"></n-empty>
+              </div>
+
+              <div id="preset-sec-dims" class="chart-card cfg-sec">
+                <div class="lib-head">维度词表
+                  <span class="cnt">自定义 {{ presetsCustomWordCount }} 条 · 当前池 {{ presetsDimWords.length }} 条</span></div>
+                <div class="av-mode-row" style="margin-bottom:8px;">
+                  <n-select v-model:value="presetsDim" :options="presetsDimOpts"
+                            size="small" style="width:180px;"></n-select>
+                  <n-input v-model:value="presetsNewWord" size="small" clearable
+                           placeholder="新增短语（回车）" style="width:220px;"
+                           @keyup.enter="addPresetWord"></n-input>
+                  <n-button size="small" @click="addPresetWord">添加自定义</n-button>
+                </div>
+                <div class="bind-tip" style="margin-top:0;">
+                  自定义短语会以中等权重参与该维度的随机抽取，也能被主题的关键词筛中；
+                  内置词可「禁用」（不改源码），随时「恢复」。
+                </div>
+                <div class="word-list">
+                  <span v-for="w in presetsDimWords" :key="'pw:' + w.zh"
+                        class="word-chip" :class="{ custom: w.custom, off: !w.enabled }">
+                    {{ w.zh }}
+                    <b v-if="w.custom" title="删除自定义短语" @click="removePresetWord(w)">×</b>
+                    <i v-else @click="togglePresetBuiltinWord(w)">{{ w.enabled ? "禁用" : "恢复" }}</i>
+                  </span>
+                </div>
+              </div>
+
+              <div id="preset-sec-wf" class="chart-card cfg-sec">
+                <div class="lib-head">工作流（只读）
+                  <span class="cnt">{{ workflows.length }} 个</span></div>
+                <div class="bind-tip" style="margin-top:0;">
+                  工作流列表来自 <b>ComfyUI萌绘</b> 插件的配置，本插件没有写权限，也不做增删改。
+                  想改用哪个工作流，到「配置 → 萌绘生图」改 <code>draw_workflow</code> /
+                  <code>img2img_workflow</code>，或在「角色库 → 编辑角色」里给单个角色指定。
+                </div>
+                <div class="word-list">
+                  <span v-for="w in workflows" :key="'pwf:' + w.name" class="word-chip">
+                    {{ w.name }}<i v-if="w.img2img" style="cursor:default;">图生图</i>
+                  </span>
+                </div>
+                <div v-if="!workflows.length" class="lib-empty">没有读到工作流（萌绘插件可能未安装或未启用）。</div>
+              </div>
+            </div>
+
+            <!-- 新建 / 编辑主题弹窗 -->
+            <n-modal v-model:show="presetsEditorOpen" preset="dialog"
+                     :title="presetsEditorIsNew ? '新建主题' : '编辑主题'" style="width: 620px;">
+              <div class="stack">
+                <div class="bind-tip" style="margin-top:0;">
+                  <code>*_kw</code> 是「按中文子串从该维度池里筛子集」，不是直接写进提示词的短语；
+                  留空 = 该维度不约束。一行一个或逗号分隔。
+                </div>
+                <div class="preset-kw-grid">
+                  <div>
+                    <div class="lab">名称</div>
+                    <n-input v-model:value="presetsEditor.label" size="small" placeholder="例如：夏日海边"></n-input>
+                  </div>
+                  <div>
+                    <div class="lab">分类</div>
+                    <n-select v-model:value="presetsEditor.group" :options="presetsEditorGroupOpts" size="small"></n-select>
+                  </div>
+                  <div>
+                    <div class="lab">ID（usr_ 前缀）</div>
+                    <n-input v-model:value="presetsEditor.id" size="small"
+                             :disabled="!presetsEditorIsNew"></n-input>
+                  </div>
+                  <div>
+                    <div class="lab">状态</div>
+                    <n-switch v-model:value="presetsEditor.enabled"></n-switch>
+                  </div>
+                </div>
+                <div class="preset-kw-grid">
+                  <div v-for="f in presetsKwFields" :key="'pk:' + f.key">
+                    <div class="lab">{{ f.label }}（{{ f.key }}）</div>
+                    <n-input v-model:value="presetsEditor[f.key]" type="textarea" :rows="2"
+                             size="small" placeholder="一行一个关键词"></n-input>
+                  </div>
+                </div>
+                <div>
+                  <div class="lab">置空维度（plain_dims：提示词完全不提及）</div>
+                  <n-select v-model:value="presetsEditor.plain_dims" multiple
+                            :options="presetsDimOpts" size="small"></n-select>
+                </div>
+                <div>
+                  <div class="lab">固定短语 fixed_dims（JSON，可选；完整场景包用）</div>
+                  <n-input v-model:value="presetsEditor.fixed_dims_text" type="textarea" :rows="3"
+                           size="small" placeholder='{"outfit": {"zh": "白色围裙", "en": "white apron"}}'></n-input>
+                </div>
+              </div>
+              <template #action>
+                <n-button size="small" @click="presetsEditorOpen = false">取消</n-button>
+                <n-button size="small" type="primary" :loading="presetsBusy"
+                          @click="savePresetTheme">保存</n-button>
+              </template>
+            </n-modal>
+          </div>
+
           <!-- ============ 配置 ============ -->
           <div v-if="menu === 'config'">
             <!-- v0.42.0：顶部固定工具条 + 分区锚点；保存按钮移到右下角悬浮条，
@@ -4011,6 +4182,7 @@
         { label: "用户查询", key: "users" },
         { label: "调试工具", key: "debug" },
         { label: "分群绑定", key: "bind" },
+        { label: "素材库", key: "presets" },
         { label: "配置", key: "config" }
       ];
       // ---- 页签路由记忆（v0.5.12）：刷新停在上次的页签 ----
@@ -7953,13 +8125,269 @@
         if (e) { openEdit(e); }
       }
 
+      // ---- 素材库（v0.43.0）：主题 / 模板 / 场景 / 维度词表 ----
+      // 所有增删改都走「整体 POST 即时保存」：后端规范化后落盘并 reload 缓存，
+      // 出图链路（prompt_gen 的 provider）下一张图就吃到新数据，不用等刷新。
+      var presetsData = Vue.ref({ themes: [], disabled_builtin: [],
+                                  dim_custom: {}, dim_disabled: {} });
+      var presetsBuiltin = Vue.ref([]);
+      var presetsDimPools = Vue.ref({});
+      var presetsDimKeys = Vue.ref([]);
+      var presetsDimLabels = Vue.ref({});
+      var presetsGroupLabels = Vue.ref({});
+      var presetsBusy = Vue.ref(false);
+      var presetsMsg = Vue.ref("");
+      var presetsGroupFilter = Vue.ref("all");
+      var presetsKeyword = Vue.ref("");
+      var presetsDim = Vue.ref("outfit");
+      var presetsNewWord = Vue.ref("");
+      var presetsEditorOpen = Vue.ref(false);
+      var presetsEditorIsNew = Vue.ref(true);
+      var presetsEditor = Vue.ref({});
+      var presetsKwFields = [
+        { key: "outfit_kw", label: "服装" },
+        { key: "bg_kw", label: "背景" },
+        { key: "pose_kw", label: "姿势" },
+        { key: "compose_kw", label: "构图" },
+        { key: "expression_kw", label: "表情" },
+        { key: "artstyle_kw", label: "画风" }
+      ];
+      var presetsGroupOpts = [
+        { label: "全部分类", value: "all" },
+        { label: "内容主题", value: "content" },
+        { label: "立绘模板", value: "tpl" },
+        { label: "纯画风", value: "art" },
+        { label: "完整场景", value: "scene" }
+      ];
+      var presetsEditorGroupOpts = presetsGroupOpts.slice(1);
+      var presetsDimOpts = Vue.computed(function () {
+        return (presetsDimKeys.value || []).map(function (k) {
+          return { label: presetsDimLabels.value[k] || k, value: k };
+        });
+      });
+      var presetsCustomThemes = Vue.computed(function () {
+        return presetsData.value.themes || [];
+      });
+      var presetsThemeRows = Vue.computed(function () {
+        var off = {};
+        (presetsData.value.disabled_builtin || []).forEach(function (x) { off[x] = true; });
+        var rows = (presetsBuiltin.value || []).map(function (t) {
+          return { id: t.id, label: t.label, group: t.group, builtin: true,
+                   enabled: !off[t.id] };
+        });
+        (presetsData.value.themes || []).forEach(function (t) {
+          rows.push({ id: t.id, label: t.label, group: t.group, builtin: false,
+                      enabled: t.enabled !== false });
+        });
+        var g = presetsGroupFilter.value;
+        var kw = String(presetsKeyword.value || "").trim().toLowerCase();
+        return rows.filter(function (r) {
+          if (g !== "all" && r.group !== g) { return false; }
+          if (kw && (String(r.label) + " " + String(r.id)).toLowerCase().indexOf(kw) < 0) {
+            return false;
+          }
+          return true;
+        });
+      });
+      var presetsDimWords = Vue.computed(function () {
+        var dim = presetsDim.value;
+        var off = {};
+        ((presetsData.value.dim_disabled || {})[dim] || []).forEach(function (x) { off[x] = true; });
+        var out = ((presetsDimPools.value || {})[dim] || []).map(function (zh) {
+          return { zh: zh, custom: false, enabled: !off[zh] };
+        });
+        ((presetsData.value.dim_custom || {})[dim] || []).forEach(function (zh) {
+          out.push({ zh: zh, custom: true, enabled: !off[zh] });
+        });
+        return out;
+      });
+      var presetsCustomWordCount = Vue.computed(function () {
+        var dc = presetsData.value.dim_custom || {};
+        var n = 0;
+        Object.keys(dc).forEach(function (k) { n += (dc[k] || []).length; });
+        return n;
+      });
+      function scrollToPresetSection(name) {
+        var el = document.getElementById("preset-sec-" + name);
+        if (el && el.scrollIntoView) {
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
+      async function loadPresets() {
+        presetsBusy.value = true;
+        try {
+          var res = await apiGet("presets");
+          presetsBuiltin.value = (res && res.builtin_themes) || [];
+          presetsDimPools.value = (res && res.dim_pools) || {};
+          presetsDimKeys.value = (res && res.dim_keys) || [];
+          presetsDimLabels.value = (res && res.dim_labels) || {};
+          presetsGroupLabels.value = (res && res.group_labels) || {};
+          presetsData.value = Object.assign(
+            { themes: [], disabled_builtin: [], dim_custom: {}, dim_disabled: {} },
+            (res && res.custom) || {});
+          presetsMsg.value = "已载入";
+        } catch (e) {
+          presetsMsg.value = "载入失败";
+        } finally { presetsBusy.value = false; }
+      }
+      // 每次 POST 都带完整 state，但响应可能乱序：A 先发后到会用旧 state
+      // 覆盖 B。串行化保证「按点击顺序写盘」，快速连点也不会丢改动。
+      var _presetsSaveChain = Promise.resolve();
+      async function _doSavePresets(msg) {
+        presetsBusy.value = true;
+        try {
+          var res = await apiPost("presets", { presets: presetsData.value });
+          presetsData.value = Object.assign({}, presetsData.value, (res && res.custom) || {});
+          presetsMsg.value = msg || "已保存";
+          await loadThemes();   // 试画台 / 立绘库 / 生成弹窗的主题下拉同步
+        } catch (e) {
+          presetsMsg.value = "保存失败，已回滚到本地快照";
+          await loadPresets();
+        } finally { presetsBusy.value = false; }
+      }
+      function savePresets(msg) {
+        _presetsSaveChain = _presetsSaveChain.then(
+          function () { return _doSavePresets(msg); },
+          function () { return _doSavePresets(msg); });
+        return _presetsSaveChain;
+      }
+      function _nextThemeId() {
+        return "usr_" + Date.now().toString(36) + "_" +
+               Math.floor(Math.random() * 1000).toString(36);
+      }
+      function _editorFrom(t) {
+        var e = { id: t.id || _nextThemeId(), label: t.label || "",
+                  group: t.group || "content", enabled: t.enabled !== false,
+                  plain_dims: (t.plain_dims || []).slice(),
+                  fixed_dims_text: JSON.stringify(t.fixed_dims || {}, null, 2) };
+        presetsKwFields.forEach(function (f) {
+          e[f.key] = (t[f.key] || []).join("\n");
+        });
+        return e;
+      }
+      function openPresetTheme(t) {
+        presetsEditorIsNew.value = !t;
+        presetsEditor.value = _editorFrom(t || {});
+        presetsEditorOpen.value = true;
+      }
+      function duplicatePresetTheme(t) {
+        var src = t;
+        if (t.builtin) {
+          src = (presetsBuiltin.value || []).filter(function (x) {
+            return x.id === t.id;
+          })[0] || t;
+        } else {
+          src = (presetsData.value.themes || []).filter(function (x) {
+            return x.id === t.id;
+          })[0] || t;
+        }
+        var copy = _editorFrom(src);
+        copy.id = _nextThemeId();
+        copy.label = String(src.label || "") + "（副本）";
+        presetsEditorIsNew.value = true;
+        presetsEditor.value = copy;
+        presetsEditorOpen.value = true;
+      }
+      async function savePresetTheme() {
+        var e = presetsEditor.value;
+        var label = String(e.label || "").trim();
+        if (!label) { message.warning("请填名称"); return; }
+        var id = String(e.id || "").trim();
+        if (!/^usr_[a-z0-9_]+$/.test(id)) {
+          message.warning("ID 必须以 usr_ 开头，且只含小写字母 / 数字 / 下划线");
+          return;
+        }
+        var arr = (presetsData.value.themes || []).slice();
+        if (presetsEditorIsNew.value && arr.some(function (x) { return x.id === id; })) {
+          message.warning("这个 ID 已存在，换一个"); return;
+        }
+        var item = { id: id, label: label, group: e.group || "content",
+                     enabled: e.enabled !== false,
+                     plain_dims: (e.plain_dims || []).slice() };
+        presetsKwFields.forEach(function (f) {
+          item[f.key] = String(e[f.key] || "").split(/[\n,，]/)
+            .map(function (s) { return s.trim(); })
+            .filter(function (s) { return !!s; }).slice(0, 40);
+        });
+        var fd = {};
+        var raw = String(e.fixed_dims_text || "").trim();
+        if (raw) {
+          try { fd = JSON.parse(raw); }
+          catch (err) { message.warning("fixed_dims 不是合法 JSON"); return; }
+          if (!fd || typeof fd !== "object" || Array.isArray(fd)) {
+            message.warning("fixed_dims 必须是 JSON 对象"); return;
+          }
+        }
+        item.fixed_dims = fd;
+        var idx = -1;
+        arr.forEach(function (x, i) { if (x.id === id) { idx = i; } });
+        if (idx >= 0) { arr[idx] = item; } else { arr.push(item); }
+        presetsData.value = Object.assign({}, presetsData.value, { themes: arr });
+        presetsEditorOpen.value = false;
+        await savePresets("主题已保存");
+      }
+      async function deletePresetTheme(t) {
+        var arr = (presetsData.value.themes || []).filter(function (x) {
+          return x.id !== t.id;
+        });
+        presetsData.value = Object.assign({}, presetsData.value, { themes: arr });
+        await savePresets("主题已删除");
+      }
+      async function toggleBuiltinTheme(t) {
+        var off = (presetsData.value.disabled_builtin || []).slice();
+        var i = off.indexOf(t.id);
+        if (i >= 0) { off.splice(i, 1); } else { off.push(t.id); }
+        presetsData.value = Object.assign({}, presetsData.value,
+                                          { disabled_builtin: off });
+        await savePresets(t.enabled ? "内置主题已停用" : "内置主题已恢复");
+      }
+      async function toggleCustomTheme(t) {
+        var arr = (presetsData.value.themes || []).map(function (x) {
+          return x.id === t.id ? Object.assign({}, x, { enabled: !t.enabled }) : x;
+        });
+        presetsData.value = Object.assign({}, presetsData.value, { themes: arr });
+        await savePresets(t.enabled ? "自定义主题已停用" : "自定义主题已启用");
+      }
+      async function addPresetWord() {
+        var w = String(presetsNewWord.value || "").trim();
+        if (!w) { return; }
+        var dim = presetsDim.value;
+        var dc = Object.assign({}, presetsData.value.dim_custom || {});
+        var arr = (dc[dim] || []).slice();
+        if (arr.indexOf(w) >= 0) { message.warning("这个短语已在自定义里"); return; }
+        arr.push(w);
+        dc[dim] = arr;
+        presetsData.value = Object.assign({}, presetsData.value, { dim_custom: dc });
+        presetsNewWord.value = "";
+        await savePresets("已添加自定义短语");
+      }
+      async function removePresetWord(w) {
+        var dc = Object.assign({}, presetsData.value.dim_custom || {});
+        dc[presetsDim.value] = (dc[presetsDim.value] || []).filter(function (x) {
+          return x !== w.zh;
+        });
+        presetsData.value = Object.assign({}, presetsData.value, { dim_custom: dc });
+        await savePresets("已删除自定义短语");
+      }
+      async function togglePresetBuiltinWord(w) {
+        var dim = presetsDim.value;
+        var dd = Object.assign({}, presetsData.value.dim_disabled || {});
+        var arr = (dd[dim] || []).slice();
+        var i = arr.indexOf(w.zh);
+        if (i >= 0) { arr.splice(i, 1); } else { arr.push(w.zh); }
+        dd[dim] = arr;
+        presetsData.value = Object.assign({}, presetsData.value, { dim_disabled: dd });
+        await savePresets(w.enabled ? "内置短语已禁用" : "内置短语已恢复");
+      }
+
       // ---- 配置（schema 驱动；group_pools 在分群绑定页签管理，此处排除） ----
       var CONFIG_SECTIONS = [
         { title: "基础", keys: ["timezone", "salt", "reroll_daily_limit", "portraits_per_char",
                                 "allow_unverified", "ui_grid_cols", "disabled_groups"] },
         { title: "萌绘生图", keys: ["gen_source_mode", "img2img_prob", "artist_draw_enabled", "draw_workflow", "img2img_workflow",
                                     "draw_width", "draw_height", "draw_timeout", "img2img_denoise",
-                                    "draw_negative_enabled", "draw_negative_prompt", "announce_enabled"] },
+                                    "draw_negative_enabled", "draw_negative_prompt", "announce_enabled",
+                                    "batch_require_ref"] },
         { title: "提示词与变化", keys: ["prompt_llm_enabled", "prompt_llm_provider",
                                         "prompt_llm_timeout", "variations_enabled"] }
       ];
@@ -8205,7 +8633,7 @@
         // 不必依赖 watch 时机，查询历史一定不为空）
         loadDebugHistory();
         return Promise.all([loadGallery(), loadConfig(), loadWorks(), loadWorkflows(),
-                            loadLlmProviders(), loadThemes()]);
+                            loadLlmProviders(), loadThemes(), loadPresets()]);
       });
 
       // v0.34.2：全局出图队列轮询（顶部指示器 + 队列面板共用一份数据）
@@ -8459,11 +8887,31 @@
         addBindRow: addBindRow, setRowGid: setRowGid, setRowSeries: setRowSeries,
         removeBindRow: removeBindRow,
         doSaveBind: doSaveBind,
+        // v0.43.0：素材库
+        presetsData: presetsData, presetsBuiltin: presetsBuiltin,
+        presetsDimPools: presetsDimPools, presetsDimKeys: presetsDimKeys,
+        presetsDimLabels: presetsDimLabels, presetsGroupLabels: presetsGroupLabels,
+        presetsBusy: presetsBusy, presetsMsg: presetsMsg,
+        presetsGroupFilter: presetsGroupFilter, presetsKeyword: presetsKeyword,
+        presetsDim: presetsDim, presetsNewWord: presetsNewWord,
+        presetsEditorOpen: presetsEditorOpen, presetsEditorIsNew: presetsEditorIsNew,
+        presetsEditor: presetsEditor, presetsKwFields: presetsKwFields,
+        presetsGroupOpts: presetsGroupOpts, presetsEditorGroupOpts: presetsEditorGroupOpts,
+        presetsDimOpts: presetsDimOpts, presetsCustomThemes: presetsCustomThemes,
+        presetsThemeRows: presetsThemeRows, presetsDimWords: presetsDimWords,
+        presetsCustomWordCount: presetsCustomWordCount,
+        loadPresets: loadPresets, savePresets: savePresets,
+        openPresetTheme: openPresetTheme, savePresetTheme: savePresetTheme,
+        deletePresetTheme: deletePresetTheme, duplicatePresetTheme: duplicatePresetTheme,
+        toggleBuiltinTheme: toggleBuiltinTheme, toggleCustomTheme: toggleCustomTheme,
+        addPresetWord: addPresetWord, removePresetWord: removePresetWord,
+        togglePresetBuiltinWord: togglePresetBuiltinWord,
+        scrollToPresetSection: scrollToPresetSection,
         configSections: configSections, configModel: configModel, configSaving: configSaving,
         configDirty: configDirty, scrollToConfigSection: scrollToConfigSection,
         uiCols: uiCols, colOpts: colOpts, uiColsSel: uiColsSel,
         saveConfig: saveConfig, optOpts: optOpts, isMulti: isMulti,
-        isWorkflowKey: isWorkflowKey, wfOpts: wfOpts,
+        isWorkflowKey: isWorkflowKey, wfOpts: wfOpts, workflows: workflows,
         isLlmKey: isLlmKey, llmOpts: llmOpts
       };
     }

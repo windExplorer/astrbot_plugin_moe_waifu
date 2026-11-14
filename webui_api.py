@@ -1986,11 +1986,158 @@ async def h_llm_providers(plugin) -> dict:
     return ok({"providers": items})
 
 
+# ---------- 自定义素材库（v0.43.0：工坊「素材库」页签） ----------
+# 主题 / 模板 / 场景 / 维度词表原本全是 prompt_gen.py 的硬编码常量，用户想调
+# 只能改源码重打包。这里把「用户自建 / 停用」独立落到
+# data_dir/waifu_presets.json：内置项只读但可停用、可复制成自定义；自定义项
+# 可增删改。内存缓存给 prompt_gen 的 provider 用（每次出图都会调，不能读盘），
+# 保存后立刻 reload，试画台 / 批量补图 / 抽卡预览同步生效。
+_PRESETS_FILE = "waifu_presets.json"
+_PRESETS_CACHE = {"themes": [], "disabled_builtin": [],
+                  "dim_custom": {}, "dim_disabled": {}}
+_DIM_KEYS = tuple(prompt_gen.DIMS.keys())
+_DIM_LABELS = {
+    "compose": "构图", "framing": "取景", "artstyle": "画风",
+    "outfit": "服装", "footwear": "鞋袜", "headwear": "头饰",
+    "outerwear": "外套", "background": "背景", "pose": "姿势",
+    "expression": "表情", "body": "体型",
+}
+_GROUP_LABELS = {"content": "内容主题", "tpl": "立绘模板",
+                 "art": "纯画风", "scene": "完整场景"}
+_THEME_KW_FIELDS = ("outfit_kw", "bg_kw", "pose_kw", "compose_kw",
+                    "expression_kw", "artstyle_kw")
+
+
+def _theme_group(tid) -> str:
+    tid = str(tid or "")
+    if tid.startswith("tpl_"):
+        return "tpl"
+    if tid.startswith("art_"):
+        return "art"
+    if tid.startswith("scene_"):
+        return "scene"
+    return "content"
+
+
+def _presets_path(plugin) -> Path:
+    return Path(plugin._data_dir) / _PRESETS_FILE
+
+
+def _clean_str_list(v, limit=40, item_len=80) -> list:
+    """任意输入 → 去空去重的短字符串数组（按行或逗号分隔都可）。"""
+    if isinstance(v, str):
+        v = [x.strip() for x in v.replace("，", ",").replace("\n", ",").split(",")]
+    if not isinstance(v, (list, tuple)):
+        return []
+    out, seen = [], set()
+    for x in list(v)[:limit]:
+        s = str(x or "").strip()[:item_len]
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
+def _normalize_presets(data) -> dict:
+    """把前端送来的任意形状收成固定结构 + 白名单，脏数据不进运行时。"""
+    d = data if isinstance(data, dict) else {}
+    builtin_ids = {str(t["id"]) for t in prompt_gen.THEMES}
+    disabled = [x for x in _clean_str_list(d.get("disabled_builtin"), 200)
+                if x in builtin_ids]
+    themes = {}
+    for t in (d.get("themes") or [])[:200]:
+        if not isinstance(t, dict):
+            continue
+        tid = str(t.get("id") or "").strip()[:48]
+        label = str(t.get("label") or "").strip()[:60]
+        # 自定义 id 必须 usr_ 前缀：random/tpl_/art_/scene_ 都承载业务语义
+        # （轮换池排除、下拉分组），撞前缀会把内置逻辑搞乱。
+        if not tid.startswith("usr_") or not label:
+            continue
+        grp = str(t.get("group") or "content")
+        item = {"id": tid, "label": label,
+                "group": grp if grp in _GROUP_LABELS else "content",
+                "enabled": bool(t.get("enabled", True))}
+        for k in _THEME_KW_FIELDS:
+            item[k] = _clean_str_list(t.get(k))
+        item["plain_dims"] = [x for x in _clean_str_list(t.get("plain_dims"), 20)
+                              if x in _DIM_KEYS]
+        fd = t.get("fixed_dims")
+        if isinstance(fd, dict):
+            item["fixed_dims"] = {
+                k: {"zh": str(v.get("zh") or "")[:80],
+                    "en": str(v.get("en") or "")[:120]}
+                for k, v in list(fd.items())[:20]
+                if k in _DIM_KEYS and isinstance(v, dict)
+                and str(v.get("zh") or "").strip()}
+        themes[tid] = item
+    dim_custom, dim_disabled = {}, {}
+    dc = d.get("dim_custom") if isinstance(d.get("dim_custom"), dict) else {}
+    dd = d.get("dim_disabled") if isinstance(d.get("dim_disabled"), dict) else {}
+    for dim in _DIM_KEYS:
+        words = _clean_str_list(dc.get(dim), 200)
+        if words:
+            dim_custom[dim] = words
+        off = _clean_str_list(dd.get(dim), 1000)
+        if off:
+            dim_disabled[dim] = off
+    return {"version": 1, "themes": list(themes.values()),
+            "disabled_builtin": disabled,
+            "dim_custom": dim_custom, "dim_disabled": dim_disabled}
+
+
+def reload_presets(plugin) -> dict:
+    """读盘 → 规范化 → 换掉内存缓存（register 与保存后调用）。"""
+    global _PRESETS_CACHE
+    raw = {}
+    try:
+        raw = _json_load(_presets_path(plugin))
+    except FileNotFoundError:
+        pass
+    except Exception:
+        logger.warning(f"[{PLUGIN_NAME}] 自定义素材读取失败，按内置处理\n"
+                       f"{traceback.format_exc()}")
+    _PRESETS_CACHE = _normalize_presets(raw)
+    return _PRESETS_CACHE
+
+
+async def h_presets_get(plugin) -> dict:
+    c = reload_presets(plugin)
+    return ok({
+        "builtin_themes": [
+            dict(t, group=_theme_group(t.get("id")), builtin=True)
+            for t in prompt_gen.THEMES],
+        "dim_pools": {
+            k: [str(it.get("zh") or "") for it in v
+                if str(it.get("zh") or "").strip()]
+            for k, v in prompt_gen.DIMS.items()},
+        "dim_keys": list(_DIM_KEYS),
+        "dim_labels": _DIM_LABELS,
+        "group_labels": _GROUP_LABELS,
+        "custom": c,
+    })
+
+
+async def h_presets_set(plugin) -> dict:
+    body = await _body()
+    payload = body.get("presets") if isinstance(body.get("presets"), dict) else body
+    data = _normalize_presets(payload)
+    try:
+        _json_save(_presets_path(plugin), data)
+    except Exception as exc:
+        return err(f"素材库写盘失败：{exc}")
+    reload_presets(plugin)
+    return ok({"custom": _PRESETS_CACHE,
+               "themes": len(prompt_gen.all_themes()),
+               "content_ids": len(prompt_gen.content_theme_ids())})
+
+
 # ---------- 主题与提示词预览（试画台第 2 步，v0.6.0） ----------
 
 async def h_themes(plugin) -> dict:
+    # v0.43.0：下拉走合并后的主题（自定义可用、被停用的内置不再出现）
     return ok({"themes": [{"id": t["id"], "label": t["label"]}
-                          for t in prompt_gen.THEMES]})
+                          for t in prompt_gen.all_themes()]})
 
 
 async def h_prompt_preview(plugin) -> dict:
@@ -2057,7 +2204,7 @@ async def h_prompt_preview(plugin) -> dict:
     _theme_label = ""
     if _theme_rec:
         _theme_label = next(
-            (str(t.get("label") or "") for t in prompt_gen.THEMES
+            (str(t.get("label") or "") for t in prompt_gen.all_themes()
              if str(t.get("id") or "") == str(_theme_rec)), "")
     theme_resolved = ({"id": str(_theme_rec), "label": _theme_label}
                       if _theme_rec else None)
@@ -2604,7 +2751,7 @@ async def h_batch_preview(plugin) -> dict:
     cands, skipped, quota, require_ref = _batch_candidates(plugin, body)
     salt = str(plugin._cfg("salt", "moe-waifu"))
     date = plugin._today()
-    labels = {t["id"]: t["label"] for t in prompt_gen.THEMES}
+    labels = {t["id"]: t["label"] for t in prompt_gen.all_themes()}
     items = []
     for c in cands:
         e = c["entry"]
@@ -2651,7 +2798,7 @@ async def h_batch_reroll(plugin) -> dict:
         cid, batch_fill.char_salt(salt, cid, nonce),
         int(body.get("need") or 0), have=int(body.get("have") or 0),
         date=plugin._today(), used=used)
-    labels = {t["id"]: t["label"] for t in prompt_gen.THEMES}
+    labels = {t["id"]: t["label"] for t in prompt_gen.all_themes()}
     labels_list = [labels.get(t, t) for t in themes]
     return ok({"char_id": cid, "nonce": nonce, "themes": labels_list,
                "themes_text": " / ".join(labels_list)})
@@ -2755,7 +2902,7 @@ async def h_batch_char_preview(plugin) -> dict:
         cid, batch_fill.char_salt(str(plugin._cfg("salt", "moe-waifu")), cid),
         need, have=have, date=plugin._today(), used=used)
     labels = {str(t.get("id") or ""): str(t.get("label") or "")
-              for t in prompt_gen.THEMES}
+              for t in prompt_gen.all_themes()}
     return ok({
         "queued": len(themes), "have": have, "quota": quota,
         "themes": [{"index": i, "theme_id": tid,
@@ -2972,8 +3119,9 @@ async def h_config_set(plugin) -> dict:
 # v0.9.0：原「记录 · 调试」拆成 抽签记录 / 数据统计 / 用户查询 / 调试工具 四页，
 # 旧键 records 保留（老记忆值仍落在抽签记录页，不会跳回角色库）。
 # v0.10.0：新增「总览」并放到第一栏，同时成为无记忆时的默认页签。
+# v0.43.0：新增「素材库」页签（主题 / 模板 / 场景 / 维度词表增删改）
 _UI_MENUS = ("overview", "chars", "works", "try", "records", "stats",
-             "users", "debug", "bind", "config")
+             "users", "debug", "bind", "presets", "config")
 
 
 def _ui_state_path(plugin) -> Path:
@@ -4696,6 +4844,14 @@ async def h_avatars_batch_stop(plugin) -> dict:
 
 
 def register(plugin) -> None:
+    # v0.43.0：挂自定义素材 provider。用「读内存缓存」的 lambda 而不是读盘函数，
+    # 因为 prompt_gen 每次出图都会问一次；保存 handler 里 reload 换掉缓存即可。
+    try:
+        reload_presets(plugin)
+        prompt_gen.set_custom_presets(lambda: _PRESETS_CACHE)
+    except Exception:
+        logger.warning(f"[{PLUGIN_NAME}] 自定义素材 provider 挂载失败\n"
+                       f"{traceback.format_exc()}")
     # v0.25.0：读路径已切新表，写 JSON 后必须同步，否则会出现「改完看不到」
     try:
         store_obj = getattr(plugin, "_store", None)
@@ -4710,6 +4866,9 @@ def register(plugin) -> None:
         ("/workflows", h_workflows, ["GET"]),
         ("/llm_providers", h_llm_providers, ["GET"]),
         ("/themes", h_themes, ["GET"]),
+        # v0.43.0：素材库（主题 / 模板 / 场景 / 维度词表）读 + 整体写
+        ("/presets", h_presets_get, ["GET"]),
+        ("/presets", h_presets_set, ["POST"]),
         ("/prompt/preview", h_prompt_preview, ["POST"]),
         # v0.38.0：AI 画师模式——不经预设维度池，LLM 以画师身份整体创作
         ("/prompt/artist", h_prompt_artist, ["POST"]),

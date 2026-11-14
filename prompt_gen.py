@@ -1263,11 +1263,68 @@ THEMES = (
 )
 
 
+# ---------- 自定义素材（v0.43.0：工坊「素材库」页签） ----------
+# 内置 THEMES / DIMS 是包内硬编码常量，插件升级会整个覆盖，也不该让用户在
+# 源码里改。用户自建/停用的素材统一落在 data_dir/waifu_presets.json，由
+# webui_api.register() 挂一个「取当前内存缓存」的 provider；这里只认纯 dict，
+# 不碰文件 I/O，prompt_gen 仍是可独立导入的纯模块（测试桩不用跟着改）。
+_CUSTOM_PRESETS_PROVIDER = None
+
+
+def set_custom_presets(fn) -> None:
+    """挂自定义素材 provider（callable → dict）；传 None 回到纯内置。"""
+    global _CUSTOM_PRESETS_PROVIDER
+    _CUSTOM_PRESETS_PROVIDER = fn
+
+
+def _custom() -> dict:
+    if _CUSTOM_PRESETS_PROVIDER is None:
+        return {}
+    try:
+        d = _CUSTOM_PRESETS_PROVIDER()
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def all_themes() -> list:
+    """内置主题（去掉被停用的）+ 自定义主题（enabled=true）。
+
+    所有消费方（get_theme / content_theme_ids / 标签映射）都走这里，保证
+    「素材库里改一下」立刻在试画台、批量补图、抽卡预览同时生效。
+    """
+    c = _custom()
+    disabled = {str(x) for x in (c.get("disabled_builtin") or [])}
+    out = [dict(t) for t in THEMES if str(t.get("id") or "") not in disabled]
+    for t in (c.get("themes") or []):
+        if isinstance(t, dict) and t.get("enabled", True) and str(t.get("id") or "").strip():
+            out.append(dict(t))
+    return out
+
+
+def _pool_for(dim: str) -> list:
+    """该维度池：内置项（去掉被禁用的）+ 自定义短语（w=2，英文兜底中文）。
+
+    无自定义数据时返回的列表与 DIMS[dim] 逐项相同，抽签结果逐位不变。
+    """
+    c = _custom()
+    dd = c.get("dim_disabled") or {}
+    dc = c.get("dim_custom") or {}
+    disabled = {str(x).strip() for x in (dd.get(dim) or []) if str(x).strip()}
+    items = [it for it in (DIMS.get(dim) or [])
+             if str(it.get("zh") or "").strip() not in disabled]
+    for zh in (dc.get(dim) or []):
+        zh = str(zh or "").strip()[:80]
+        if zh and zh not in disabled:
+            items.append({"w": 2, "zh": zh, "en": zh})
+    return items
+
+
 def get_theme(theme_id: str) -> dict | None:
     tid = str(theme_id or "").strip()
     if not tid or tid == "random":
         return None
-    return next((t for t in THEMES if t["id"] == tid), None)
+    return next((t for t in all_themes() if t["id"] == tid), None)
 
 
 def content_theme_ids() -> list:
@@ -1276,8 +1333,9 @@ def content_theme_ids() -> list:
     v0.41.0：scene_ 完整场景是「整套构图手动选用」的包——固定穿搭/鞋袜/姿势/
     取景，日常抽卡与批量补图套上它会显得千篇一律（场景包就该一张一个想法），
     故与 tpl_ 同等对待：只在面板显式选择时生效。
+    v0.43.0：改用 all_themes()，自定义主题自动进批量补图轮换池。
     """
-    return [str(t["id"]) for t in THEMES
+    return [str(t["id"]) for t in all_themes()
             if str(t.get("id") or "") != "random"
             and not str(t.get("id") or "").startswith("tpl_")
             and not str(t.get("id") or "").startswith("scene_")]
@@ -1322,7 +1380,7 @@ def apply_theme(picks: dict, seed_int: int, theme: dict | None) -> dict:
         kws = _theme_kws(dim, theme)
         if not kws:
             continue
-        subset = [it for it in DIMS[dim]
+        subset = [it for it in _pool_for(dim)
                   if any(kw in str(it.get("zh") or "") for kw in kws)]
         if subset:
             picks[dim] = _weighted_pick(
@@ -1364,7 +1422,7 @@ def _pick_dim(dim: str, seed_int: int, theme: dict | None = None,
     """单维度抽签：主题带该维度关键词 → 子集内摇（tag 混入主题 id，与
     apply_theme 历史行为逐位一致）；否则全池摇。non_empty_only 用于「显式启用」
     默认沉默的维度（compose/body）：子集内没有非空项时才回落全池。"""
-    items = DIMS[dim]
+    items = _pool_for(dim)
     kws = _theme_kws(dim, theme)
     if kws:
         subset = [it for it in items
@@ -1388,7 +1446,7 @@ def _fixed_item(dim: str, zh: str) -> dict:
     if not zh:
         return {"w": 0, "zh": "", "en": ""}
     en = ""
-    for it in DIMS[dim]:
+    for it in _pool_for(dim):
         if str(it.get("zh") or "") == zh:
             en = str(it.get("en") or "")
             break
@@ -1396,10 +1454,13 @@ def _fixed_item(dim: str, zh: str) -> dict:
 
 
 def dim_pool_options() -> dict:
-    """预览面板维度下拉用：每个维度池的非空中文短语（按权重降序）。"""
+    """预览面板维度下拉用：每个维度池的非空中文短语（按权重降序）。
+
+    v0.43.0：走 _pool_for()，自定义短语与内置项一起出现在下拉里。
+    """
     out = {}
-    for dim, items in DIMS.items():
-        ne = [it for it in items if str(it.get("zh") or "").strip()]
+    for dim in DIMS:
+        ne = [it for it in _pool_for(dim) if str(it.get("zh") or "").strip()]
         ne.sort(key=lambda it: -int(it.get("w", 1)))
         out[dim] = [str(it.get("zh") or "") for it in ne]
     return out

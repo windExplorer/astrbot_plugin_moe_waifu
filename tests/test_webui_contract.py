@@ -84,6 +84,15 @@ ovVerifiedPct ovFullPct ovWithPortraitPct ovDrawSrcPct
 galActiveCount dbgQueries configDirty scrollToConfigSection
 galAvatarGenOpen openAvatarGen avatarGenMode avatarGenSrc avatarGenSrcLabel
 avatarGenResult avatarGenApplying applyAvatarResult discardAvatarResult
+presetsBuiltin presetsCustomThemes presetsThemeRows presetsGroupLabels
+presetsBusy presetsMsg presetsGroupFilter presetsKeyword presetsDim presetsNewWord
+presetsEditorOpen presetsEditorIsNew presetsEditor presetsKwFields
+presetsGroupOpts presetsEditorGroupOpts presetsDimOpts presetsDimWords
+presetsCustomWordCount
+loadPresets openPresetTheme savePresetTheme deletePresetTheme
+duplicatePresetTheme toggleBuiltinTheme toggleCustomTheme
+addPresetWord removePresetWord togglePresetBuiltinWord
+scrollToPresetSection
 """.split()
 
 ROUTES = """
@@ -105,6 +114,7 @@ ROUTES = """
 /websearch/status
 /pools/profile_save /pools/profile_gen /char/summary
 /pools/avatar_set /pools/avatar_clear /avatar/generate /avatar/discard
+/presets
 /avatars/batch /avatars/batch_status /avatars/batch_stop
 """.split()
 
@@ -128,7 +138,7 @@ def main():
     check("后端存在 _UI_MENUS", ui_block is not None)
     back_keys = re.findall(r'"(\w+)"', ui_block.group(1)) if ui_block else []
     check("页签前后一致（页签记忆不会写入被拒）",
-          front_keys == back_keys and len(front_keys) == 10
+          front_keys == back_keys and len(front_keys) == 11
           and front_keys[0] == "overview",
           f"front={front_keys} back={back_keys}")
     check("四个新页签齐全",

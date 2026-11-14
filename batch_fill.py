@@ -46,8 +46,12 @@ def content_theme_ids() -> list:
     v0.19.0：`art_*` 纯画风主题（只约束画风）也在此列——批量补图时「这一批换成
     水彩/水墨/赛博」是用户要的效果，不该只能一张张手点。
     """
-    return [t["id"] for t in prompt_gen.THEMES
-            if t["id"] != "random" and not str(t["id"]).startswith("tpl_")
+    # v0.43.0：优先走 prompt_gen.all_themes()（含用户自定义主题 / 被停用的内置
+    # 主题）；测试桩里可能只有 THEMES，用 getattr 兜底保持纯函数可独立测。
+    getter = getattr(prompt_gen, "all_themes", None)
+    themes = getter() if callable(getter) else prompt_gen.THEMES
+    return [str(t["id"]) for t in themes
+            if str(t["id"]) != "random" and not str(t["id"]).startswith("tpl_")
             and not str(t["id"]).startswith("scene_")]
 
 
