@@ -85,6 +85,7 @@ AstrBot Dashboard → 插件 → 萌萌今日老婆 → 打开插件 Page（仅�
 | `strategy` | **画法策略**：`base`（底模认识的角色 tag 直出）/ `lora`（`{"type":"lora","loras":["xxx:0.8"]}`）/ `img2img`（`{"type":"img2img","ref":"<官方立绘 URL 或本地路径>"}`） |
 | `tags_en` | 英文 danbooru 角色标签（角色 tag + 系列 tag + 稳定外观特征）。括号要写成 `\(` `\)` 转义 |
 | `verified` | 试画验证过「画得对」才参与抽卡（可在配置里放宽） |
+| `keep_headwear` / `keep_outerwear` / `keep_footwear` | **人设固装**（v0.35.0，可选，默认关）：帽子 / 外套 / 鞋袜属于角色特色（如女巫的尖顶帽）时勾选对应项——抽卡与补图不再随机摘掉或更换它们（不产出「摘掉帽子」类指令、外观 tags 不剥离），始终按角色原本设定画 |
 | `color` | 角色应援色（hex），整张卡随它定色 |
 
 **怎么保证画对？** 策略是试出来的，不是配置出来的：

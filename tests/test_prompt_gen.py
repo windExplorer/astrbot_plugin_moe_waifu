@@ -1104,4 +1104,45 @@ check("探测：工作流未绑基础库 → danbooru",
 check("探测：萌绘未装 → danbooru",
       prompt_gen.detect_t2i_style(_FakeCtx(None), "x") == "danbooru")
 
+# ---------- 人设固装（v0.35.0）：keep_xxx 让派生维度整维沉默 ----------
+# 女巫的尖顶帽是角色特色：头饰固装后，200 个种子里头饰一律沉默，
+# 而同种子不加固装时「哥特」家族头饰恒为「摘掉帽子」（_FHW_PLAIN 单候选）。
+KE = {"id": "witch", "name": "魔女", "series": "x",
+      "tags_en": "witch hat, cape", "strategy_type": "base",
+      "keep_headwear": True}
+kk = prompt_gen.keep_dims_of(KE)
+check("固装集合换算", kk == frozenset({"headwear"}))
+check("无开关条目固装集合为空",
+      prompt_gen.keep_dims_of({"id": "x", "tags_en": "t"}) == frozenset())
+_ok = all(prompt_gen.pick_variations(s, None, "哥特萝莉裙", kk)["headwear"]["zh"] == ""
+          for s in range(200))
+check("固装：有穿搭时头饰 200 种子全沉默", _ok)
+check("对照：无固装时同家族头饰恒产出摘帽",
+      all(prompt_gen.pick_variations(s, None, "哥特萝莉裙")["headwear"]["zh"] == "摘掉帽子"
+          for s in range(200)))
+_kw = prompt_gen.pick_variations(555, None, "哥特萝莉裙", kk)
+check("固装：其余派生维度照常（外套仍派生）", _kw["outerwear"]["zh"] != "")
+check("固装：外观 tags 不剥帽", "witch hat" in prompt_gen._entry_tags(KE, _kw))
+_kn = prompt_gen.pick_variations(555, None, "哥特萝莉裙")
+check("对照：摘帽维度命中时 tags 剥帽",
+      "witch hat" not in prompt_gen._entry_tags(KE, _kn))
+check("固装：随档复算同口径（无摘帽条目）",
+      not any("帽" in zh for _l, zh in
+              prompt_gen.describe_variations(555, "", "哥特萝莉裙", keep=kk)))
+check("对照：随档复算不加 keep 含摘帽",
+      any(zh == "摘掉帽子" for _l, zh in
+          prompt_gen.describe_variations(555, "", "哥特萝莉裙")))
+_inst = prompt_gen.build_local_instruction(KE, _kw)
+check("固装：img2img 编辑指令无摘帽子句", "摘掉帽子" not in _inst)
+# 面板显式操作仍可覆盖（用户意图优先于固装；随机才被拦）
+_p = prompt_gen.pick_variations(777, None, "哥特萝莉裙", kk)
+_r = prompt_gen.apply_dim_state(_p, 777, {"attempts": {"outfit": 1}}, None, kk)
+check("固装：重摇穿搭后头饰仍沉默", _r["headwear"]["zh"] == "")
+_e = prompt_gen.apply_dim_state(_p, 777, {"enabled": ["headwear"]}, None, kk)
+check("固装：面板显式启用可覆盖", _e["headwear"]["zh"] != "")
+_f = prompt_gen.apply_dim_state(_p, 777, {"fixed": {"headwear": "戴上贝雷帽"}}, None, kk)
+check("固装：面板显式锁定可覆盖", _f["headwear"]["zh"] == "戴上贝雷帽")
+_rf = prompt_gen.apply_dim_state(_p, 777, {"fixed": {"outfit": "哥特萝莉裙"}}, None, kk)
+check("固装：锁定穿搭重派生仍尊重固装", _rf["headwear"]["zh"] == "")
+
 print("test_prompt_gen: ALL OK")

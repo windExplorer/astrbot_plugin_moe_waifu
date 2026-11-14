@@ -562,7 +562,8 @@ class MoeWaifuPlugin(Star):
                 char_id, rel_path, seed_int, date, seq,
                 entry["strategy_type"], prompt=prompt_text, theme="",
                 dims=json.dumps(prompt_gen.describe_variations(
-                    seed_int, force_single=(entry["strategy_type"] == "img2img")),
+                    seed_int, force_single=(entry["strategy_type"] == "img2img"),
+                    keep=prompt_gen.keep_dims_of(entry)),
                     ensure_ascii=False),
                 width=_w, height=_h,
                 duration_ms=dur)

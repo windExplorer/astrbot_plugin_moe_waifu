@@ -697,13 +697,29 @@ _FOLLOW_DIMS = (
     ("outerwear", outerwear_candidates, _OUTER_SILENT_KWS),
 )
 
+# 人设固装（v0.35.0）：有的角色帽子/外套/鞋袜是角色特色（女巫的尖顶帽、
+# 永远穿长靴的角色），摘掉或换掉就不符合人设。角色条目上的 keep_xxx 布尔
+# 开关让对应派生维度**整维沉默**——种子随机永远不产出「摘掉帽子 / 脱掉外套」
+# 这类指令，外观 tags 也不剥离（_entry_tags 只认 picks 的 strip 标记，维度
+# 置空即不剥）。预览面板的显式操作（锁定 fixed / 重新启用 enabled）仍可覆盖：
+# 那是管理员当面点的，属于用户意图优先——保护针对的是「随机抽中」。
+_KEEP_ENTRY_FIELDS = (("footwear", "keep_footwear"),
+                      ("headwear", "keep_headwear"),
+                      ("outerwear", "keep_outerwear"))
 
-def _follow_item(tag: str, out_zh: str, seed_int: int) -> dict:
-    """穿搭派生维度统一求值（纯函数）：自洽沉默或空穿搭 → 置空不提及。"""
+
+def keep_dims_of(entry: dict) -> frozenset:
+    """角色条目 → 人设固装维度集合（纯函数）。keep_xxx=True 的维度整维沉默。"""
+    return frozenset(tag for tag, field in _KEEP_ENTRY_FIELDS
+                     if (entry or {}).get(field))
+
+
+def _follow_item(tag: str, out_zh: str, seed_int: int, keep=()) -> dict:
+    """穿搭派生维度统一求值（纯函数）：自洽沉默、人设固装或空穿搭 → 置空不提及。"""
     z = str(out_zh or "").strip()
     fn, silent = next(((f, k) for t, f, k in _FOLLOW_DIMS if t == tag),
                       (None, ()))
-    if fn is None or not z or any(k in z for k in silent):
+    if fn is None or not z or tag in keep or any(k in z for k in silent):
         return {"w": 0, "zh": "", "en": ""}
     return _weighted_pick(fn(z), _sub(seed_int, f"{tag}|{z}", 2 ** 30))
 
@@ -1097,7 +1113,7 @@ def _apply_outfit_color(picks: dict, color: dict) -> None:
 
 
 def pick_variations(seed_int: int, theme: dict | None = None,
-                    outfit_override: str = "") -> dict:
+                    outfit_override: str = "", keep=()) -> dict:
     """按种子从各维度池确定性挑选（纯函数，可测）。返回 {维度: 条目}。
 
     theme 传入主题预设时，约束维度在主题子集内重摇（_pick_dim 与历史
@@ -1111,6 +1127,8 @@ def pick_variations(seed_int: int, theme: dict | None = None,
     不提及。
     v0.34.1：头饰 / 外套两维同构派生（见 headwear_candidates /
     outerwear_candidates，自洽沉默规则见 _FOLLOW_DIMS）。
+    v0.35.0：keep = 人设固装维度集合（keep_dims_of(entry)）——集合内的
+    派生维度整维沉默，随机不产出「摘掉帽子」类违背人设的指令。
     """
     picks = {tag: _pick_dim(tag, seed_int, theme) for tag in DIMS
              if tag not in ("footwear", "headwear", "outerwear")}
@@ -1134,7 +1152,7 @@ def pick_variations(seed_int: int, theme: dict | None = None,
         if tag in _plain:
             picks[tag] = {"w": 0, "zh": "", "en": ""}
         else:
-            picks[tag] = _follow_item(tag, out_zh, seed_int)
+            picks[tag] = _follow_item(tag, out_zh, seed_int, keep)
     # v0.26.3：纯画风主题（art_*）只锁画风、不约束表情，实测会出现「婚纱 +
     # 困倦惺忪」这类违和。给一个通用立绘表情池（排除需要特定情境的困倦 /
     # 惊讶 / 疑惑），让纯画风主题下的表情也落在自然范围。
@@ -1170,7 +1188,8 @@ def pick_variations(seed_int: int, theme: dict | None = None,
 
 
 def apply_dim_state(picks: dict, seed_int: int, dim_state: dict | None,
-                    theme: dict | None = None) -> dict:
+                    theme: dict | None = None,
+                    keep=()) -> dict:
     """预览面板的维度级控制（v0.14.0）：单独重摇 / 锁定 / 删除 / 启用，纯函数。
 
     dim_state 字段（全部可选，未知维度与字段忽略）：
@@ -1187,6 +1206,9 @@ def apply_dim_state(picks: dict, seed_int: int, dim_state: dict | None,
     优先级（后覆盖前）：attempts < enabled < fixed < disabled——用户显式操作
     都优先于种子随机。调用方须在 force_single_view 之后调用：面板显式启用的
     compose 应能覆盖图生图的强制单图（用户意图优先，v0.13.3 只拦「随机命中」）。
+    v0.35.0：keep = 人设固装维度集合——穿搭重摇/锁定后的派生维度重摇尊重
+    keep（随机不许碰人设固装）；enabled / fixed 是面板上的显式操作，不拦
+    （用户意图优先，见 _KEEP_ENTRY_FIELDS 注释）。
     """
     st = dim_state if isinstance(dim_state, dict) else {}
     out = dict(picks)
@@ -1223,7 +1245,7 @@ def apply_dim_state(picks: dict, seed_int: int, dim_state: dict | None,
             for tag, _fn, _silent in _FOLLOW_DIMS:
                 if tag in fixed or tag in disabled:
                     continue
-                out[tag] = _follow_item(tag, new_zh, sub_seed)
+                out[tag] = _follow_item(tag, new_zh, sub_seed, keep)
     for dim in enabled:
         dim = str(dim)
         if dim not in DIMS or dim in fixed:
@@ -1231,7 +1253,8 @@ def apply_dim_state(picks: dict, seed_int: int, dim_state: dict | None,
         if not str((out.get(dim) or {}).get("zh") or "").strip():
             if dim in ("footwear", "headwear", "outerwear"):
                 # v0.32.0/v0.34.1：重新启用 = 跟随当前穿搭的家族候选（不是全池
-                # 乱摇；自洽沉默规则照常生效）
+                # 乱摇；自洽沉默规则照常生效）。v0.35.0：不传 keep——面板显式
+                # 启用是用户当面操作，人设固装拦的是随机命中，不拦显式操作
                 z = str((out.get("outfit") or {}).get("zh") or "").strip()
                 out[dim] = _follow_item(dim, z, seed_int)
             else:
@@ -1242,11 +1265,12 @@ def apply_dim_state(picks: dict, seed_int: int, dim_state: dict | None,
             out[dim] = _fixed_item(dim, zh)
             if dim == "outfit":
                 # v0.32.0/v0.34.1：锁定穿搭后鞋袜、头饰、外套跟随锁定穿搭重派生
+                # （v0.35.0：重派生尊重 keep——锁穿搭不是解锁人设固装）
                 z = str((out.get("outfit") or {}).get("zh") or "").strip()
                 for tag, _fn, _silent in _FOLLOW_DIMS:
                     if tag in fixed:
                         continue
-                    out[tag] = _follow_item(tag, z, seed_int)
+                    out[tag] = _follow_item(tag, z, seed_int, keep)
     for dim in disabled:
         dim = str(dim)
         if dim in DIMS:
@@ -1353,20 +1377,22 @@ def variation_zh_list(picks: dict) -> list:
 
 def describe_variations(seed_int: int, theme_id: str = "", outfit: str = "",
                         dim_state: dict | None = None,
-                        force_single: bool = False) -> list:
+                        force_single: bool = False, keep=()) -> list:
     """复算本轮变化维度（与 build_generation_prompt 同种子同口径），随档记录用。
 
     返回 [(维度中文标签, 中文短语)]，只含非空项。v0.22.4 起「非模板主题一律
     强制单图」不再由调用方按 strategy_type 传 force_single——base/lora 文生图
     链路此前漏传，随档维度与提示词会错位（记录里三视图、实际按单图出）。
     force_single 参数保留兼容旧调用，内部统一按主题判断。纯函数。
+    v0.35.0：keep = 人设固装维度集合（keep_dims_of(entry)），与提示词生成
+    同口径——否则随档维度会记出「摘掉帽子」而实际提示词里没有。
     """
     theme, _ = resolve_theme(theme_id, seed_int)
-    picks = pick_variations(seed_int, theme, outfit)
+    picks = pick_variations(seed_int, theme, outfit, keep)
     if not (theme and theme.get("compose_kw")):
         picks = force_single_view(picks)
     if dim_state:
-        picks = apply_dim_state(picks, seed_int, dim_state, theme)
+        picks = apply_dim_state(picks, seed_int, dim_state, theme, keep)
     return variation_zh_list(picks)
 
 
@@ -1890,6 +1916,9 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
     outfit：用户指定穿搭（预览面板「穿搭」框，空 = 按种子/主题随机）。
     dim_state：预览面板维度级控制（v0.14.0，见 apply_dim_state；抽卡主链路
     不传 = 纯种子决定论不变）。
+    v0.35.0：角色条目的 keep_xxx（人设固装）在这里统一换算成 keep 集合并传给
+    pick_variations / apply_dim_state——文生图、图生图与异常回落三条路全部
+    同口径，随机不再产出「摘掉帽子」类违背人设的指令。
     """
     theme, _theme_rec = resolve_theme(theme_id, seed_int)
     # v0.31.1：tpl_ 模板主题 = 固定底稿（v0.29.3 口径：模板是固定提示词，不能充满
@@ -1898,6 +1927,7 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
     # 通道甚至会写出「把构图改为…」的编辑指令口吻。模板提示词必须逐位确定：
     # 图生图走 build_local_instruction，文生图走 _t2i_local_of（含 qwen/natural）。
     is_tpl = bool(theme and str(theme.get("id") or "").startswith("tpl_"))
+    keep = keep_dims_of(entry)
     try:
         stype = str(entry.get("strategy_type") or "base")
         if stype == "img2img" and template_ref_mode(entry) == "none":
@@ -1913,13 +1943,13 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
         if stype != "img2img":
             if not bool(cfg.get("variations_enabled", True)):
                 return build_prompt_tags(entry), "static"
-            picks = pick_variations(seed_int, theme, outfit)
+            picks = pick_variations(seed_int, theme, outfit, keep)
             # v0.22.4：文生图同样不许随机混入三/四视图（此前只有 img2img
             # 分支做了，base/lora 吐出设定稿就是这么来的）。tpl_ 模板主题
             # 带 compose_kw，仍可显式出多视角设定稿。
             if not (theme and theme.get("compose_kw")):
                 picks = force_single_view(picks)
-            picks = apply_dim_state(picks, seed_int, dim_state, theme)
+            picks = apply_dim_state(picks, seed_int, dim_state, theme, keep)
             # v0.29.7：按「实际会用的」工作流探测（条目/本次覆盖 > 全局），
             # 修「选了 Qwen 工作流却按全局底模拼 tags」的错位
             style = detect_t2i_style(context, effective_workflow(entry, cfg))
@@ -1955,14 +1985,14 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
             return _t2i_local_of(style, entry, picks, custom)
         if not bool(cfg.get("variations_enabled", True)):
             return build_prompt_tags(entry), "static"
-        picks = pick_variations(seed_int, theme, outfit)
+        picks = pick_variations(seed_int, theme, outfit, keep)
         # v0.13.3：图生图编辑模式（非模板主题）compose 强制单视图——
         # 别让 COMPOSE 池随机命中三/四视图混进编辑指令（见 force_single_view）
         if not (theme and theme.get("compose_kw")):
             picks = force_single_view(picks)
         # v0.14.0：维度级控制在强制单图之后——面板显式启用/锁定的 compose
         # 是用户意图，应能覆盖「随机命中被拦」的默认行为
-        picks = apply_dim_state(picks, seed_int, dim_state, theme)
+        picks = apply_dim_state(picks, seed_int, dim_state, theme, keep)
         if not bool(cfg.get("prompt_llm_enabled", True)) or is_tpl:
             # v0.31.1：is_tpl 一并短路——模板的编辑指令走本地确定性拼装
             return build_local_instruction(entry, picks, custom), "local"
@@ -1994,10 +2024,10 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
         logger.error("[moe_waifu] 提示词生成异常，回落本地模板", exc_info=True)
         try:
             if str(entry.get("strategy_type") or "base") == "img2img":
-                picks = pick_variations(seed_int, theme, outfit)
+                picks = pick_variations(seed_int, theme, outfit, keep)
                 if not (theme and theme.get("compose_kw")):
                     picks = force_single_view(picks)
-                picks = apply_dim_state(picks, seed_int, dim_state, theme)
+                picks = apply_dim_state(picks, seed_int, dim_state, theme, keep)
                 return (build_local_instruction(entry, picks, custom), "local")
             return build_prompt_tags(entry), "static"
         except Exception:

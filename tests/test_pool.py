@@ -65,6 +65,22 @@ check("未知分类落 other", n["category"] == "other")
 check("缺 tags 拒收", pool.normalize_entry({"id": "x", "name": "名"}, "p") is None)
 check("缺 id 拒收", pool.normalize_entry({"name": "名", "tags_en": "t"}, "p") is None)
 
+# v0.35.0：人设固装三开关——布尔归一，旧条目缺字段默认 False（不保护）
+gk = pool.normalize_entry({"id": "k", "name": "名", "tags_en": "t",
+                           "keep_headwear": True, "keep_outerwear": 1,
+                           "keep_footwear": ""}, "p")
+check("固装开关布尔归一", gk["keep_headwear"] is True and gk["keep_outerwear"] is True
+      and gk["keep_footwear"] is False)
+gk2 = pool.normalize_entry({"id": "k", "name": "名", "tags_en": "t"}, "p")
+check("旧条目无固装字段默认 False", not gk2["keep_headwear"]
+      and not gk2["keep_outerwear"] and not gk2["keep_footwear"])
+# 编辑保存合并：表单提交的固装开关必须覆盖旧值（在 normalize 输出里，不在 keep_local 名单）
+gk3 = pool.merge_saved_entry(
+    {"id": "k", "name": "名", "tags_en": "t", "keep_headwear": True},
+    pool.normalize_entry({"id": "k", "name": "名2", "tags_en": "t",
+                          "keep_headwear": False}, "p"))
+check("固装开关随编辑保存覆盖", gk3["keep_headwear"] is False and gk3["name"] == "名2")
+
 # 候选过滤：verified / 群绑定 / 去重 / 排序
 packs = [
     {"pack": "p1", "title": "卷一", "enabled": True, "entries": [

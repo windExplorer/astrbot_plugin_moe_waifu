@@ -62,7 +62,7 @@ galFillBusy galFillLabel startGalFill stopGalFill
 galFillOpen galFillRows galFillHave galFillQuota galFillLoading
 rerollFillRow rerollFillAll doFillStart
 galQueueTip galSubmitting
-queueTopCount queuePanelOpen queueRows
+queueTopCount queuePanelOpen queueRows queueTopBroken
 avatarOf hashColor thumbOf colorOf rerollLabel tv brandColor zhLocale
 bindRows bindSeriesOpts bindRawOpen bindLoading loadBindPools onBindRawInput
 addBindRow setRowGid setRowSeries removeBindRow

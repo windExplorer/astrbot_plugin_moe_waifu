@@ -312,7 +312,8 @@ class BatchRunner:
                                 dims=json.dumps(prompt_gen.describe_variations(
                                     seed_int, theme_id,
                                     force_single=(str(entry.get("strategy_type") or "")
-                                                  == "img2img")),
+                                                  == "img2img"),
+                                    keep=prompt_gen.keep_dims_of(entry)),
                                     ensure_ascii=False),
                                 width=_w, height=_h,
                                 duration_ms=_dur)

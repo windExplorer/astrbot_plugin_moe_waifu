@@ -247,6 +247,8 @@
   .top-queue { cursor: pointer; user-select: none; font-size: 13px; opacity: .75; }
   .top-queue:hover { opacity: 1; text-decoration: underline; }
   .top-queue.busy { color: #d63384; font-weight: 600; opacity: 1; }
+  /* v0.35.0：/queue/list 连续失败——「不可用」态，别把查不到当空闲 */
+  .top-queue.broken { color: #e0862a; font-weight: 600; opacity: 1; }
   .page-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 16px 22px 22px; }
   .page-foot { flex: none; padding: 10px 22px; display: flex; justify-content: center;
     border-top: 1px solid rgba(128,128,128,.14); }
@@ -384,11 +386,16 @@
               {{ meta.anima_ready ? "萌绘已就绪" : "萌绘未安装/未启用" }}
             </n-tag>
             <n-tag :bordered="false" size="small">立绘配额 {{ meta.quota }}/角色</n-tag>
-            <!-- v0.34.2：全局出图队列指示器（点击展开队列面板，全局可见） -->
-            <span class="top-queue" :class="{ busy: queueTopCount > 0 }"
-                  title="点击查看出图队列（生成立绘 / 试画 / 头像 / 批量）"
+            <!-- v0.34.2：全局出图队列指示器（点击展开队列面板，全局可见）。
+                 v0.35.0：/queue/list 连续失败显示「不可用」——后端没重载到新版
+                 （旧模块没有该路由，一直 404）时不再假扮「空闲」。 -->
+            <span class="top-queue" :class="{ busy: queueTopCount > 0, broken: queueTopBroken }"
+                  :title="queueTopBroken
+                            ? '队列状态查询连续失败：插件后端可能没有重载到最新版（请重载插件或重启 AstrBot）'
+                            : '点击查看出图队列（生成立绘 / 试画 / 头像 / 批量）'"
                   @click="queuePanelOpen = true">
-              出图队列 {{ queueTopCount > 0 ? "· " + queueTopCount : "· 空闲" }}
+              出图队列 {{ queueTopBroken ? "· 不可用"
+                          : (queueTopCount > 0 ? "· " + queueTopCount : "· 空闲") }}
             </span>
             <n-button size="tiny" secondary :loading="refreshing" @click="refreshAll">
               刷新全部
@@ -2776,6 +2783,11 @@
     <n-modal v-model:show="queuePanelOpen" preset="dialog" title="出图队列"
              style="width: 620px;">
       <n-space vertical size="medium">
+        <!-- v0.35.0：查询连续失败时明说，别让面板看起来「只是没任务」 -->
+        <n-alert v-if="queueTopBroken" type="warning" :bordered="false">
+          队列状态查询连续失败：插件后端可能没有重载到最新版
+          （旧模块没有 /queue/list 路由）。请重载插件或重启 AstrBot 后再看。
+        </n-alert>
         <div class="bind-tip" v-if="queueRows.length === 0">
           当前没有排队 / 进行中的出图任务。
         </div>
@@ -2896,6 +2908,29 @@
             <n-switch v-model:value="form.verified"></n-switch>
             <span style="font-size:13px;">verified：画对验证过，参与群内抽卡</span>
           </n-space>
+          <!-- v0.35.0：人设固装——帽子/外套/鞋袜属于角色特色时不被随机摘换。
+               勾选 = 对应派生维度对这位角色整维沉默（不产出「摘掉帽子 / 脱掉外套」
+               类指令，外观 tags 不剥离），预览面板显式锁定仍可临时覆盖。 -->
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <div class="bind-tip" style="margin-top:0;">
+              人设固装：帽子 / 外套 / 鞋袜是角色特色（如女巫的尖顶帽）时勾选对应项——
+              抽卡与补图不再随机摘掉或更换它们，始终按角色原本设定画。
+            </div>
+            <div style="display:flex; align-items:center; gap:18px; flex-wrap:wrap;">
+              <span style="display:flex; align-items:center; gap:6px;">
+                <n-switch v-model:value="form.keep_headwear" size="small"></n-switch>
+                <span style="font-size:13px;">头饰固定</span>
+              </span>
+              <span style="display:flex; align-items:center; gap:6px;">
+                <n-switch v-model:value="form.keep_outerwear" size="small"></n-switch>
+                <span style="font-size:13px;">外套固定</span>
+              </span>
+              <span style="display:flex; align-items:center; gap:6px;">
+                <n-switch v-model:value="form.keep_footwear" size="small"></n-switch>
+                <span style="font-size:13px;">鞋袜固定</span>
+              </span>
+            </div>
+          </div>
           <n-space>
             <n-button type="primary" :loading="saving" @click="saveForm">保存</n-button>
             <n-button @click="showDrawer = false">取消</n-button>
@@ -3899,7 +3934,8 @@
           category: "anime", tier: "S", strategy_type: "base",
           strategy_loras: "", strategy_ref: "", strategy_img2img_workflow: null,
           strategy_denoise: null,
-          tags_en: "", quote: "", color: "#E8B4C8", verified: false
+          tags_en: "", quote: "", color: "#E8B4C8", verified: false,
+          keep_footwear: false, keep_headwear: false, keep_outerwear: false
         };
       };
       var form = Vue.ref(emptyForm());
@@ -3938,7 +3974,9 @@
           tags_en: String(f.tags_en || "").trim(),
           quote: quotes[0] || "",
           quotes: quotes,
-          color: f.color || "#E8B4C8", verified: !!f.verified
+          color: f.color || "#E8B4C8", verified: !!f.verified,
+          keep_footwear: !!f.keep_footwear, keep_headwear: !!f.keep_headwear,
+          keep_outerwear: !!f.keep_outerwear
         };
       }
       function entryToForm(e) {
@@ -3953,7 +3991,9 @@
           strategy_denoise: (st.denoise !== undefined && st.denoise !== null) ? Number(st.denoise) : null,
           tags_en: e.tags_en || "",
           quote: (Array.isArray(e.quotes) && e.quotes.length ? e.quotes.join("\n") : (e.quote || "")),
-          color: e.color || "#E8B4C8", verified: !!e.verified
+          color: e.color || "#E8B4C8", verified: !!e.verified,
+          keep_footwear: !!e.keep_footwear, keep_headwear: !!e.keep_headwear,
+          keep_outerwear: !!e.keep_outerwear
         };
       }
       function openNew() {
@@ -6146,10 +6186,21 @@
       var queueTop = Vue.ref({ jobs: [], batch: null, avatar_batch: null });
       var queuePanelOpen = Vue.ref(false);
       var queueTopTimer = null;
+      // v0.35.0：/queue/list 连续失败必须可见——「空闲」只能是查到的空闲，
+      // 不能是「没查到就当空闲」。v0.34.2 真机教训：文件更新了但插件后端没
+      // 重载，旧模块没有 /queue/list 路由，轮询一直 404 被静默吞掉，指示器
+      // 永远显示「空闲」，队列功能没生效完全看不出来。连败 3 次显示「不可用」，
+      // 成功一次即恢复；不打 message（每 3 秒弹一次是打扰），由指示器自己呈现。
+      var queueTopFails = Vue.ref(0);
+      var queueTopBroken = Vue.computed(function () { return queueTopFails.value >= 3; });
       function pollQueueTop() {
-        return apiPost("queue/list", {}).then(function (res) {
+        // 不走 apiPost：它失败会弹 message 错误提示，3 秒一次等于打扰轰炸；
+        // 且首次调用发生在 setup 同步段，此时 bridge 还没就绪（mount 前是 null）。
+        if (!bridge) { return Promise.resolve(); }   // 等下一个轮询周期
+        return bridge.apiPost("queue/list", plain({}, {})).then(function (res) {
+          queueTopFails.value = 0;
           if (res) { queueTop.value = res; }
-        }).catch(function () { /* 静默：指示器不打扰 */ });
+        }).catch(function () { queueTopFails.value += 1; });
       }
       var queueTopCount = Vue.computed(function () {
         var qt = queueTop.value || {};
@@ -7550,7 +7601,7 @@
         loadingGal: loadingGal, refillError: refillError,
         galQueueTip: galQueueTip, galSubmitting: galSubmitting,
         queueTopCount: queueTopCount, queuePanelOpen: queuePanelOpen,
-        queueRows: queueRows,
+        queueTopBroken: queueTopBroken, queueRows: queueRows,
         doDeletePortrait: doDeletePortrait, movePortraitToRef: movePortraitToRef,
         moveRefToPortrait: moveRefToPortrait,
         loadGallery: loadGallery,

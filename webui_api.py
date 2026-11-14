@@ -128,17 +128,29 @@ def _json_save(path: Path, data) -> None:
 
 
 def _version_of() -> str:
-    """读 metadata.yaml 的 version（带 v 前缀）。
+    """本模块**加载时**读到的 metadata.yaml version（带 v 前缀）。
 
     ⚠️ 不能找 plugin._plugin_version —— 那是 main.py 的模块级函数而非类方法，
     hasattr 永远 False，页面版本号就会显示成 v?（v0.3.1 及以前真机如此）。
+
+    v0.35.0 起改为**导入时读一次并缓存**（此前每次请求都重读磁盘）：
+    页面版本号必须反映「正在运行的代码」而不是「磁盘上的文件」。文件更新了
+    但插件没重载时，旧模块继续跑旧代码——若按磁盘读，顶栏显示新版号、
+    /queue/list 等新端点却 404（v0.34.2 真机「队列一直空闲」的根因），
+    版本号在撒谎；缓存于导入时，旧模块如实显示旧版号，一眼可辨。
     """
-    try:
-        text = (Path(__file__).resolve().parent / "metadata.yaml").read_text(encoding="utf-8")
-        m = re.search(r"(?m)^\s*version:\s*v?([0-9][^\s#]*)", text)
-        return f"v{m.group(1).strip()}" if m else ""
-    except Exception:
-        return ""
+    return _VERSION_AT_IMPORT
+
+
+_VERSION_AT_IMPORT = ""
+try:
+    _t = (Path(__file__).resolve().parent / "metadata.yaml").read_text(encoding="utf-8")
+    _m = re.search(r"(?m)^\s*version:\s*v?([0-9][^\s#]*)", _t)
+    if _m:
+        _VERSION_AT_IMPORT = f"v{_m.group(1).strip()}"
+    del _t, _m
+except Exception:
+    pass
 
 
 _THUMB_CACHE: dict = {}
@@ -1392,7 +1404,8 @@ async def _run_job(plugin, job_id: str, entry: dict, kind: str,
     if prompt_src != "manual":
         dims_json = json.dumps(prompt_gen.describe_variations(
             seed_int, theme_rec,
-            force_single=(str(entry.get("strategy_type") or "") == "img2img")),
+            force_single=(str(entry.get("strategy_type") or "") == "img2img"),
+            keep=prompt_gen.keep_dims_of(entry)),
             ensure_ascii=False)
     elif dims_override:
         dims_json = dims_override
@@ -2032,12 +2045,15 @@ async def h_prompt_preview(plugin) -> dict:
              if str(t.get("id") or "") == str(_theme_rec)), "")
     theme_resolved = ({"id": str(_theme_rec), "label": _theme_label}
                       if _theme_rec else None)
-    picks = prompt_gen.pick_variations(seed_int, theme, outfit)
+    picks = prompt_gen.pick_variations(seed_int, theme, outfit,
+                                       prompt_gen.keep_dims_of(entry))
     # v0.22.4：与 build_generation_prompt 同口径——非模板主题一律强制单图，
     # 不再按 strategy_type 区分（文生图此前会漏，预览显示三视图、实际出单图）。
+    # v0.35.0：keep 同口径——预览维度 chip 与提示词一致（人设固装维度不出现）。
     if not (theme and theme.get("compose_kw")):
         picks = prompt_gen.force_single_view(picks)
-    picks = prompt_gen.apply_dim_state(picks, seed_int, dim_state, theme)
+    picks = prompt_gen.apply_dim_state(picks, seed_int, dim_state, theme,
+                                       prompt_gen.keep_dims_of(entry))
     dims = [{"label": label, "zh": zh}
             for label, zh in prompt_gen.variation_zh_list(picks)]
     body_zh = str((picks.get("body") or {}).get("zh") or "").strip()
