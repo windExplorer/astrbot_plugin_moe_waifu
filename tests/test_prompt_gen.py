@@ -646,16 +646,30 @@ check("编辑指令含独立头饰/外套子句",
       any(x in prompt_gen.build_local_instruction(
           _OE, _op_sw, ref_mode="none")
           for x in ("摘掉帽子", "戴上草帽", "戴上宽檐遮阳帽")))
-_stripped = prompt_gen.build_t2i_prompt(_OE, _op_sw)
+# v0.37.0：种子可能摇中「泳装外罩防晒开衫」这类自带外套的条目——外套维度
+# 自洽沉默、无需剥 tags（正确行为）。剥离断言改用确定性构造的摘帽+脱外套
+# picks，测的就是剥离机制本身，不再受 outfit 随机落点影响。
+_op_strip = dict(_op_sw)
+_op_strip["headwear"] = {"w": 8, "zh": "摘掉帽子", "en": "", "strip": 1}
+_op_strip["outerwear"] = {"w": 8, "zh": "脱掉外套", "en": "", "strip": 1}
+_stripped = prompt_gen.build_t2i_prompt(_OE, _op_strip)
 check("danbooru tags 已剥离 hat 与 jacket（头饰/外套分词干，保留其余）",
       "cap" not in _stripped and "jacket" not in _stripped
       and "blue hair" in _stripped and "fox ears" in _stripped)
 check("qwen 中文描述已剥离 hat/jacket",
-      "cap" not in prompt_gen.build_t2i_qwen_local(_OE, _op_sw).lower()
-      and "jacket" not in prompt_gen.build_t2i_qwen_local(_OE, _op_sw))
+      "cap" not in prompt_gen.build_t2i_qwen_local(_OE, _op_strip).lower()
+      and "jacket" not in prompt_gen.build_t2i_qwen_local(_OE, _op_strip))
 check("元提示词 tags 同步剥离（不与维度指令矛盾）",
-      "cap" not in prompt_gen.build_t2i_meta_prompt(_OE, _op_sw, "qwen")
-      and "jacket" not in prompt_gen.build_t2i_meta_prompt(_OE, _op_sw, "qwen"))
+      "cap" not in prompt_gen.build_t2i_meta_prompt(_OE, _op_strip, "qwen")
+      and "jacket" not in prompt_gen.build_t2i_meta_prompt(_OE, _op_strip, "qwen"))
+# 自带外套的穿搭（防晒开衫）→ 外套维度沉默、tags 不剥（新条目的正确行为）
+if "开衫" in str(_op_sw["outfit"]["zh"]):
+    check("自带开衫的穿搭 → 外套沉默且 tags 保留 jacket",
+          _op_sw["outerwear"]["zh"] == ""
+          and "jacket" in prompt_gen.build_t2i_prompt(_OE, _op_sw))
+else:
+    check("该种子穿搭不含外套 → 外套维度有值",
+          _op_sw["outerwear"]["zh"] != "")
 _op_keep = prompt_gen.pick_variations(11)
 _op_keep["outfit"] = {"w": 0, "zh": "", "en": ""}
 _op_keep["headwear"] = {"w": 0, "zh": "", "en": ""}
@@ -1200,5 +1214,61 @@ _pk2["background"] = {"zh": "教室", "en": "classroom"}
 check("qwen 本地兜底：无 light 条目回落通用光句",
       "光照自然通透" in prompt_gen.build_t2i_qwen_local(
           {"id": "x", "name": "魔女", "tags_en": ""}, _pk2))
+
+# ---------- v0.37.0：穿搭表现力 + 图生图同权 ----------
+check("穿搭池规模（v0.37.0 扩后 >= 85）", len(prompt_gen.OUTFITS) >= 85)
+_of_ens = [str(o.get("en") or "") for o in prompt_gen.OUTFITS]
+check("街头混搭在池（滑肩 / 腿环 / 层叠）",
+      any("falling off one shoulder" in e for e in _of_ens)
+      and any("thigh strap" in e for e in _of_ens)
+      and any("layered clothing" in e for e in _of_ens))
+check("异域华丽在池（多重腰带 / 羽毛短裙）",
+      any("multiple belts" in e for e in _of_ens)
+      and any("feather skirt" in e for e in _of_ens))
+check("哥特束腰在池", any("corset" in e for e in _of_ens))
+_of_themes = {t["id"]: t for t in prompt_gen.THEMES}
+
+
+def _of_subset(tid):
+    # 返回 zh 字符串列表（返回 dict 的话 `x in z` 会变成查键名，恒 False）
+    kws = prompt_gen._theme_kws("outfit", _of_themes[tid])
+    return [str(o.get("zh") or "") for o in prompt_gen.OUTFITS
+            if any(k in str(o.get("zh") or "") for k in kws)]
+
+
+check("滑肩卫衣/毛衣进居家子集", sum("滑落" in z for z in _of_subset("home")) >= 2)
+check("泳装混搭两条进泳装子集",
+      sum(("混搭" in z) or ("防晒开衫" in z) for z in _of_subset("swimsuit")) >= 2)
+check("哥特束腰进哥特子集", any("束腰" in z for z in _of_subset("gothic")))
+check("皮夹克触发外套维度自洽沉默",
+      prompt_gen._follow_item("outerwear", "皮夹克与百褶短裙", 123)
+      == {"w": 0, "zh": "", "en": ""})
+_p37_ens = [str(p.get("en") or "") for p in prompt_gen.POSES]
+check("姿势第二批在池（沙发舒展 / 闻花 / 贩卖机）",
+      any("arms above head" in e for e in _p37_ens)
+      and any("smelling flowers" in e for e in _p37_ens)
+      and any("vending machine" in e for e in _p37_ens))
+check("gaze：低头 / 眺望让位",
+      prompt_gen._gaze_tag({"pose": {"en": "hood up, walking, looking down"}}) == ""
+      and prompt_gen._gaze_tag({"pose": {"en": "shielding eyes, looking into distance"}}) == "")
+_lit2 = next(b for b in prompt_gen.BACKGROUNDS if b.get("light"))
+_pk3 = {k: {"zh": "", "en": ""} for k in ("pose", "outfit", "footwear", "headwear",
+                                          "outerwear", "expression", "body",
+                                          "framing", "compose", "artstyle")}
+_pk3["background"] = dict(_lit2)
+check("图生图：背景子句带显式光照改动目标",
+      "整体光照与色调也随之改为" in prompt_gen.build_local_instruction(
+          {"id": "x", "name": "魔女", "tags_en": ""}, _pk3))
+_pk4 = dict(_pk3)
+_pk4["background"] = {"zh": "教室", "en": "classroom"}
+check("图生图：无 light 条目维持原句式",
+      "整体光照与色调" not in prompt_gen.build_local_instruction(
+          {"id": "x", "name": "魔女", "tags_en": ""}, _pk4))
+check("图生图：编辑指令纪律放宽到 300 字",
+      "总长不超过 300 字" in prompt_gen._SYSTEM_PROMPT)
+check("图生图：氛围要求写进 system（只换地点不换光）",
+      "只换地点不换光" in prompt_gen._SYSTEM_PROMPT)
+check("图生图：改动子句不可丢写进 system",
+      "一条都不能丢" in prompt_gen._SYSTEM_PROMPT)
 
 print("test_prompt_gen: ALL OK")

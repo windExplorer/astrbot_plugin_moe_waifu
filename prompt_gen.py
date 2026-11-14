@@ -121,6 +121,45 @@ OUTFITS = [
     {"w": 4, "zh": "亮片演出服", "en": "sequined stage outfit"},
     {"w": 3, "zh": "帅气风打歌服（领结与短裤）", "en": "idol costume, bow tie, shorts"},
     {"w": 3, "zh": "学园偶像演出服", "en": "school idol costume"},
+    # —— v0.37.0 穿搭表现力扩充（用户参考图拆解：参考好图的穿搭是「层叠
+    #    混搭、有细节有态度」——滑落的开衫、腿环、多重腰带、露腰层叠；原池
+    #    74 条都是规矩成衣，换装换来换去就那几样）。五路补充，zh 关键词
+    #    顺带挂接主题子集（卫衣→home、泳装/比基尼→swimsuit、哥特→gothic、
+    #    毛衣→home/office）：
+    # 街头混搭系
+    {"w": 4, "zh": "露脐短上衣与工装短裤（腿环）",
+     "en": "crop top, cargo shorts, thigh strap, midriff, navel"},
+    {"w": 4, "zh": "oversize 连帽卫衣滑落单肩（内搭吊带）",
+     "en": "oversized hoodie, falling off one shoulder, camisole, collarbone"},
+    {"w": 3, "zh": "Y2K 短上衣与低腰牛仔裤",
+     "en": "y2k fashion, crop top, low-rise jeans, midriff"},
+    {"w": 3, "zh": "皮夹克与百褶短裙", "en": "leather jacket, pleated skirt"},
+    {"w": 3, "zh": "白衬衫下摆系结与牛仔短裤",
+     "en": "knotted shirt, midriff, denim shorts"},
+    {"w": 4, "zh": "针织开衫滑落露单肩（内搭吊带裙）",
+     "en": "cardigan falling off one shoulder, slip dress, collarbone"},
+    {"w": 3, "zh": "西装外套披在肩上（内搭吊带裙）",
+     "en": "blazer draped over shoulders, slip dress"},
+    {"w": 3, "zh": "挂脖露脐上衣与宽腿裤",
+     "en": "halterneck, midriff, navel, wide-leg pants"},
+    {"w": 3, "zh": "吊带连衣裙叠穿长袖T恤",
+     "en": "slip dress over t-shirt, layered clothing"},
+    # 泳装混搭（进泳装主题子集；「开衫」同时触发外套维度自洽沉默）
+    {"w": 3, "zh": "泳装混搭风（比基尼上装、羽毛短裙与条纹臂套）",
+     "en": "bikini top, feather skirt, striped arm warmers, jewelry"},
+    {"w": 3, "zh": "泳装外罩宽松防晒开衫（敞开未扣）",
+     "en": "swimsuit, open cardigan, beach cover up, swimsuit under clothes"},
+    # 异域华丽系（对齐「黑金埃及风」类参考）
+    {"w": 3, "zh": "异域神明风（黑金短外套、挂脖露脐上衣与多重腰带金饰）",
+     "en": "open jacket, gold trim, halterneck, multiple belts, gold accessories, navel, jewelry"},
+    {"w": 3, "zh": "部族风舞衣（银饰、流苏与露腰）",
+     "en": "tribal outfit, silver jewelry, tassel, midriff, navel"},
+    # 慵懒滑肩系（进居家主题子集；毛衣同时进职场子集）
+    {"w": 4, "zh": "oversize 毛衣滑落露肩与格纹裙",
+     "en": "off-shoulder sweater, falling off one shoulder, plaid skirt, collarbone"},
+    # 哥特扩展（进哥特主题子集）
+    {"w": 3, "zh": "哥特束腰腰封与薄纱层叠裙",
+     "en": "gothic, corset, waist cincher, sheer skirt, layered skirt"},
     # —— 通用（无主题归属，随机模式专属）——
     {"w": 5, "zh": "运动外套与短裤", "en": "track jacket, gym clothes"},
     {"w": 5, "zh": "冬季大衣与围巾", "en": "winter coat, scarf"},
@@ -323,6 +362,31 @@ POSES = [
      "en": "sitting on floor, chin rest, hand on own chin, spacing out"},
     {"w": 3, "zh": "伸手去够飘在半空的肥皂泡",
      "en": "reaching out, soap bubbles, chasing, dynamic pose, light particles"},
+    # —— v0.37.0 生活瞬间第二批（继续对齐参考图的抓拍感与机位变化）——
+    {"w": 4, "zh": "半躺在沙发上、双臂举过头顶舒展身体",
+     "en": "lying on sofa, on back, arms above head, stretching, from side"},
+    {"w": 3, "zh": "原地转圈、裙摆旋开飞扬",
+     "en": "twirling, skirt flip, dynamic pose, motion"},
+    {"w": 3, "zh": "坐在高脚凳上侧身回头",
+     "en": "sitting on stool, turning around, looking back"},
+    {"w": 3, "zh": "单膝跪在床上回眸",
+     "en": "kneeling on bed, looking back, from behind"},
+    {"w": 4, "zh": "抱着一束花低头轻嗅",
+     "en": "holding bouquet, smelling flowers, closed eyes"},
+    {"w": 3, "zh": "站在自动贩卖机前弯腰取饮料",
+     "en": "vending machine, bending over, reaching out, night"},
+    {"w": 4, "zh": "躺在草地上单手枕着头",
+     "en": "lying on grass, on back, arm behind head"},
+    {"w": 3, "zh": "逆光里抬手挡在眼前眺望远方",
+     "en": "shielding eyes, hand raised, looking into distance, backlighting"},
+    {"w": 3, "zh": "双手插兜倚着栏杆",
+     "en": "hands in pockets, leaning on railing, relaxed"},
+    {"w": 3, "zh": "拎着凉鞋赤脚走在沙滩边",
+     "en": "carrying sandals, barefoot, walking on beach, water edge"},
+    {"w": 3, "zh": "拉起连帽衫的兜帽低头快步走",
+     "en": "hood up, walking, looking down, hands in pockets"},
+    {"w": 3, "zh": "双手撑在栏杆上探头望向镜头",
+     "en": "leaning forward on railing, looking at viewer, playful"},
     # 立绘模板专用（tpl_ 主题用 pose_kw「标准站姿」精确命中）：character sheet 惯例
     # 是双臂自然下垂、正面直视，不摆性格姿势
     {"w": 0, "zh": "双臂自然下垂的标准站姿", "en": "standing, arms at sides, straight-on, full body"},
@@ -613,11 +677,25 @@ _FEET_GENERIC = (
     {"w": 2, "zh": "黑色长靴", "en": "black boots"},
 )
 
+# 街头混搭族（v0.37.0）：工装短裤 / Y2K / 皮夹克 / 挂脖露脐 / 层叠叠穿 /
+# 异域华丽 / 滑肩开衫——鞋袜厚底鞋、帆布鞋、马丁靴、罗马凉鞋
+_F_STREET = (
+    {"w": 4, "zh": "厚底运动鞋", "en": "platform sneakers"},
+    {"w": 3, "zh": "帆布鞋与白色短袜", "en": "sneakers, white socks"},
+    {"w": 2, "zh": "马丁靴", "en": "combat boots"},
+    {"w": 2, "zh": "罗马凉鞋", "en": "gladiator sandals"},
+)
+_F_STREET_KWS = ("工装", "Y2K", "牛仔", "皮夹克", "挂脖", "叠穿",
+                 "异域", "部族", "开衫")
+
 # 穿搭家族映射：按 outfit zh 子串命中（顺序即优先级——「运动系比基尼」必须先
 # 命中泳装族再轮到运动族，故 SWIM 在 SPORT 之前；「花嫁和服」先命中和风族）。
 _FEET_FAMILIES = (
     (("JK", "水手", "校服", "背带", "学院"), _F_JK),
     (("泳装", "泳衣", "比基尼", "纱笼", "防晒泳"), _F_SWIM),
+    # v0.37.0：街头混搭族——「针织开衫JK制服」含开衫但 JK 行在前优先命中；
+    # 「泳装外罩防晒开衫」泳装行在前；老条目均不含本行关键词，零影响
+    (_F_STREET_KWS, _F_STREET),
     (("体操服", "运动", "拉拉队"), _F_SPORT),
     (("浴衣", "和服", "振袖", "访问着", "巫女", "袴"), _F_KIMONO),
     (("女仆", "围裙"), _F_MAID),
@@ -698,6 +776,9 @@ _HEAD_STRIP_STEMS = ("hat", "cap", "beret", "hood", "helmet", "veil", "headband"
 _HEADWEAR_FAMILIES = (
     (("JK", "水手", "校服", "背带", "学院"), _FHW_JK),
     (("泳装", "泳衣", "比基尼", "纱笼", "防晒泳"), _FHW_SUMMER),
+    # v0.37.0：街头混搭族——棒球帽 / 发带 / 摘掉（放在连衣裙行前，
+    # 「吊带连衣裙叠穿T恤」这类层叠街头款命中本行）
+    (_F_STREET_KWS, (_FHW_REMOVE, _FHW_CAP, _FHW_BAND)),
     (("连衣裙", "碎花"), _FHW_SUMMER),
     (("体操服", "运动", "拉拉队"), _FHW_SPORT),
     (("浴衣", "和服", "振袖", "访问着", "巫女", "袴"), _FHW_PLAIN),
@@ -740,6 +821,8 @@ _COAT_STRIP_STEMS = ("jacket", "coat", "cape", "cloak", "robe", "cardigan",
 
 _OUTERWEAR_FAMILIES = (
     (("泳装", "泳衣", "比基尼", "纱笼", "防晒泳"), _FOW_SWIM),
+    # v0.37.0：街头混搭族——脱掉为主（层叠款不再叠一件外套）
+    (_F_STREET_KWS, _FOW_PLAIN),
     (("连衣裙", "碎花"), _FOW_SUMMER),
     (("JK", "水手", "校服", "背带", "学院"), _FOW_PLAIN),
     (("体操服", "运动", "拉拉队"), _FOW_PLAIN),
@@ -752,8 +835,9 @@ _OUTERWEAR_FAMILIES = (
     (("西装", "通勤", "铅笔裙", "航空", "职业", "衬衫"), _FOW_PLAIN),
     (("婚纱", "礼服", "秀禾", "白无垢", "旗袍"), _FOW_PLAIN),
 )
-# 自洽沉默：穿搭本身就是外套（冬季呢子校服大衣、运动外套与短裤）→ 外套沉默
-_OUTER_SILENT_KWS = ("外套", "大衣", "斗篷", "披风", "开衫", "披肩")
+# 自洽沉默：穿搭本身就是外套（冬季呢子校服大衣、运动外套与短裤、v0.37.0 的
+# 皮夹克/西装外套披肩）→ 外套沉默
+_OUTER_SILENT_KWS = ("外套", "大衣", "斗篷", "披风", "开衫", "披肩", "夹克")
 
 
 def outerwear_candidates(outfit_zh: str):
@@ -1535,7 +1619,15 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "",
             # 文生图侧按维度分别剥离对应外观 tag
             parts.append(zh)
         elif label == "背景与光照":
-            parts.append(f"把背景改为{zh}")
+            # v0.37.0：编辑模型默认保留原图的光线与色调——背景条目自带
+            # light 光照句（v0.36.0 光线驱动组）时，把「光照」写成显式改动
+            # 目标，只说换地点光不会跟着变
+            li = str((picks.get("background") or {}).get("light")
+                     or "").strip().strip("。")
+            if li:
+                parts.append(f"把背景改为{zh}，整体光照与色调也随之改为{li}")
+            else:
+                parts.append(f"把背景改为{zh}")
         elif label == "姿势动作":
             parts.append(f"让角色{zh}")
         elif label == "表情":
@@ -1597,7 +1689,8 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "",
 # 「每张都盯着镜头」同质化的推手之一。默认仍看镜头（立绘惯例），姿势或
 # 表情自带视线语义时让位。
 _GAZE_AWAY_KWS = ("looking back", "from behind", "closed eyes", "looking away",
-                  "sleeping", "side view", "back view")
+                  "sleeping", "side view", "back view", "looking down",
+                  "looking into distance", "looking afar")
 
 
 def _gaze_tag(picks: dict) -> str:
@@ -1735,7 +1828,9 @@ _SYSTEM_PROMPT = (
     "你为 Qwen-Image-2.1（通义千问图像模型，文生图与图像编辑统一在同一模型，"
     "编辑由自然语言指令驱动）撰写图生图编辑指令。"
     "写法要点：一句话内「动作+目标+约束」，句尾强调保持人物面部特征、"
-    "发型发色与角色辨识度不变；避免一次塞太多改动。"
+    "发型发色与角色辨识度不变。"
+    "改动子句必须全部保留、一条都不能丢——改动很多时按「人物 → 服装 → "
+    "场景 → 氛围」排序，逐条写清，绝不合并省略（丢子句 = 那个维度这轮白改）。"
     "若给定了「角色固有特征」（尾巴、兽耳、角、翅膀、光环等），必须逐项写明"
     "「原样保留、清晰可见、不得丢失或改写」——编辑模型最容易把这些非人类"
     "部件洗掉，笼统的「保持辨识度」不够。"
@@ -1743,11 +1838,14 @@ _SYSTEM_PROMPT = (
     "画风类改动最容易把脸画丢，必须点明保持辨识度。"
     "若改动维度里有「构图取景」，明确写出裁切范围（半身 / 胸像特写 / 膝上 /"
     " 全身），不要默认全身；取景与姿势是两件事，分开表述。"
+    "画面氛围（必须落实）：编辑模型默认保留原图的光线与色调——背景子句里"
+    "括号内的光线描述（光源方向、光斑、空气感）必须一并写进指令，让整张图的"
+    "光影与新场景一致；只换地点不换光，画面就会发闷。"
     "画面纪律（必须写进指令）：画面中只允许出现这一个人物、只保留一颗头部；"
     "改动姿势时以新姿势为唯一姿势，绝不能把原姿势与新姿势同时画出来"
     "（两个头/两个身体/分身都是严重错误）。"
     "输出纪律：只输出一条简体中文编辑指令本身——不要解释、不要引号、"
-    "不要 markdown、不要分点，总长不超过 130 字。"
+    "不要 markdown、不要分点，总长不超过 300 字。"
 )
 
 # 文生图（natural 系底模，如 Moss-Image）：MOSS-Image 规范 A 档——英文 caption、
@@ -2156,7 +2254,10 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
         except asyncio.TimeoutError:
             logger.warning(f"[moe_waifu] 提示词 LLM 超时（>{timeout}s），回落本地模板")
             return build_local_instruction(entry, picks, custom), "local"
-        text = sanitize_llm_output(getattr(resp, "completion_text", "") or "")
+        # v0.37.0：限额 150→340——system 纪律放宽到 300 字（130 字装不下
+        # 7 个改动子句，LLM 被迫丢子句，背景/光照/姿势在图生图里被整条砍掉）
+        text = sanitize_llm_output(getattr(resp, "completion_text", "") or "",
+                                   limit=340)
         if text:
             return text, "llm"
         logger.warning("[moe_waifu] 提示词 LLM 返回为空，回落本地模板")
