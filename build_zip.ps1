@@ -82,7 +82,11 @@ $includeList = @(
 )
 
 # --- self-check: every top-level .py in the repo MUST be listed above ---
-$topPy = @(Get-ChildItem $root -Filter *.py -File | Select-Object -ExpandProperty Name)
+# _tmp_*.py are scratch files (same pattern as .gitignore): they are not shipped and
+# must not fail the build, otherwise a leftover probe script blocks every release.
+$topPy = @(Get-ChildItem $root -Filter *.py -File |
+    Where-Object { $_.Name -notlike "_tmp_*" } |
+    Select-Object -ExpandProperty Name)
 $notListed = @($topPy | Where-Object { $includeList -notcontains $_ })
 if ($notListed.Count -gt 0) {
     Write-Host ("ERROR: top-level module(s) missing from includeList: " + ($notListed -join ", ")) -ForegroundColor Red

@@ -486,7 +486,7 @@ def render_card(portrait_path, entry: dict, *, date_str: str, same_count: int = 
     date_fb = load_font(19, "name", data_dir)
     meta_f = load_font(17, "body", data_dir)
     bio_f = load_font(23, "body", data_dir)
-    brow_f = load_font(20, "body", data_dir)
+    brow_f = load_font(24, "body", data_dir)   # v0.47.3：作品名放大一档（20→24）
 
     # 页脚：统计与日期是**页脚**，不是正文最后一行——下沿只留 36px（v0.47.1）
     bottom = CARD_H - _FOOT_PAD
@@ -587,13 +587,14 @@ def render_card(portrait_path, entry: dict, *, date_str: str, same_count: int = 
     layer.alpha_composite(seal, (sx, sy))
     bottom -= nsize + 16
 
-    # ---- 第 0 层（最上，最小字）：作品眉标（只写作品名，不再拼类型后缀） ----
+    # ---- 第 0 层（最上）：作品眉标（只写作品名，不再拼类型后缀） ----
     series = str(entry.get("series") or "").strip()
     if series:
-        draw.rounded_rectangle((_PAD_X, bottom - 17, _PAD_X + 3, bottom),
+        bar_h = int(brow_f.size * 0.84)   # 竖条跟着字号走，放大后不会变成小短杠
+        draw.rounded_rectangle((_PAD_X, bottom - bar_h, _PAD_X + 3, bottom),
                                radius=2, fill=(*t_rgb, 240))
         _mixed(layer, (_PAD_X + 15, bottom - brow_f.size), series, brow_f, None,
-               _tint(t_rgb, 0.30) + (240,), spacing=1.6)
+               _tint(t_rgb, 0.30) + (240,), spacing=2.0)
 
     # ---- 收边：1px 半透明细线（替代原来的 14px 档位色宽边框） ----
     hair = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
