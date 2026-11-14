@@ -7,6 +7,7 @@
   3) 新数据路由 ↔ webui_api.register 路由表；
   4) 新 store 方法 ↔ 数据层真实定义。
 """
+import json
 import re
 import sys
 from pathlib import Path
@@ -189,6 +190,23 @@ def main():
     register = api.split("def register(plugin)")[1]
     absent = [r for r in ROUTES if f'"{r}"' not in register]
     check("新数据路由全部已注册", not absent, f"缺：{absent}")
+
+    # 3b) 配置页覆盖：schema 的每个顶层键必须有归属（某个分区，或显式隐藏清单）。
+    # v0.47.2 实锤：v0.47.0 加了 card_scrim / card_seal_pos 却没登记分区，
+    # 工坊「配置」页里**完全看不到**（schema 有、页面没有），只能去 AstrBot 后台改。
+    schema = json.loads((ROOT / "_conf_schema.json").read_text(encoding="utf-8"))
+    sec_block = re.search(r"var CONFIG_SECTIONS = \[(.*?)\n      \];", page, re.S)
+    check("页面存在 CONFIG_SECTIONS", sec_block is not None)
+    covered = set()
+    if sec_block:
+        for keys_block in re.findall(r"keys:\s*\[(.*?)\]", sec_block.group(1), re.S):
+            covered.update(re.findall(r'"(\w+)"', keys_block))
+    hid_block = re.search(r"var CONFIG_HIDDEN = \[(.*?)\];", page, re.S)
+    hidden = set(re.findall(r'"(\w+)"', hid_block.group(1))) if hid_block else set()
+    lost = [k for k in schema if k not in covered and k not in hidden]
+    check("schema 配置键在配置页有归属（分区或隐藏清单）", not lost, f"缺：{lost}")
+    stale = sorted(k for k in covered if k not in schema)
+    check("配置页分区键都在 schema 里（防拼错）", not stale, f"多余：{stale}")
 
     # 4) 数据层方法
     absent_methods = [m for m in STORE_METHODS if f"def {m}(" not in store]
