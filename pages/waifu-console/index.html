@@ -2630,6 +2630,9 @@
         <div style="display: flex; gap: 10px; align-items: center; margin-top: 6px;">
           <n-button type="primary" size="small" :loading="batchStarting"
                     :disabled="batchRunning" @click="doBatchStart">开始补图</n-button>
+          <!-- v0.39.1：画师模式按次勾选——LLM 整体创作，题材序列降级为灵感 -->
+          <n-checkbox v-model:checked="batchArtist" :disabled="batchRunning"
+                      title="本次批量由 LLM 画师整体创作提示词（不经预设维度池）；题材序列只作灵感参考，单张失败自动回落池子链路">🎨 画师出词</n-checkbox>
           <n-button size="small" :disabled="!batchRunning" @click="doBatchStop">停止</n-button>
           <span class="bind-tip" style="margin-top: 0;" v-if="batchRunning">
             队列在后端继续运行，可安全离开本页面
@@ -2776,6 +2779,9 @@
           <n-button size="small" type="primary" :loading="galFillLoading"
                     :disabled="batchRunning || galFillRows.length === 0"
                     @click="doFillStart">开始补图</n-button>
+          <!-- v0.39.1：画师模式按次勾选——LLM 整体创作，题材序列降级为灵感 -->
+          <n-checkbox v-model:checked="galFillArtist" :disabled="batchRunning"
+                      title="本次补齐由 LLM 画师整体创作提示词（不经预设维度池）；主题序列只作灵感参考，单张失败自动回落池子链路">🎨 画师出词</n-checkbox>
           <n-button size="small" :disabled="batchRunning || galFillRows.length === 0"
                     @click="rerollFillAll">全部重随机</n-button>
           <n-button size="small" @click="galFillOpen = false">取消</n-button>
@@ -5284,6 +5290,8 @@
       // v0.28.3：预览里「换一个」——记每个角色点了几次，启动时按同一 nonce
       // 派生盐（后端 batch_fill.char_salt），保证「预览看到的」就是「实跑的」。
       var batchOverrides = Vue.ref({});
+      // v0.39.1：画师模式按次勾选——LLM 整体创作，题材序列降级为灵感
+      var batchArtist = Vue.ref(false);
       var batchRerollBusy = Vue.ref("");
       var batchProg = Vue.ref(null);
       var batchQuota = Vue.ref(5);
@@ -5325,7 +5333,9 @@
                  series: ids(batchSeries.value),
                  chars: ids(batchChars.value),
                  // v0.28.3：单角色「换一个」的覆盖（char_id → nonce）
-                 overrides: batchOverrides.value || {} };
+                 overrides: batchOverrides.value || {},
+                 // v0.39.1：画师模式按次勾选（LLM 整体创作，题材作灵感）
+                 artist: !!batchArtist.value };
       }
       function openBatchModal() {
         batchOpen.value = true;
@@ -6323,6 +6333,7 @@
       var galFillTotal = Vue.ref(0);
       var galFillTimer = null;
       var galFillOpen = Vue.ref(false);
+      var galFillArtist = Vue.ref(false);   // v0.39.1：画师模式按次勾选
       var galFillRows = Vue.ref([]);      // [{index, theme_id, label}]
       var galFillHave = Vue.ref(0);
       var galFillQuota = Vue.ref(0);
@@ -6406,7 +6417,8 @@
         galFillLoading.value = true;
         try {
           var res = await apiPost("batch/char_start",
-                                  { id: galCharId.value, themes: ids });
+                                  { id: galCharId.value, themes: ids,
+                                    artist: !!galFillArtist.value });
           var queued = (res && res.queued) || 0;
           if (!queued) {
             message.info((res && res.note) || "立绘已满配额，无需补齐");
@@ -7752,6 +7764,7 @@
         galFillOpen: galFillOpen, galFillRows: galFillRows,
         galFillHave: galFillHave, galFillQuota: galFillQuota,
         galFillLoading: galFillLoading,
+        galFillArtist: galFillArtist,
         rerollFillRow: rerollFillRow, rerollFillAll: rerollFillAll,
         doFillStart: doFillStart,
         startGalFill: startGalFill, stopGalFill: stopGalFill,
@@ -7794,6 +7807,7 @@
         batchChars: batchChars, batchBtnText: batchBtnText,
         batchPreview: batchPreview, batchPreviewLoading: batchPreviewLoading,
         batchStarting: batchStarting, batchProg: batchProg,
+        batchArtist: batchArtist,
         batchRerollBusy: batchRerollBusy, doBatchReroll: doBatchReroll,
         batchQuota: batchQuota, batchRunning: batchRunning, batchPct: batchPct,
         batchCharOpts: batchCharOpts, openBatchModal: openBatchModal,

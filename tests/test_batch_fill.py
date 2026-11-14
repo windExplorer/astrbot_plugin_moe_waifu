@@ -213,6 +213,107 @@ def main():
     finally:
         bf.draw, bf.prompt_gen, bf.pool = real_draw, real_pg, real_pool
 
+    test_batch_artist()
+
+
+def test_batch_artist():
+    """v0.39.1：画师模式按次勾选——勾选时走 build_artist_prompt（题材作灵感
+    传入），单张失败回落池子链路，批量不中断。"""
+    import types
+
+    class FakeStore:
+        def __init__(self):
+            self.rows = []
+
+        def next_portrait_seq(self, cid):
+            return 0
+
+        def alloc_portrait_seq(self, cid):
+            return 0
+
+        def add_portrait(self, *a, **k):
+            self.rows.append((a, k))
+
+    class FakePlugin:
+        _today = staticmethod(lambda: "2026-11-14")
+        _cfg = staticmethod(lambda k, d=None: {"salt": "s", "draw_timeout": 1}.get(k, d))
+        context = object()
+        _store = FakeStore()
+        _data_dir = Path(".")
+
+        def _draw_cfg(self):
+            return {}
+
+    tasks = [
+        {"char_id": "a", "index": 0, "theme_id": "swimsuit",
+         "entry": {"id": "a", "name": "甲", "strategy_type": "base",
+                   "strategy": {"type": "base"}}},
+        {"char_id": "b", "index": 1, "theme_id": "campus",
+         "entry": {"id": "b", "name": "乙", "strategy_type": "base",
+                   "strategy": {"type": "base"}}},
+    ]
+    artist_calls = []
+
+    def fake_artist(context, cfg, entry, seed_int, theme_id="", **k):
+        artist_calls.append((entry.get("id"), theme_id))
+        if entry.get("id") == "b":
+            raise RuntimeError("LLM 挂了")
+        return ("画师提示词", "artist")
+
+    real_draw, real_pg, real_pool = bf.draw, bf.prompt_gen, bf.pool
+    bf.draw = types.SimpleNamespace(
+        generate_portrait=async_init(lambda *a, **k: ("/tmp/x.png", "ok", "", 1)),
+        archive_portrait=lambda *a: "portraits/x/1.png",
+        image_size=lambda *a: (0, 0),
+        has_gen_refs=lambda e, d=None: False,
+        effective_entry=lambda e, o: e)
+    bf.prompt_gen = types.SimpleNamespace(
+        THEMES=real_pg.THEMES,
+        build_generation_prompt=async_init(lambda *a, **k: ("池子提示词", "local")),
+        describe_variations=lambda *a, **k: [],
+        keep_dims_of=lambda e: frozenset(),
+        build_artist_prompt=async_init(fake_artist),
+        art_theme_weight=lambda t: 2)
+    bf.pool = types.SimpleNamespace(portrait_seed_int=lambda *a: 1)
+    try:
+        runner = bf.BatchRunner()
+
+        async def run_all():
+            n = runner.start(FakePlugin(), tasks, artist=True)
+            assert n == 2
+            for _ in range(100):
+                await asyncio.sleep(0.02)
+                if not runner.snapshot()["running"]:
+                    break
+
+        asyncio.run(run_all())
+        snap = runner.snapshot()
+        check("画师批次全部完成", snap["done"] == 2 and snap["ok"] == 2,
+              str(snap))
+        check("画师出词带题材灵感（a 用画师）",
+              artist_calls and artist_calls[0] == ("a", "swimsuit"),
+              str(artist_calls))
+        prompts = {a[0]: k.get("prompt") for a, k in FakePlugin._store.rows}
+        check("画师产出落档（a=画师提示词）", prompts.get("a") == "画师提示词")
+        check("画师失败单张回落池子（b=池子提示词）",
+              prompts.get("b") == "池子提示词")
+        # 不勾选时完全不走画师（老路径零影响）
+        artist_calls.clear()
+        FakePlugin._store.rows.clear()
+        runner2 = bf.BatchRunner()
+
+        async def run_plain():
+            runner2.start(FakePlugin(), tasks)
+            for _ in range(100):
+                await asyncio.sleep(0.02)
+                if not runner2.snapshot()["running"]:
+                    break
+
+        asyncio.run(run_plain())
+        check("不勾选画师时不调 build_artist_prompt", not artist_calls)
+    finally:
+        bf.draw, bf.prompt_gen, bf.pool = real_draw, real_pg, real_pool
+
 
 def async_init(fn):
     """把同步函数包装成 async 函数桩。"""

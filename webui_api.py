@@ -2655,11 +2655,14 @@ async def h_batch_start(plugin) -> dict:
     tasks = batch_fill.build_tasks(cands, salt, date=plugin._today(),
                                    overrides=overrides)
     runner = _batch_runner(plugin)
-    n = runner.start(plugin, tasks)
+    # v0.39.1：画师模式按次勾选（弹窗复选框）——LLM 整体创作，题材作灵感
+    artist = bool(body.get("artist"))
+    n = runner.start(plugin, tasks, artist=artist)
     if n < 0:
         return err("批量补图正在运行中，请先停止或等待完成")
     logger.info(f"[{PLUGIN_NAME}] 批量补图启动：{len(cands)} 角色 / {n} 张"
-                f"（require_ref={require_ref}, 跳过 {len(skipped)}）")
+                f"（require_ref={require_ref}, 跳过 {len(skipped)}"
+                f"{', 画师出词' if artist else ''}）")
     return ok({"queued": n, "chars": len(cands), "skipped": len(skipped)})
 
 
@@ -2787,10 +2790,13 @@ async def h_batch_char_start(plugin) -> dict:
             need, have=have, date=plugin._today(), used=used)
     tasks = batch_fill.build_char_tasks(entry, themes, have=have)
     runner = _batch_runner(plugin)
-    n = runner.start(plugin, tasks)
+    # v0.39.1：画师模式按次勾选（补齐配额弹窗复选框）
+    artist = bool(body.get("artist"))
+    n = runner.start(plugin, tasks, artist=artist)
     if n < 0:
         return err("批量补图队列正在运行中（可能是列表页的批量），请等待完成或先停止")
-    logger.info(f"[{PLUGIN_NAME}] 单角色补齐启动：{cid}（{have}/{quota}，补 {n} 张）")
+    logger.info(f"[{PLUGIN_NAME}] 单角色补齐启动：{cid}（{have}/{quota}，补 {n} 张"
+                f"{', 画师出词' if artist else ''}）")
     return ok({"queued": n, "have": have, "quota": quota})
 
 

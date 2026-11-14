@@ -237,6 +237,7 @@ class BatchRunner:
     def __init__(self):
         self.running = False
         self.stop_flag = False
+        self.artist = False  # v0.39.1：本次批量是否用 LLM 画师出词（按次勾选）
         self.items = []      # [{char_id, name, index, theme_id, seq, status, error}]
         self.total = 0
         self._task = None
@@ -256,12 +257,15 @@ class BatchRunner:
         self.stop_flag = True
         return self.running
 
-    def start(self, plugin, tasks: list) -> int:
+    def start(self, plugin, tasks: list, artist: bool = False) -> int:
         if self.running:
             return -1
         tasks = list(tasks or [])
         self.running = True
         self.stop_flag = False
+        # v0.39.1：画师模式按次勾选（弹窗复选框），题材序列降级为「题材灵感」
+        # 喂给画师（保持相邻不重复的轮换），随档照记；单张失败回落池子链路
+        self.artist = bool(artist)
         self.items = [{"char_id": t.get("char_id"), "name": "",
                        "index": int(t.get("index") or 0),
                        "theme_id": t.get("theme_id") or "", "seq": None,
@@ -294,8 +298,20 @@ class BatchRunner:
                 item["seq"] = seq
                 seed_int = pool.portrait_seed_int(cid, date, seq, salt)
                 try:
-                    prompt_text, _src = await prompt_gen.build_generation_prompt(
-                        plugin.context, draw_cfg, entry, seed_int, theme_id)
+                    # v0.39.1：画师模式（按次勾选）——LLM 整体创作，题材序列降级
+                    # 为「题材灵感」；单张失败回落池子链路，批量不中断
+                    prompt_text = ""
+                    if self.artist:
+                        try:
+                            prompt_text, _src = await prompt_gen.build_artist_prompt(
+                                plugin.context, draw_cfg, entry, seed_int,
+                                theme_id=theme_id)
+                        except Exception as exc:
+                            logger.warning("[moe_waifu] 批量补图画师出词失败，"
+                                           "回落池子链路（%s）：%s", cid, exc)
+                    if not prompt_text:
+                        prompt_text, _src = await prompt_gen.build_generation_prompt(
+                            plugin.context, draw_cfg, entry, seed_int, theme_id)
                     src, status, err, _dur = await draw.generate_portrait(
                         plugin.context, draw_cfg, entry, seed_int,
                         _synthetic_event(), prompt=prompt_text)
