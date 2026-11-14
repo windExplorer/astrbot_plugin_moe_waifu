@@ -250,8 +250,18 @@ check("头像可点开大图（头像墙 / 资料页 / 图库页）",
       PAGE.count("openCharAvatarViewer") >= 4)
 check("用户 QQ 头像可点开大图（总览 / 记录 / 用户列表 / 用户详情）",
       PAGE.count("openAvatarBig") >= 4)
-check("总览最近抽签的角色缩略可点开大图",
-      "openCharCoverViewer(r.char_id, r.char_name)" in PAGE)
+# v0.51.0：最近抽签改「角色头像 + 名字点击进详情；卡面点开看大图」——
+# 角色缩略不再承担「看大图」职责（openCharCoverViewer 已删）
+check("总览最近抽签：角色头像/名字进详情、卡面看大图",
+      "charAvatarOf(r.char_id)" in PAGE and 'gotoGallery(r.char_id)' in PAGE
+      and "r.card_thumb" in PAGE and "openViewer(r.card_path" in PAGE)
+check("记录表 / 用户详情的老婆相关列都带头像且可进详情",
+      PAGE.count("charAvatarOf(") >= 10
+      and PAGE.count("gotoGallery(d.char_id)") >= 1
+      and PAGE.count("gotoGallery(h.char_id)") >= 1
+      and PAGE.count("gotoGallery(c.char_id)") >= 1)
+check("角色头像缺图兜底为文字头像（首字 + 应援色）",
+      PAGE.count("char-av-letter") >= 4)
 check("data URL 也能进 lightbox（不经 /image/data）",
       "function openImageViewerUrl" in PAGE and "lightbox.setSrc(src, name)" in PAGE)
 

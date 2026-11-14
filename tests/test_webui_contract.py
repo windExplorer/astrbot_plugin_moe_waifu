@@ -71,7 +71,7 @@ galQueueTip galSubmitting
 queueTopCount queuePanelOpen queueRows queueTopBroken
 galArtistLoading galArtistPrompt tryArtistLoading tryArtistPrompt
 ovLoading dbgAuditLoading batchArtist galFillArtist
-avatarOf hashColor thumbOf colorOf rerollLabel tv brandColor zhLocale
+avatarOf hashColor charAvatarOf colorOf rerollLabel tv brandColor zhLocale
 bindRows bindSeriesOpts bindRawOpen bindLoading loadBindPools onBindRawInput
 addBindRow setRowGid setRowSeries removeBindRow
 galWidth galHeight galThemeResolved
@@ -87,7 +87,7 @@ doTrashPurgeGroup doTrashPurgeAll
 dbgTabs dbgTab switchDbgTab
 ovVerifiedPct ovFullPct ovWithPortraitPct ovDrawSrcPct
 galActiveCount configDirty scrollToConfigSection
-openCharAvatarViewer openAvatarBig openCharCoverViewer openImageViewerUrl
+openCharAvatarViewer openAvatarBig openImageViewerUrl
 galAvatarGenOpen openAvatarGen avatarGenMode avatarGenSrc avatarGenSrcLabel
 avatarGenResult avatarGenApplying applyAvatarResult discardAvatarResult
 presetsBuiltin presetsCustomThemes presetsThemeRows presetsGroupLabels

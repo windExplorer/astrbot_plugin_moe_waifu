@@ -3204,6 +3204,11 @@ async def h_overview(plugin) -> dict:
             recent = plugin._store.list_records(1, 5)["rows"]
             today_draws = plugin._store.list_records(1, 1, today, today)["total"]
             total_draws = plugin._store.list_records(1, 1)["total"]
+            # v0.51.0：最近抽签的行附卡面缩略（≤5 张、120px data URL），前端
+            # 直接当缩略图展示、点开走 openViewer(card_path) 看原图
+            for row in recent:
+                fp = _safe_data_file(plugin, row.get("card_path"))
+                row["card_thumb"] = _thumb_cached(str(fp), 120) if fp else ""
         try:
             anima_ready = draw._get_tool_handler(plugin.context, "comfyui_draw") is not None
         except Exception:

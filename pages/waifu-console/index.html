@@ -555,6 +555,17 @@
   .dbg-query-row .ts { opacity: .6; flex: none; }
   /* v0.50.0：可点开大图的缩略图（用户头像 / 角色缩略 / 头像墙） */
   .zoomable { cursor: zoom-in; }
+  /* v0.51.0：列表里的「角色头像 + 名字」——点击进角色详情（不看大图） */
+  .char-av-link { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .char-av-link:hover .char-av-name { text-decoration: underline; }
+  .char-av { width: 22px; height: 22px; border-radius: 50%; object-fit: cover;
+    flex: none; border: 1px solid rgba(128,128,128,.25); }
+  .char-av-letter { display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; user-select: none; }
+  .char-av-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* v0.51.0：总览最近抽签的卡面缩略（点开看原图） */
+  .ov-card-thumb { width: 34px; height: 46px; object-fit: cover; border-radius: 4px;
+    flex: none; cursor: zoom-in; border: 1px solid var(--wf-line); }
 
   /* 素材库（v0.43.0）：主题表 + 维度词 chip */
   .word-list { display: flex; flex-wrap: wrap; gap: 6px; max-height: 300px;
@@ -768,7 +779,8 @@
                     <span class="txt">正在载入…</span>
                   </div>
                   <div v-if="!ovLoading && !ov.recent.length" style="font-size:12px; opacity:.6;">还没有抽签记录</div>
-                  <!-- v0.13.2：头像 + 昵称 + 角色色点/缩略，替代裸 QQ 文本行 -->
+                  <!-- v0.13.2：头像 + 昵称；v0.51.0：角色头像 + 名字（点击进角色详情，
+                       不看大图）+ 抽到的卡面缩略（点开看原图） -->
                   <div v-for="r in ov.recent" :key="r.user_id + r.date"
                        style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12px;">
                     <img v-if="avatarOf(r.user_id)" class="avatar zoomable" :src="avatarOf(r.user_id)"
@@ -779,14 +791,19 @@
                           fontSize: '12px', background: hashColor(r.user_id) }">{{ (r.nickname || r.user_id).slice(0, 1) }}</span>
                     <span style="flex:none; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
                           :title="r.user_id">{{ r.nickname || r.user_id }}</span>
-                    <!-- v0.50.0：角色缩略也能点开看大图 -->
-                    <img v-if="thumbOf(r.char_id)" :src="thumbOf(r.char_id)" class="zoomable"
-                         style="width:20px; height:34px; object-fit:cover; border-radius:4px; flex:none;" alt=""
-                         title="点击查看角色大图"
-                         @click.stop="openCharCoverViewer(r.char_id, r.char_name)">
-                    <span class="dot" :style="{ background: r.char_color || colorOf(r.char_id) }"></span>
-                    <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                      {{ r.char_name || r.char_id }}</span>
+                    <span class="char-av-link" style="flex:1; min-width:0;"
+                          title="进入角色详情" @click="gotoGallery(r.char_id)">
+                      <img v-if="charAvatarOf(r.char_id)" class="char-av"
+                           :src="charAvatarOf(r.char_id)" alt="">
+                      <span v-else class="char-av char-av-letter"
+                            :style="{ background: (r.char_color || colorOf(r.char_id)) + '33',
+                                      color: r.char_color || colorOf(r.char_id) }">{{ (r.char_name || r.char_id || '?').slice(0, 1) }}</span>
+                      <span class="char-av-name"
+                            style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ r.char_name || r.char_id }}</span>
+                    </span>
+                    <img v-if="r.card_thumb" class="ov-card-thumb" :src="r.card_thumb"
+                         alt="卡面" title="点击查看卡片大图"
+                         @click.stop="r.card_path && openViewer(r.card_path, r.date + ' 卡片')">
                     <span class="bind-tip" style="margin-top:0; flex:none;">{{ r.date }}</span>
                   </div>
                 </div>
@@ -1849,7 +1866,16 @@
                                @click.stop="openAvatarBig(d.user_id, d.nickname || d.user_id)">
                           {{ d.user_id }}</a></td>
                         <td>{{ d.nickname || "—" }}</td>
-                        <td><span class="dot" :style="{ background: d.char_color }"></span>{{ d.char_name || d.char_id }}</td>
+                        <!-- v0.51.0：老婆列改「角色头像 + 名字」，点击进角色详情 -->
+                        <td><span class="char-av-link" title="进入角色详情"
+                                  @click="gotoGallery(d.char_id)">
+                          <img v-if="charAvatarOf(d.char_id)" class="char-av"
+                               :src="charAvatarOf(d.char_id)" alt="">
+                          <span v-else class="char-av char-av-letter"
+                                :style="{ background: (d.char_color || colorOf(d.char_id)) + '33',
+                                          color: d.char_color || colorOf(d.char_id) }">{{ (d.char_name || d.char_id || '?').slice(0, 1) }}</span>
+                          <span class="char-av-name">{{ d.char_name || d.char_id }}</span>
+                        </span></td>
                         <td>{{ d.series || "—" }}</td>
                         <td>{{ d.group_name || "私聊" }}</td>
                         <td>{{ rerollLabel(d.nonce) }}</td>
@@ -2152,8 +2178,16 @@
 
                   <n-card size="small" title="今日老婆" :bordered="true" v-if="userDetail.today">
                     <n-space align="center" :wrap="true">
-                      <span class="dot" :style="{ background: userDetail.today.char_color }"></span>
-                      <b>{{ userDetail.today.char_name || userDetail.today.char_id }}</b>
+                      <!-- v0.51.0：角色头像 + 名字可点进详情 -->
+                      <span class="char-av-link" title="进入角色详情"
+                            @click="gotoGallery(userDetail.today.char_id)">
+                        <img v-if="charAvatarOf(userDetail.today.char_id)" class="char-av"
+                             :src="charAvatarOf(userDetail.today.char_id)" alt="">
+                        <span v-else class="char-av char-av-letter"
+                              :style="{ background: (userDetail.today.char_color || colorOf(userDetail.today.char_id)) + '33',
+                                        color: userDetail.today.char_color || colorOf(userDetail.today.char_id) }">{{ (userDetail.today.char_name || userDetail.today.char_id || '?').slice(0, 1) }}</span>
+                        <b class="char-av-name">{{ userDetail.today.char_name || userDetail.today.char_id }}</b>
+                      </span>
                       <span class="bind-tip" style="margin: 0;">{{ userDetail.today.series || "—" }}</span>
                       <n-tag size="tiny" :bordered="false" v-if="userDetail.today.rerolled">换过老婆</n-tag>
                       <n-button size="tiny" v-if="userDetail.today.card_path"
@@ -2179,7 +2213,16 @@
                     <n-gi>
                       <n-card size="small" title="老婆偏好" :bordered="true">
                         <div v-for="c in userDetail.top_chars" :key="c.char_id" class="bar-row">
-                          <div class="bar-label">{{ c.char_name || c.char_id }}</div>
+                          <!-- v0.51.0：偏好条目也带角色头像，点击进角色详情 -->
+                          <div class="bar-label char-av-link" title="进入角色详情"
+                               @click="gotoGallery(c.char_id)">
+                            <img v-if="charAvatarOf(c.char_id)" class="char-av"
+                                 :src="charAvatarOf(c.char_id)" alt="">
+                            <span v-else class="char-av char-av-letter"
+                                  :style="{ background: (c.char_color || colorOf(c.char_id)) + '33',
+                                            color: c.char_color || colorOf(c.char_id) }">{{ (c.char_name || c.char_id || '?').slice(0, 1) }}</span>
+                            <span class="char-av-name">{{ c.char_name || c.char_id }}</span>
+                          </div>
                           <div class="bar-track"><div class="bar-fill"
                                :style="{ width: barPct(c.n, userMaxChar), background: c.char_color }"></div></div>
                           <div class="bar-num">{{ c.n }}</div>
@@ -2209,7 +2252,15 @@
                       <tbody>
                         <tr v-for="h in userDetail.history" :key="h.date">
                           <td>{{ h.date }}</td>
-                          <td>{{ h.char_name || h.char_id }}</td>
+                          <td><span class="char-av-link" title="进入角色详情"
+                                    @click="gotoGallery(h.char_id)">
+                            <img v-if="charAvatarOf(h.char_id)" class="char-av"
+                                 :src="charAvatarOf(h.char_id)" alt="">
+                            <span v-else class="char-av char-av-letter"
+                                  :style="{ background: (h.char_color || colorOf(h.char_id)) + '33',
+                                            color: h.char_color || colorOf(h.char_id) }">{{ (h.char_name || h.char_id || '?').slice(0, 1) }}</span>
+                            <span class="char-av-name">{{ h.char_name || h.char_id }}</span>
+                          </span></td>
                           <td>{{ h.series || "—" }}</td>
                           <td>{{ h.group_name || "私聊" }}</td>
                           <td>{{ rerollLabel(h.nonce) }}</td>
@@ -4755,6 +4806,9 @@
       var ovLoading = Vue.ref(true);   // v0.39.2：总览首屏加载态（最近抽签假空态守卫）
       async function loadOverview() {
         ovLoading.value = true;
+        // v0.51.0：总览 / 记录 / 用户详情都要展示「角色头像」，提前把缩略拉好
+        // （有 mtime 缓存 + loaded 标记，只拉一次）
+        loadAvatarThumbs();
         try {
           var res = await apiGet("overview", {});
           if (res) {
@@ -7210,18 +7264,11 @@
         var e = allEntries.value.find(function (x) { return x.id === charId; });
         return (e && e.color) || "#d63384";
       }
-      function thumbOf(charId) {
-        var e = allEntries.value.find(function (x) { return x.id === charId; });
-        return (e && e.thumb) || "";
-      }
-      // v0.50.0：总览「最近抽签」的角色缩略 → 点开看大图（封面原图优先，
-      // 没有封面就退回卡片缩略 data URL，别弹「文件不存在」）
-      function openCharCoverViewer(charId, name) {
-        var e = allEntries.value.find(function (x) { return x.id === charId; });
-        var label = name || (e && e.name) || charId || "查看大图";
-        var rel = (e && e.cover_path) || "";
-        if (rel) { openViewer(rel, label); return; }
-        openImageViewerUrl(thumbOf(charId), label);
+      // v0.51.0：列表里代表角色的「头像」（/avatars/thumbs 的 160px data URL）。
+      // 没有头像时模板用名字首字 + 应援色做文字头像兜底（同头像墙口径）。
+      // 旧 thumbOf（封面缩略）已随 openCharCoverViewer 一起下线。
+      function charAvatarOf(charId) {
+        return avatarThumbs.value[charId] || "";
       }
       // v0.50.0：用户 QQ 头像点开看大图（/user/avatar 已是 data URL，直接喂 lightbox）
       function openAvatarBig(uid, label) {
@@ -10059,7 +10106,7 @@
         theme: theme, themeOverrides: themeOverrides,
         zhLocale: zhLocale, brandColor: brandColor,
         avatarOf: avatarOf, hashColor: hashColor,
-        thumbOf: thumbOf, colorOf: colorOf,
+        colorOf: colorOf, charAvatarOf: charAvatarOf,
         rerollLabel: rerollLabel, tv: tv,
         dragOverlay: dragOverlay, dragOverlayText: dragOverlayText,
         menu: menu, menuOpts: menuOpts, onMenu: onMenu,
@@ -10265,10 +10312,9 @@
         galAvOverwrite: galAvOverwrite, setAvOverwrite: setAvOverwrite,
         openAvatarBatchPreview: openAvatarBatchPreview,
         avatarThumbs: avatarThumbs, avatarThumbsLoading: avatarThumbsLoading,
-        // v0.50.0：头像 / 角色缩略点开看大图
+        // v0.50.0：头像点开看大图；v0.51.0：列表角色头像（点击进详情）
         openCharAvatarViewer: openCharAvatarViewer, openAvatarBig: openAvatarBig,
-        openCharCoverViewer: openCharCoverViewer,
-        openImageViewerUrl: openImageViewerUrl,
+        openImageViewerUrl: openImageViewerUrl, charAvatarOf: charAvatarOf,
         galFillBusy: galFillBusy, galFillLabel: galFillLabel,
         galFillOpen: galFillOpen, galFillRows: galFillRows,
         galFillHave: galFillHave, galFillQuota: galFillQuota,
