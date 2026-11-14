@@ -388,8 +388,8 @@ POSES = [
      "en": "vending machine, bending over, reaching out, night"},
     {"w": 4, "zh": "躺在草地上单手枕着头",
      "en": "lying on grass, on back, arm behind head"},
-    {"w": 3, "zh": "逆光里抬手挡在眼前眺望远方",
-     "en": "shielding eyes, hand raised, looking into distance, backlighting"},
+    {"w": 3, "zh": "抬手搭在额前眺望远方",
+     "en": "shielding eyes, hand raised, looking into distance"},
     {"w": 3, "zh": "双手插兜倚着栏杆",
      "en": "hands in pockets, leaning on railing, relaxed"},
     {"w": 3, "zh": "拎着凉鞋赤脚走在沙滩边",
@@ -454,7 +454,7 @@ EXPRESSIONS = [
     {"w": 6, "zh": "害羞脸红", "en": "blush, shy"},
     {"w": 5, "zh": "微微移开视线、带着浅笑", "en": "looking away, soft smile"},
     {"w": 5, "zh": "无语地半眯着眼", "en": "expressionless, half-closed eyes"},
-    {"w": 5, "zh": "闭眼享受阳光", "en": "closed eyes, peaceful expression"},
+    {"w": 5, "zh": "闭眼享受微风", "en": "closed eyes, peaceful expression"},
     {"w": 4, "zh": "得意的坏笑", "en": "smirk, smug"},
     {"w": 4, "zh": "困倦惺忪", "en": "sleepy"},
     {"w": 4, "zh": "星星眼兴奋表情", "en": "star-shaped eyes, excited"},
@@ -1366,7 +1366,7 @@ def pick_variations(seed_int: int, theme: dict | None = None,
                 generic, _sub(seed_int, "expression@art_theme", 2 ** 30))
     # v0.26.3：姿势与表情强相关——睡着 / 躺着的姿势配「惊讶瞪眼」是硬伤。
     # 与主题子集取交集（睡姿优先）；交集为空才退到睡姿子集，避免覆盖掉主题
-    # 已收窄的表情范围（泳装主题的「闭眼享受阳光」正好两边都合适）。
+    # 已收窄的表情范围（泳装主题的「闭眼享受微风」正好两边都合适）。
     pose_zh = str((picks.get("pose") or {}).get("zh") or "")
     for hints, expr_kws in _POSE_EXPR_LOCK:
         if not any(h in pose_zh for h in hints):
@@ -1705,7 +1705,7 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "",
 
 
 # 视线 tag（v0.36.0）：此前 danbooru 底稿硬编码 looking at viewer——与回眸 /
-# 闭眼 / 移开视线的姿势表情直接打架（「闭眼享受阳光」却盯着镜头），也是
+# 闭眼 / 移开视线的姿势表情直接打架（「闭眼享受微风」却盯着镜头），也是
 # 「每张都盯着镜头」同质化的推手之一。默认仍看镜头（立绘惯例），姿势或
 # 表情自带视线语义时让位。
 _GAZE_AWAY_KWS = ("looking back", "from behind", "closed eyes", "looking away",
@@ -1861,6 +1861,10 @@ _SYSTEM_PROMPT = (
     "画面氛围（必须落实）：编辑模型默认保留原图的光线与色调——背景子句里"
     "括号内的光线描述（光源方向、光斑、空气感）必须一并写进指令，让整张图的"
     "光影与新场景一致；只换地点不换光，画面就会发闷。"
+    "环境一致性（必须遵守）：子句之间不得出现天气 / 时刻矛盾——雨天不能"
+    "「享受阳光」、夜晚不能「烈日当头」；若随机维度撞出这类矛盾，以背景"
+    "场景为基准调和措辞（例如雨天把「享受阳光」调和成「听雨」的意境），"
+    "不要把矛盾原样写进指令。"
     "改动服装时必须写明「新服装完全替换原服装，原款式轮廓不要残留」——"
     "编辑模型默认保留原服装，不点名就只改个别元素。"
     "画面纪律（必须写进指令）：画面中只允许出现这一个人物、只保留一颗头部；"
@@ -1889,7 +1893,8 @@ _SYSTEM_T2I_NATURAL = (
     "与时间感（backlighting / dappled sunlight / golden hour / neon…）、空气感"
     "（light particles / lens flare / depth of field）、整体色调倾向，让光成为"
     "画面的一部分；若姿势/表情与视线冲突（looking back / closed eyes 等），"
-    "删掉 looking at viewer，视线服从动作。"
+    "删掉 looking at viewer，视线服从动作。天气、时刻与人物状态必须一致"
+    "（雨天不要写 enjoying the sunshine）。"
     "画风维度翻成对应英文风格词（modern anime illustration / cel shading / "
     "cinematic anime / watercolor…），整段保持同一画风。"
     "禁止：8k/highly detailed 之类质量词堆砌（最多以 best quality, highres 开头）、"
@@ -1914,7 +1919,9 @@ _SYSTEM_T2I_QWEN = (
     "不要默认全身；④ 只描述成品画面，绝不写「请画」「帮我生成」这类指令；"
     "⑤ 画面中只有这一个人物、只保留一颗头部，不出现第二个人；"
     "⑥ 不写比例数字、不写 best quality 之类画质套话、不写标签串、不用 markdown；"
-    "⑦ 视线服从动作——姿势或表情是回眸 / 闭眼 / 移开视线时，不要写看镜头。"
+    "⑦ 视线服从动作——姿势或表情是回眸 / 闭眼 / 移开视线时，不要写看镜头；"
+    "⑧ 环境一致——天气、时刻、光线与人物状态不得互相矛盾（不要雨天写"
+    "享受阳光、夜晚写烈日当头）。"
     "输出纪律：只输出提示词本体一段话，不要解释、不要引号、不要分点。"
 )
 

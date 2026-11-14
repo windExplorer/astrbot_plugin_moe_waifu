@@ -1359,4 +1359,20 @@ try:
 except RuntimeError as _e:
     check("画师模式：未配置对话模型报可读错误", "对话模型" in str(_e))
 
+# ---------- v0.38.1：跨维度环境一致性（雨天 ✗ 享受阳光） ----------
+_WEATHER_LITERALS = ("阳光", "烈日", "星空", "雨天", "下雨", "雪")
+_weather_bad = [str(e.get("zh") or "") for e in prompt_gen.EXPRESSIONS
+                if any(w in str(e.get("zh") or "") for w in _WEATHER_LITERALS)]
+check("表情池天气中性（不与雨天/夜晚背景撞车）", not _weather_bad, str(_weather_bad))
+_pose_light_bad = [str(p.get("zh") or "") for p in prompt_gen.POSES
+                   if any(w in str(p.get("zh") or "") for w in ("逆光", "夕阳", "烈日"))]
+check("姿势池不硬编码光线时刻（光线交给背景维度）", not _pose_light_bad,
+      str(_pose_light_bad))
+check("居家主题 300 种子表情无阳光字样",
+      not any("阳光" in prompt_gen.pick_variations(s, prompt_gen.get_theme("home"))
+              ["expression"]["zh"] for s in range(300)))
+check("图生图 system：环境矛盾调和许可",
+      "以背景" in prompt_gen._SYSTEM_PROMPT and "调和" in prompt_gen._SYSTEM_PROMPT)
+check("qwen system：环境一致条款", "环境一致" in prompt_gen._SYSTEM_T2I_QWEN)
+
 print("test_prompt_gen: ALL OK")
