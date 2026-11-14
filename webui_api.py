@@ -5583,24 +5583,124 @@ def _avatar_runner(plugin):
     return r
 
 
-async def h_avatars_batch(plugin) -> dict:
-    """批量生成缺失头像：串行后台队列，只处理还没有头像的角色。"""
-    body = await _body()
-    workflow = str(body.get("workflow") or "").strip()
+def _avatar_batch_plan(plugin) -> dict:
+    """批量头像候选计划（v0.49.0）。
+
+    用户口径（v0.49.0）：批量头像 = 以角色的**图生图参考图**为基准生成头像
+    特写，产物直接覆盖原头像（不再二次确认）；**没有参考图的角色一律跳过**，
+    不再像旧版那样回落文生图（批量重画容易把角色画歪，用户明确要求跳过）。
+
+    返回 {"total", "targets": [{"entry", "has_avatar"}], "skipped": [entry],
+          "overwrite"}；`overwrite` = targets 里已有可用头像文件的人数。
+    """
+    data_dir = str(plugin._data_dir or "")
+    seen = set()
     entries = []
     for pack in pool.load_packs(_pools_dir(plugin), logger):
         if not bool(pack.get("enabled", True)):
             continue
         for raw in pack["entries"]:
             e = pool.normalize_entry(raw, pack["pack"])
-            if e and not str(e.get("avatar") or "").strip():
-                entries.append(e)
+            if e is None or e["id"] in seen:
+                continue
+            seen.add(e["id"])
+            entries.append(e)
+    targets, skipped = avatars.split_batch_targets(
+        entries, lambda e: draw.has_gen_refs(e, data_dir))
+    for t in targets:
+        t["has_avatar"] = _safe_data_file(
+            plugin, t["entry"].get("avatar")) is not None
+    return {"total": len(entries), "targets": targets, "skipped": skipped,
+            "overwrite": sum(1 for t in targets if t["has_avatar"])}
+
+
+def _avatar_batch_preview(plan: dict, limit: int = 300) -> dict:
+    """计划 → 前端预览（统计 + 清单 + 跳过文本）。纯组装，方便直测。"""
+
+    def label(e: dict) -> str:
+        name = str(e.get("name") or "").strip() or str(e.get("id") or "")
+        series = str(e.get("series") or "").strip()
+        return f"{name}（{series}）" if series else name
+
+    items = [{
+        "id": str(t["entry"].get("id") or ""),
+        "name": str(t["entry"].get("name") or ""),
+        "series": str(t["entry"].get("series") or ""),
+        "has_avatar": bool(t["has_avatar"]),
+    } for t in plan["targets"]]
+    skipped = [label(e) for e in plan["skipped"]]
+    return {
+        "total": int(plan["total"]),
+        "with_refs": len(items),
+        "overwrite": int(plan["overwrite"]),
+        "skipped": len(skipped),
+        "skipped_text": "、".join(skipped[:20]) + ("…" if len(skipped) > 20 else ""),
+        "items": items[:limit],
+        "truncated": len(items) > limit,
+    }
+
+
+async def h_avatars_batch_preview(plugin) -> dict:
+    """批量头像预览（v0.49.0）：将生成 / 覆盖 / 跳过（无参考图）/ 总角色数。"""
+    return ok(_avatar_batch_preview(_avatar_batch_plan(plugin)))
+
+
+async def h_avatars_batch(plugin) -> dict:
+    """批量生成头像：串行后台队列，**覆盖**原头像，无参考图的角色跳过。
+
+    body（都可选）：`ids` 限定角色子集；`overwrite=false` 退回旧语义（只补
+    没有头像的角色）；`workflow` 指定萌绘工作流。前端默认不带 ids/overwrite。
+    """
+    body = await _body()
+    workflow = str(body.get("workflow") or "").strip()
+    ids = body.get("ids")
+    id_sel = ({str(x).strip() for x in ids if str(x or "").strip()}
+              if isinstance(ids, list) else set())
+    overwrite = body.get("overwrite", True) is not False
+    plan = _avatar_batch_plan(plugin)
+    targets = [t for t in plan["targets"]
+               if not id_sel or str(t["entry"].get("id")) in id_sel]
+    if not overwrite:
+        targets = [t for t in targets if not t["has_avatar"]]
+    entries = [t["entry"] for t in targets]
     if not entries:
-        return ok({"total": 0, "note": "所有角色都已有头像"})
-    n = _avatar_runner(plugin).start(plugin, entries, workflow=workflow)
+        if not plan["targets"]:
+            note = ("没有可生成的角色：批量头像只处理有参考图的角色，"
+                    "没有参考图的会跳过（先去「参考图」给角色上传并设为生成源）")
+        else:
+            note = "筛选后没有需要生成的角色"
+        return ok({"total": 0, "note": note,
+                   "skipped": len(plan["skipped"]),
+                   "with_refs": len(plan["targets"])})
+    over = sum(1 for t in targets if t["has_avatar"])
+    n = _avatar_runner(plugin).start(plugin, entries, workflow=workflow,
+                                    overwrite=over)
     if n < 0:
         return err("批量头像已在运行中")
-    return ok({"total": n})
+    return ok({"total": n, "overwrite": over,
+               "skipped": len(plan["skipped"]),
+               "with_refs": len(plan["targets"])})
+
+
+async def h_avatars_thumbs(plugin) -> dict:
+    """角色头像墙缩略（v0.49.0）：id → data URL（160px JPEG，走 mtime 缓存）。
+
+    单独成端点而不是塞进 `/pools`：头像墙是可选视图，全量头像 data URL 会把
+    每次角色库刷新都撑大（几百个角色就是几 MB）。
+    """
+    thumbs: dict = {}
+    for pack in pool.load_packs(_pools_dir(plugin), logger):
+        for raw in pack["entries"]:
+            e = pool.normalize_entry(raw, pack["pack"])
+            if e is None or e["id"] in thumbs:
+                continue
+            fp = _safe_data_file(plugin, e.get("avatar"))
+            if fp is None:
+                continue
+            url = _thumb_cached(str(fp), 160)
+            if url:
+                thumbs[e["id"]] = url
+    return ok({"thumbs": thumbs})
 
 
 async def h_avatars_batch_status(plugin) -> dict:
@@ -5673,6 +5773,10 @@ def register(plugin) -> None:
         ("/pools/avatar_clear", h_avatar_clear, ["POST"]),
         ("/avatar/generate", h_avatar_generate, ["POST"]),
         ("/avatar/discard", h_avatar_discard, ["POST"]),
+        # v0.49.0：批量头像改「预览制」——统计 + 只收有参考图的角色；
+        # 头像墙（可选视图）单独拉缩略，不塞进 /pools
+        ("/avatars/batch_preview", h_avatars_batch_preview, ["GET", "POST"]),
+        ("/avatars/thumbs", h_avatars_thumbs, ["GET", "POST"]),
         ("/avatars/batch", h_avatars_batch, ["POST"]),
         ("/avatars/batch_status", h_avatars_batch_status, ["GET", "POST"]),
         ("/avatars/batch_stop", h_avatars_batch_stop, ["POST"]),

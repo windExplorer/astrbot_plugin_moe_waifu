@@ -486,6 +486,38 @@
   .av-compare img { width: 108px; height: 108px; border-radius: 12px; object-fit: cover;
     border: 1px solid var(--wf-line); }
 
+  /* v0.49.0：角色库「头像墙」视图——一屏纯头像；没头像用文字头像兜底，
+     悬停才浮出「名字 + 作品」气泡（.av-hover 绝对定位，不吃布局行高） */
+  .av-wall { display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); }
+  .av-tile { position: relative; cursor: pointer; }
+  .av-pic { position: relative; width: 100%; aspect-ratio: 1 / 1; border-radius: 50%;
+    overflow: hidden; display: flex; align-items: center; justify-content: center;
+    border: 1px solid rgba(128,128,128,.22);
+    transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease; }
+  .av-tile:hover .av-pic { transform: translateY(-2px) scale(1.03);
+    border-color: var(--wf-brand);
+    box-shadow: 0 8px 20px -10px rgba(160,50,120,.85); }
+  .av-pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .av-letter { font-size: 26px; font-weight: 700; line-height: 1; user-select: none; }
+  .av-hover { position: absolute; left: 50%; bottom: calc(100% + 6px);
+    transform: translate(-50%, 4px); z-index: 6; pointer-events: none;
+    display: flex; flex-direction: column; gap: 2px; align-items: center;
+    padding: 5px 10px; border-radius: 8px; white-space: nowrap;
+    background: rgba(28,18,26,.92); color: #fff; opacity: 0;
+    transition: opacity .15s ease, transform .15s ease; }
+  .av-hover b { font-size: 12px; font-weight: 600; }
+  .av-hover span { font-size: 10.5px; opacity: .72; }
+  .av-tile:hover .av-hover { opacity: 1; transform: translate(-50%, 0); }
+  /* 批量头像预览：四个统计块（将生成 / 覆盖 / 跳过 / 总数） */
+  .av-pv-stats { display: flex; gap: 10px; flex-wrap: wrap; }
+  .av-pv-stat { flex: 1 1 88px; min-width: 88px; padding: 9px 12px; border-radius: 10px;
+    border: 1px solid var(--wf-line); background: var(--wf-surface); text-align: center; }
+  .av-pv-stat b { display: block; font-size: 20px; font-weight: 700; }
+  .av-pv-stat span { font-size: 11px; opacity: .62; }
+  .av-pv-stat.hot b { color: #c07a00; }
+  .av-pv-ops { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
   /* 配置页：分区锚点 + 左侧色条 + 悬浮固定保存条 */
   .cfg-anchor { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
   .cfg-anchor span { padding: 5px 12px; border-radius: 8px; cursor: pointer;
@@ -759,6 +791,8 @@
               <n-radio-group v-model:value="charsMode" size="small">
                 <n-radio-button value="card">卡片</n-radio-button>
                 <n-radio-button value="list">列表</n-radio-button>
+                <!-- v0.49.0：头像墙——只留头像，悬停才浮出名字与作品 -->
+                <n-radio-button value="avatar">头像</n-radio-button>
               </n-radio-group>
               <n-button type="primary" size="small" @click="openNew">新增角色</n-button>
               <n-button size="small" @click="openImport">导入角色</n-button>
@@ -768,9 +802,9 @@
               <!-- v0.25.6：后台补图进度跟到按钮上（关掉弹窗也能看见在跑） -->
               <n-button size="small" :type="batchRunning ? 'primary' : 'default'"
                         :secondary="batchRunning" @click="openBatchModal">{{ batchBtnText }}</n-button>
-              <!-- v0.31.0：批量生成缺失头像（后台队列，进度弹窗） -->
+              <!-- v0.49.0：批量头像先出预览（统计 / 覆盖数 / 跳过无参考图） -->
               <n-button size="small" :loading="!!(galAvBatch && galAvBatch.running)"
-                        @click="startAvatarBatch">{{ (galAvBatch && galAvBatch.running) ? "头像生成中…" : "批量头像" }}</n-button>
+                        @click="openAvatarBatchPreview">{{ (galAvBatch && galAvBatch.running) ? "头像生成中…" : "批量头像" }}</n-button>
               <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
               <!-- v0.6.1：每行卡片数快捷调整（写回 ui_grid_cols，免去去配置页） -->
               <span style="font-size: 12px; opacity: .6;">每行</span>
@@ -846,6 +880,29 @@
                   <i v-for="n in 8" :key="'csk' + n"></i>
                 </div>
               </div>
+              <n-empty v-if="!loadingAll && filteredEntries.length === 0"
+                       description="没有匹配的角色"></n-empty>
+            </div>
+
+            <!-- 头像墙视图（v0.49.0）：一屏纯头像；没有头像用文字头像兜底，
+                 悬停浮出「名字 + 作品」小气泡，点击进角色详情 -->
+            <div v-if="charsMode === 'avatar'" style="margin-top: 14px;">
+              <div class="av-wall" v-if="filteredEntries.length > 0">
+                <div v-for="e in filteredEntries" :key="'avw' + e.id" class="av-tile"
+                     :title="(e.name || '') + ' · ' + (e.series || '未填作品')"
+                     @click="gotoGallery(e.id)">
+                  <div class="av-pic" :style="{ background: (e.color || '#8A8A9A') + '33' }">
+                    <img v-if="avatarThumbs[e.id]" :src="avatarThumbs[e.id]" alt="">
+                    <span v-else class="av-letter"
+                          :style="{ color: e.color || '#8A8A9A' }">{{ (e.name || '?').slice(0, 1) }}</span>
+                  </div>
+                  <div class="av-hover">
+                    <b>{{ e.name }}</b>
+                    <span>{{ e.series || "未填作品" }}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="bind-tip" v-if="avatarThumbsLoading">正在载入头像缩略…</div>
               <n-empty v-if="!loadingAll && filteredEntries.length === 0"
                        description="没有匹配的角色"></n-empty>
             </div>
@@ -3525,11 +3582,65 @@
       </div>
     </n-modal>
 
+    <!-- ============ 批量头像预览弹窗（v0.49.0）：统计 + 清单 + 跳过无参考图。
+         容器用 div.stack（带 v-if 的兄弟节点不能放 n-space：槽 key 全 1 会错位补丁） ============ -->
+    <n-modal v-model:show="galAvPreviewOpen" preset="dialog" title="批量头像 · 预览"
+             style="width: 560px;">
+      <div class="stack">
+        <div class="bind-tip">
+          以角色的图生图参考图为基准生成头像特写（与「AI 生成头像 → 图生图」同一口径）；
+          产物<b>直接覆盖</b>原头像，保存即生效，不再二次确认。
+          没有可用参考图的角色会跳过（批量头像不做文生图重画）。
+        </div>
+        <div class="av-pv-stats" v-if="galAvPreview">
+          <div class="av-pv-stat"><b>{{ galAvPreview.with_refs }}</b><span>将生成</span></div>
+          <div class="av-pv-stat"><b>{{ galAvPreview.overwrite }}</b><span>覆盖已有头像</span></div>
+          <div class="av-pv-stat hot" v-if="galAvPreview.skipped > 0">
+            <b>{{ galAvPreview.skipped }}</b><span>跳过（无参考图）</span>
+          </div>
+          <div class="av-pv-stat"><b>{{ galAvPreview.total }}</b><span>角色总数</span></div>
+        </div>
+        <div class="gal-loading" v-if="galAvPreviewLoading">
+          <n-spin size="small"></n-spin>
+          <span class="txt">正在统计候选角色…</span>
+        </div>
+        <div v-else-if="galAvPreview && galAvPreview.items.length > 0"
+             style="max-height: 210px; overflow-y: auto; border: 1px solid rgba(128,128,128,.2);
+                    border-radius: 8px; padding: 6px 10px;">
+          <div v-for="it in galAvPreview.items" :key="'avpv' + it.id" class="batch-row">
+            <b class="entry-name">{{ it.name }}</b>
+            <span class="bind-tip" style="flex: 1; min-width: 0;">{{ it.series || "未填作品" }}</span>
+            <n-tag size="tiny" :bordered="false" :type="it.has_avatar ? 'warning' : 'success'">
+              {{ it.has_avatar ? "覆盖" : "新增" }}
+            </n-tag>
+          </div>
+        </div>
+        <div class="bind-tip" v-else-if="galAvPreview">
+          没有可生成的角色：角色库为空，或所有角色都还没有参考图。
+        </div>
+        <div class="bind-tip" v-if="galAvPreview && galAvPreview.skipped_text">
+          跳过：{{ galAvPreview.skipped_text }}
+        </div>
+        <div class="bind-tip" v-if="galAvPreview && galAvPreview.truncated">
+          清单只列前 {{ galAvPreview.items.length }} 个角色，实跑按上面统计数字执行。
+        </div>
+        <div class="av-pv-ops">
+          <n-button size="small" type="primary"
+                    :disabled="!(galAvPreview && galAvPreview.with_refs > 0) || !!(galAvBatch && galAvBatch.running)"
+                    @click="startAvatarBatch">开始生成</n-button>
+          <n-button size="small" @click="galAvPreviewOpen = false">取消</n-button>
+          <span class="bind-tip" style="margin-top: 0;" v-if="galAvBatch && galAvBatch.running">
+            头像队列正在后台跑，进度见弹窗
+          </span>
+        </div>
+      </div>
+    </n-modal>
+
     <!-- ============ 批量头像进度弹窗（v0.31.0；角色库工具栏发起） ============ -->
-    <n-modal v-model:show="galAvBatchOpen" preset="dialog" title="批量生成缺失头像"
+    <n-modal v-model:show="galAvBatchOpen" preset="dialog" title="批量生成头像（覆盖原头像）"
              style="width: 460px;">
-      <n-space vertical size="medium">
-        <div class="bind-tip">串行逐角色走萌绘工作流生成（单张 20~120s），只处理还没有头像的角色；进度实时刷新。</div>
+      <div class="stack">
+        <div class="bind-tip">串行逐角色以参考图为基准生成头像特写（单张 20~120s），无参考图的角色已跳过；生成成功即覆盖原头像。进度实时刷新。</div>
         <div style="font-size: 22px; font-weight: 600;">
           {{ galAvBatch ? (galAvBatch.done + " / " + galAvBatch.total) : "…" }}
           <span v-if="galAvBatch && galAvBatch.failed > 0"
@@ -3546,7 +3657,7 @@
           <n-button size="small" :disabled="!!(galAvBatch && galAvBatch.running)"
                     @click="galAvBatchOpen = false">关闭</n-button>
         </n-space>
-      </n-space>
+      </div>
     </n-modal>
 
     <!-- ============ 角色详情 · 补齐配额预览弹窗（v0.32.2）：逐张主题序列，
@@ -7722,6 +7833,55 @@
       var galAvBatchOpen = Vue.ref(false);
       var galAvBatch = Vue.ref(null);
       var galAvBatchTimer = null;
+      // v0.49.0：批量头像改预览制——先拉统计（将生成 / 覆盖 / 跳过无参考图）
+      var galAvPreviewOpen = Vue.ref(false);
+      var galAvPreview = Vue.ref(null);
+      var galAvPreviewLoading = Vue.ref(false);
+      // v0.49.0：角色库「头像墙」缩略（id → data URL），懒加载，不进 /pools
+      var avatarThumbs = Vue.ref({});
+      var avatarThumbsLoaded = Vue.ref(false);
+      var avatarThumbsLoading = Vue.ref(false);
+      async function loadAvatarThumbs(force) {
+        if (avatarThumbsLoading.value) { return; }
+        if (avatarThumbsLoaded.value && !force) { return; }
+        avatarThumbsLoading.value = true;
+        try {
+          var res = await apiGet("avatars/thumbs");
+          avatarThumbs.value = (res && res.thumbs) || {};
+          avatarThumbsLoaded.value = true;
+        } catch (e) {
+          // 拉不到就整墙回落文字头像（不挡浏览）
+        } finally {
+          avatarThumbsLoading.value = false;
+        }
+      }
+      function invalidateAvatarThumbs() {
+        avatarThumbsLoaded.value = false;
+        if (charsMode.value === "avatar") { loadAvatarThumbs(true); }
+      }
+      Vue.watch(charsMode, function (m) {
+        if (m === "avatar") { loadAvatarThumbs(); }
+      });
+      function openAvatarBatchPreview() {
+        // 队列已在跑：直接看进度，别让用户以为还能再开一批
+        if (galAvBatch.value && galAvBatch.value.running) {
+          galAvBatchOpen.value = true;
+          pollAvBatch();
+          return;
+        }
+        galAvPreviewOpen.value = true;
+        galAvPreview.value = null;
+        loadAvatarBatchPreview();
+      }
+      async function loadAvatarBatchPreview() {
+        galAvPreviewLoading.value = true;
+        try {
+          var res = await apiPost("avatars/batch_preview", {});
+          galAvPreview.value = res || null;
+        } catch (e) { /* 已提示 */ } finally {
+          galAvPreviewLoading.value = false;
+        }
+      }
       Vue.watch(galSummary, function (s) {
         // 保守同步：summary 带缩略才更新；「明确无头像」才清空——job 侧刚拿到
         // 的缩略不该被一次迟到的空 summary 冲掉（生成后 summary 竞态）
@@ -7741,6 +7901,7 @@
           galAvatarUploadOpen.value = false;
           message.success("头像已更新");
           await loadGalSummary();
+          invalidateAvatarThumbs();   // 头像墙跟着换图（v0.49.0）
         } catch (e) { galAvatarNote.value = ""; }
       }
       function openAvatarPick() {
@@ -7757,6 +7918,7 @@
           galAvatarPickOpen.value = false;
           message.success("头像已更新");
           await loadGalSummary();
+          invalidateAvatarThumbs();   // 头像墙跟着换图（v0.49.0）
         } catch (e) { /* 已提示 */ }
       }
       async function avatarClear() {
@@ -7766,6 +7928,7 @@
           message.success("已移除头像");
           delArm.value = "";
           await loadGalSummary();
+          invalidateAvatarThumbs();   // 头像墙回落文字头像（v0.49.0）
         } catch (e) { /* 已提示 */ }
       }
       async function doAvatarGenerate() {
@@ -7822,6 +7985,7 @@
           avatarGenResult.value = null;
           galAvatarGenOpen.value = false;
           await loadGalSummary();
+          invalidateAvatarThumbs();   // 头像墙跟着换图（v0.49.0）
         } catch (e) { /* 已提示 */ }
         finally { avatarGenApplying.value = false; }
       }
@@ -7842,9 +8006,17 @@
       });
       async function startAvatarBatch() {
         try {
+          // v0.49.0：默认覆盖原头像、只收有参考图的角色（后端同口径）
           var res = await apiPost("avatars/batch", {});
           var total = (res && res.total) || 0;
-          if (!total) { message.info((res && res.note) || "所有角色都已有头像"); return; }
+          if (!total) {
+            message.info((res && res.note) || "没有可生成头像的角色（需要参考图）");
+            return;
+          }
+          if (res && res.skipped) {
+            message.info("已跳过 " + res.skipped + " 个没有参考图的角色");
+          }
+          galAvPreviewOpen.value = false;
           galAvBatch.value = null;
           galAvBatchOpen.value = true;
           pollAvBatch();
@@ -7854,9 +8026,11 @@
         if (galAvBatchTimer) { clearTimeout(galAvBatchTimer); }
         galAvBatchTimer = setTimeout(async function () {
           try {
+            var wasRunning = !!(galAvBatch.value && galAvBatch.value.running);
             var res = await apiPost("avatars/batch_status", {});
             galAvBatch.value = res || null;
             if (res && res.running) { pollAvBatch(); }
+            else if (wasRunning) { invalidateAvatarThumbs(); }  // 头像已换，头像墙重取
           } catch (e) {
             if (galAvBatchOpen.value) { pollAvBatch(); }
           }
@@ -10006,6 +10180,11 @@
         applyAvatarResult: applyAvatarResult, discardAvatarResult: discardAvatarResult,
         galAvBatchOpen: galAvBatchOpen, galAvBatch: galAvBatch,
         startAvatarBatch: startAvatarBatch, stopAvatarBatch: stopAvatarBatch,
+        // v0.49.0：批量头像预览 + 头像墙缩略
+        galAvPreviewOpen: galAvPreviewOpen, galAvPreview: galAvPreview,
+        galAvPreviewLoading: galAvPreviewLoading,
+        openAvatarBatchPreview: openAvatarBatchPreview,
+        avatarThumbs: avatarThumbs, avatarThumbsLoading: avatarThumbsLoading,
         galFillBusy: galFillBusy, galFillLabel: galFillLabel,
         galFillOpen: galFillOpen, galFillRows: galFillRows,
         galFillHave: galFillHave, galFillQuota: galFillQuota,

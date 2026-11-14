@@ -140,25 +140,49 @@ I2I_INSTRUCTION = (
 )
 
 
+def split_batch_targets(entries: list, has_refs) -> tuple:
+    """批量头像候选筛选（纯函数，v0.49.0）。
+
+    用户口径：批量头像以**参考图**为基准生成头像特写，所以没有可用参考图
+    （`strategy.gen_refs` / 旧的主参考 `strategy.ref`）的角色一律跳过——不再
+    回落文生图（批量重画容易把角色画歪）。`has_refs(entry) -> bool` 由调用方
+    注入（webui_api 传 `draw.has_gen_refs`），便于脱离运行时单测。
+
+    返回 `(targets, skipped)`：targets 是 `[{"entry": e, "has_avatar": bool}]`，
+    skipped 是原始 entry 列表（顺序与输入一致）。
+    """
+    targets, skipped = [], []
+    for e in (entries or []):
+        if not isinstance(e, dict):
+            continue
+        if callable(has_refs) and has_refs(e):
+            targets.append({"entry": e, "has_avatar": False})
+        else:
+            skipped.append(e)
+    return targets, skipped
+
+
 class AvatarRunner:
     """批量头像生成队列：串行逐角色、单张超时不卡队、可停止（同 batch_fill.BatchRunner）。
 
-    任务 = [entry dict]；只处理还没有头像的角色（调用方筛好）。进程重启即清。
+    任务 = [entry dict]（v0.49.0 起由调用方筛好「有参考图的角色」，生成走
+    图生图、**直接覆盖**原头像）。进程重启即清。
     """
 
     def __init__(self):
         self.running = False
         self.stop_flag = False
-        self.items = []      # [{char_id, name, status, error}]
+        self.items = []      # [{char_id, name, series, status, error}]
         self.total = 0
         self.done = 0
         self.ok = 0
         self.failed = 0
+        self.overwrite = 0   # 本批里「已有头像会被覆盖」的人数（仅展示用）
         self._task = None
 
     def snapshot(self) -> dict:
         return {"running": self.running, "total": self.total, "done": self.done,
-                "ok": self.ok, "failed": self.failed,
+                "ok": self.ok, "failed": self.failed, "overwrite": self.overwrite,
                 "stopped": self.stop_flag and not self.running,
                 "items": self.items[-80:]}
 
@@ -166,16 +190,19 @@ class AvatarRunner:
         self.stop_flag = True
         return self.running
 
-    def start(self, plugin, entries: list, workflow: str = "") -> int:
+    def start(self, plugin, entries: list, workflow: str = "",
+              overwrite: int = 0) -> int:
         if self.running:
             return -1
         entries = [e for e in (entries or []) if isinstance(e, dict)]
         self.running = True
         self.stop_flag = False
         self.items = [{"char_id": e.get("id"), "name": e.get("name") or "",
+                       "series": e.get("series") or "",
                        "status": None, "error": ""} for e in entries]
         self.total = len(entries)
         self.done = self.ok = self.failed = 0
+        self.overwrite = max(0, int(overwrite or 0))
         loop = asyncio.get_running_loop()
         self._task = loop.create_task(self._run(plugin, entries, workflow))
         return len(entries)
@@ -196,8 +223,10 @@ class AvatarRunner:
                     break
                 item = self.items[i] if i < len(self.items) else {}
                 try:
+                    # v0.49.0：批量固定走图生图（候选已保证有参考图），产物
+                    # 直接覆盖 avatars/<id>.png 并改写条目的 avatar 字段。
                     rel, _w, _h = await webui_api.generate_avatar_for(
-                        plugin, e, workflow=workflow)
+                        plugin, e, workflow=workflow, mode="i2i")
                     item["status"] = "ok"
                     item["error"] = ""
                     self.ok += 1

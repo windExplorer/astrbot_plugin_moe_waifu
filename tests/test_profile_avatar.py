@@ -135,6 +135,39 @@ def test_avatars_helpers():
             check("竖版偏上裁剪（上半部像素保留）", px[0] > 200 and px[2] < 60)
 
 
+def test_avatar_batch_plan():
+    """v0.49.0：批量头像只收「有参考图」的角色，预览给统计 + 跳过清单。"""
+    entries = [
+        {"id": "a", "name": "甲", "series": "作品一", "avatar": "avatars/a.png"},
+        {"id": "b", "name": "乙", "series": ""},
+        {"id": "c", "name": "丙", "series": "作品二"},
+    ]
+    targets, skipped = avatars.split_batch_targets(
+        entries, lambda e: e["id"] in ("a", "c"))
+    check("split：有参考图的进 targets、其余进 skipped",
+          [t["entry"]["id"] for t in targets] == ["a", "c"]
+          and [e["id"] for e in skipped] == ["b"])
+    check("split：targets 默认 has_avatar=False",
+          all(t["has_avatar"] is False for t in targets))
+    check("split：空/脏输入不炸",
+          avatars.split_batch_targets(None, lambda e: True) == ([], [])
+          and avatars.split_batch_targets([None, 1, "x"], lambda e: True) == ([], []))
+    plan = {"total": 3, "targets": targets, "skipped": skipped, "overwrite": 1}
+    targets[0]["has_avatar"] = True
+    pv = api._avatar_batch_preview(plan)
+    check("预览统计：将生成 / 覆盖 / 跳过 / 总数",
+          pv["with_refs"] == 2 and pv["overwrite"] == 1
+          and pv["skipped"] == 1 and pv["total"] == 3)
+    check("预览跳过文本带角色名", "乙" in pv["skipped_text"])
+    one = api._avatar_batch_preview(plan, limit=1)
+    check("预览清单按 limit 截断并标 truncated",
+          len(one["items"]) == 1 and one["truncated"] is True)
+    check("AvatarRunner 快照带 overwrite 字段",
+          "overwrite" in avatars.AvatarRunner().snapshot())
+    src = (ROOT / "avatars.py").read_text(encoding="utf-8")
+    check('批量头像固定走图生图（mode="i2i"）', 'mode="i2i"' in src)
+
+
 def test_avatar_prompt():
     entry = {"name": "狐娘", "tags_en": "1girl, fox ears, tail, blue hair"}
     d = avatars.build_avatar_prompt(entry, "danbooru")
@@ -243,6 +276,7 @@ def main():
     test_sanitize_profile()
     test_extract_json_object()
     test_avatars_helpers()
+    test_avatar_batch_plan()
     test_avatar_prompt()
     test_store_summary_and_trend()
     test_backfill_duration()

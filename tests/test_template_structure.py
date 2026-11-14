@@ -112,6 +112,15 @@ def main():
           page.count('v-if="galSwitching"') >= 2)
     check("载入态有骨架样式（gal-skel）", ".gal-skel" in page)
 
+    # v0.49.0：角色库第三视图「头像墙」——纯头像 + 文字头像兜底 + 悬停气泡
+    check("角色库有头像墙视图", 'v-if="charsMode === \'avatar\'"' in page
+          and ".av-wall" in page and ".av-hover" in page)
+    check("头像墙有文字头像兜底", 'class="av-letter"' in page)
+    # 同一个坑：预览弹窗里有 v-if 兄弟节点（加载态 / 清单 / 提示），不能放 n-space
+    avseg = page.split('title="批量头像 · 预览"', 1)[1][:400]
+    check("批量头像预览容器不是 n-space（div.stack）",
+          "<n-space" not in avseg and '<div class="stack">' in avseg)
+
     if FAILURES:
         print(f"test_template_structure: {len(FAILURES)} FAILED")
         sys.exit(1)

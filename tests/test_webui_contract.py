@@ -61,6 +61,8 @@ galTaglineBusy genGalTagline galQuoteCount
 galAvatarThumb galAvatarBusy galAvatarUploadOpen galAvatarNote
 galAvatarPickOpen openAvatarPick doAvatarSet avatarClear doAvatarGenerate
 onAvatarPanelFiles galAvBatchOpen galAvBatch startAvatarBatch stopAvatarBatch
+galAvPreviewOpen galAvPreview galAvPreviewLoading openAvatarBatchPreview
+avatarThumbs avatarThumbsLoading
 galFillBusy galFillLabel startGalFill stopGalFill
 galFillOpen galFillRows galFillHave galFillQuota galFillLoading
 rerollFillRow rerollFillAll doFillStart
@@ -128,6 +130,7 @@ ROUTES = """
 /pools/avatar_set /pools/avatar_clear /avatar/generate /avatar/discard
 /presets
 /avatars/batch /avatars/batch_status /avatars/batch_stop
+/avatars/batch_preview /avatars/thumbs
 """.split()
 
 STORE_METHODS = """
