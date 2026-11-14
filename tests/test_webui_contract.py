@@ -172,6 +172,18 @@ def main():
     template = page.split('<script src="assets/vue.global.prod.js">')[0]
     unused = [b for b in BINDINGS if not re.search(r"\b" + re.escape(b) + r"\b", template)]
     check("暴露的契约键确实被模板用到（防清单腐化）", not unused, f"未使用：{unused}")
+    # 2b) **return 里的每个键都必须在脚本里真的有定义**。
+    # v0.46.1 实锤：`galQuoteCount` 模板用了、return 也带了，但脚本里根本没有
+    # `var` —— setup 直接 `ReferenceError: galQuoteCount is not defined`，
+    # 整页白屏（还会连带报 meta 未定义）。只查「模板用到 + return 暴露」查不出这类。
+    exposed_keys = re.findall(r"\b(\w+)\s*:", returns[-1].group(1)) if returns else []
+    undefined = [k for k in exposed_keys
+                 if not re.search(r"(?:var|let|const)\s+" + re.escape(k) + r"\s*=",
+                                  main_script)
+                 and not re.search(r"function\s+" + re.escape(k) + r"\s*\(",
+                                   main_script)]
+    check("return 的键在脚本里都有定义（防 setup ReferenceError）", not undefined,
+          f"缺：{undefined}")
 
     # 3) 路由表
     register = api.split("def register(plugin)")[1]

@@ -5668,6 +5668,15 @@
       // 与编辑抽屉同一份数据（entry.quotes），但走 /pools/quote_save 只改这两个键，
       // 避免「只想改一句话却把参考图 / 封面整条覆盖掉」的旧坑。
       var galQuotes = Vue.ref("");
+      // v0.46.1：`galQuotes` 是 textarea 的字符串（每行一句），句数口径必须与
+      // 保存时一致 → 直接复用 galQuoteList()（函数声明会提升，写在前面也能调）。
+      // ⚠️ 这个 computed 在 v0.45.1 **漏了定义**——模板用了、return 也带了，但脚本里
+      // 没有 `var`，setup 直接 `ReferenceError: galQuoteCount is not defined`，
+      // 整页白屏（还连带报 meta 未定义）。契约守卫只查「模板用到 + return 暴露」，
+      // 现在补一条「return 的每个键都必须在脚本里有定义」。
+      var galQuoteCount = Vue.computed(function () {
+        return galQuoteList().length;
+      });
       var galQuotesDirty = Vue.ref(false);   // 用户动过就不被 refreshAll 的快照盖掉
       var galQuotesSaving = Vue.ref(false);
       var galQuotesGenLoading = Vue.ref(false);

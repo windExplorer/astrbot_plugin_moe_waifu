@@ -2,6 +2,26 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.46.1 (2026-11-15)
+
+- **工坊整页白屏：`ReferenceError: galQuoteCount is not defined`**（用户实报：控制台第一行
+  `vue.global.prod.js:5 ReferenceError: galQuoteCount is not defined at setup`，紧跟着
+  `TypeError: Cannot read properties of undefined (reading 'anima_ready')`）。
+  - **根因（v0.45.1 埋的）**：加「印象语当前 N 句」时，`galQuoteCount` 只写进了**模板**
+    （`{{ galQuoteCount }}`）和 **setup 的 `return`**，脚本里**从来没有 `var` 定义**。
+    setup 执行到 `return { galQuoteCount: galQuoteCount, … }` 时直接抛 ReferenceError，
+    整个 setup 中断 → 所有绑定都没返回 → 接着模板渲染 `meta.anima_ready` 又炸一次
+    （第二条报错是假象，不是两个 bug）。
+  - **修复**：在 `galQuotes` 旁边补上 computed，句数口径直接复用保存时用的
+    `galQuoteList()`（`galQuotes` 是 textarea 的字符串，按行去空去重后的条数），
+    「当前 N 句」与实际保存的条数从此一致。
+  - **为什么守卫没拦住**：`test_webui_contract` 的 BINDINGS 只校验「模板用到 +
+    return 暴露」，**不检查有没有定义**；v0.45.1 那条 `galQuoteCount` 恰好两项都过。
+  - **新增守卫（堵这一类）**：从 setup 的 `return {...}` 抽出**全部键**（619 个，不再
+    只查 BINDINGS 清单），逐个要求脚本里有 `var/let/const 键 =` 或 `function 键(`。
+    以后再出现「只在 return / 模板里出现、脚本没定义」的绑定，`test_webui_contract`
+    直接 FAIL 并列出缺的键名。
+
 ## v0.46.0 (2026-11-15)
 
 - **新增「卡片调试」页签：网页里模拟抽卡，直接出一张卡**（用户：「找个地方做一下模拟抽卡吧，免得每次都要 qq 上输入指令然后重置，挺繁琐的，你直接在 webui 里面弄一个，这样出卡就能很方便调试了」）。
