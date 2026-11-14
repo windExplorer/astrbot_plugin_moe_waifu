@@ -130,14 +130,17 @@ OUTFITS = [
 ]
 
 BACKGROUNDS = [
-    {"w": 8, "zh": "纯白色摄影棚背景（柔光箱打光）", "en": "simple background, white background, studio lighting"},
-    {"w": 7, "zh": "浅粉色纯色背景", "en": "simple background, pink background"},
-    {"w": 6, "zh": "浅灰渐变摄影棚背景", "en": "simple background, grey background, soft lighting"},
-    {"w": 6, "zh": "樱花树下的春日午后", "en": "cherry blossoms, outdoors, sunlight"},
-    {"w": 6, "zh": "教室窗边（午后斜阳）", "en": "classroom, window, afternoon sunlight"},
-    {"w": 5, "zh": "黄昏时分的街道", "en": "sunset, street, outdoors"},
-    {"w": 5, "zh": "星空下的夜晚屋顶", "en": "night, stars, rooftop"},
-    {"w": 5, "zh": "夏日海边（蓝天白云）", "en": "beach, ocean, summer, blue sky"},
+    # v0.36.0：影棚纯色底整体降权（此前 w=8/7/6 合计占比偏高，「干净但空」
+    # 是产出同质化的推手之一）——保留给证价/头像类场景用，随机里让位给
+    # 有光线、有生活的场景。
+    {"w": 4, "zh": "纯白色摄影棚背景（柔光箱打光）", "en": "simple background, white background, studio lighting"},
+    {"w": 4, "zh": "浅粉色纯色背景", "en": "simple background, pink background"},
+    {"w": 3, "zh": "浅灰渐变摄影棚背景", "en": "simple background, grey background, soft lighting"},
+    {"w": 6, "zh": "樱花树下的春日午后（花瓣飘落逆光透亮）", "en": "cherry blossoms, outdoors, sunlight, falling petals, backlighting"},
+    {"w": 6, "zh": "教室窗边（午后斜阳穿过百叶、光斑落在课桌上）", "en": "classroom, window, afternoon sunlight through blinds, light rays, dust particles"},
+    {"w": 5, "zh": "黄昏时分的街道（金色夕阳把影子拉得很长）", "en": "sunset, street, outdoors, golden hour, long shadows"},
+    {"w": 5, "zh": "星空下的夜晚屋顶（城市灯火在远处铺开）", "en": "night, stars, rooftop, city lights, night sky"},
+    {"w": 5, "zh": "夏日海边（蓝天白云、海面波光粼粼）", "en": "beach, ocean, summer, blue sky, sparkling water, sunlight"},
     {"w": 5, "zh": "霓虹闪烁的都市夜景", "en": "city lights, night, neon lights"},
     {"w": 5, "zh": "绿意花园（树影间洒落的阳光）", "en": "garden, flowers, dappled sunlight"},
     {"w": 4, "zh": "雨天的窗边（室内）", "en": "rain, window, indoors"},
@@ -184,6 +187,68 @@ BACKGROUNDS = [
     # 东方系（中式庭院 / 红灯笼）
     {"w": 4, "zh": "中式庭院（红墙与月门）", "en": "chinese garden, red wall, moon gate"},
     {"w": 3, "zh": "挂满红灯笼的夜市", "en": "red lanterns, night market"},
+    # —— v0.36.0 表现力升级（用户参考图拆解）：此前背景池本质是「地点名单」，
+    #    参考好图里真正卖钱的是**光**（逆光叶隙、金色黄昏、光斑粒子——参考图
+    #    「树下吃西瓜」「秋日银杏」的主角其实是光）与**叙事**（物件堆满的房间、
+    #    「正在做某事」的瞬间感）与**图形化构成**（网点+色块+斜纹）。按四路扩池：
+    # 光线驱动：光就是画面的主角（条目可选带 light 字段 = qwen 本地兜底的光照句）
+    {"w": 7, "zh": "树下乘凉（叶隙强逆光、光斑洒满全身，空气里浮着微尘光点）",
+     "en": "under tree shade, dappled sunlight, backlighting, sun, light particles, lens flare",
+     "light": "叶隙漏下的强逆光在轮廓上镶出金边，斑驳光斑洒在皮肤与衣物上，空气里有浮动的微尘光点"},
+    {"w": 6, "zh": "金色黄昏的原野（夕阳把轮廓镀成金边）",
+     "en": "golden hour, field, sunset, backlighting, rim light, warm colors",
+     "light": "低角度的暖金色夕阳逆光，人物轮廓镶着金边、发丝半透明发亮，整体暖调"},
+    {"w": 5, "zh": "晨光透过薄纱窗帘的房间（通体透亮的柔逆光）",
+     "en": "indoors, sheer curtains, morning light, backlighting, soft light, airy",
+     "light": "晨光透过薄纱窗帘变成通体透亮的柔逆光，亮部轻盈、阴影淡而软"},
+    {"w": 5, "zh": "秋日银杏街道（满地落叶、斑驳树影落在身上）",
+     "en": "autumn, ginkgo leaves, fallen leaves, dappled sunlight, street, warm colors",
+     "light": "秋日斜阳穿过枝叶，斑驳的光影碎块落在肩头与地面，暖金与青蓝对比"},
+    {"w": 4, "zh": "雨后的街角（湿漉漉的路面倒映着霓虹）",
+     "en": "after rain, wet street, reflections, puddle, neon lights, evening",
+     "light": "雨后傍晚，湿路面的镜面倒影裹着霓虹光，环境冷调、点缀高饱和光色"},
+    {"w": 4, "zh": "雪后初晴（雪面反光透着淡粉天色）",
+     "en": "snow, winter, reflective snow, sunlight, blue sky, pale pink sky",
+     "light": "雪面把阳光反射成大面积柔光，天际一抹淡粉，整体清透微冷调"},
+    {"w": 4, "zh": "午后天台（晾晒的床单被风掀起、透光的布料）",
+     "en": "rooftop, laundry, backlit fabric, blue sky, wind, sunlight",
+     "light": "午后天台，逆光里半透明的床单被风吹起，云影在天台上缓缓移动"},
+    {"w": 3, "zh": "夏夜庭院（风铃轻响、远处有零星烟火的光）",
+     "en": "summer night, garden, wind chime, fireworks in distance, night sky",
+     "light": "夏夜暗青色调，远处烟火与檐下灯笼提供点状暖光源，人物被夜色包裹"},
+    {"w": 3, "zh": "萤火虫漂浮的夏夜河堤",
+     "en": "riverbank, night, fireflies, glowing particles, dark blue",
+     "light": "深蓝夜色里萤火虫的绿色光点点缀，月亮提供柔和冷光，水面泛微光"},
+    {"w": 3, "zh": "车窗边（流动的光斑掠过脸侧）",
+     "en": "inside train, window seat, motion blur, passing scenery, sunlight",
+     "light": "行进的车厢里，窗外风景拉成流动的光斑扫过脸侧与窗框，明暗交替"},
+    # 物件叙事：环境里堆满角色的生活痕迹（参考图「粉色卫衣房间」那类的骨架）
+    {"w": 5, "zh": "塞满收藏的房间（唱片机、海报、玩偶与零食袋）",
+     "en": "cozy room, record player, posters, plush toys, snacks, warm lighting, cluttered"},
+    {"w": 4, "zh": "深夜便利店门口（冷白灯光与关东煮的蒸汽）",
+     "en": "convenience store, night, fluorescent light, steam, street",
+     "light": "店内冷白荧光灯光泻到人行道上，与夜的暖色路灯光形成冷暖对比"},
+    {"w": 4, "zh": "台灯下的书桌学习角（摊开的笔记与冒着热气的可可）",
+     "en": "study desk, lamp light, open notebook, hot cocoa, night, cozy",
+     "light": "台灯的暖黄光罩住书桌一角，四周渐渐没入夜色，光域之外发虚"},
+    {"w": 4, "zh": "飘着烘焙香气的厨房（面粉与刚出炉的饼干）",
+     "en": "kitchen, baking, flour, cookies, oven, warm light, cozy"},
+    {"w": 3, "zh": "铺满靠垫的飘窗读书角（薄毯与散落的书）",
+     "en": "bay window, cushions, books, blanket, soft daylight, cozy"},
+    # 图形化背景：海报式构成（对齐「撞色色块+半调网点」那类参考图）
+    {"w": 4, "zh": "撞色几何背景（大色块、半调网点与斜切条纹）",
+     "en": "halftone, color blocks, diagonal stripes, graphic background, pop art, flat colors"},
+    {"w": 3, "zh": "放射集中线背景（速度感与冲击力）",
+     "en": "speed lines, radial background, manga effects, dynamic, flat colors"},
+    {"w": 3, "zh": "同色系渐变背景加漂浮符号（爱心、星星与气泡）",
+     "en": "gradient background, floating hearts, stars, bubbles, decorative, flat colors"},
+    {"w": 2, "zh": "报纸拼贴背景（旧印刷质感与裁剪字迹）",
+     "en": "newspaper collage, printed text, paper texture, vintage, flat background"},
+    # 装饰拼贴（doujin 封面风：波点边框、贴纸、颜文字——低权重实验位）
+    {"w": 2, "zh": "带装饰相框的封面构图（波点边框、贴纸与颜文字气泡）",
+     "en": "decorated frame, polka dot border, stickers, kaomoji, scrapbook, colorful"},
+    {"w": 2, "zh": "拍立得照片与胶带叠贴的背景",
+     "en": "polaroid photos, scattered photos, washi tape, flat lay, pastel"},
 ]
 
 POSES = [
@@ -222,6 +287,42 @@ POSES = [
     {"w": 4, "zh": "手里举着冰淇淋", "en": "holding ice cream cone"},
     {"w": 3, "zh": "撑着伞回头", "en": "holding umbrella, looking back"},
     {"w": 3, "zh": "坐在窗台上双腿悬空", "en": "sitting on windowsill, legs dangling"},
+    # —— v0.36.0 生活瞬间系（用户参考图拆解）：「正在做某件事」的抓拍感 +
+    #    道具互动——参考图里最动人的是「穿高跟鞋的瞬间」「吃西瓜」「捧着杯子
+    #    喝咖啡」这类动作，而不是站桩摆拍。镜头语言（低角度 / 动势）直接写进
+    #    个别条目，不新增维度。
+    {"w": 4, "zh": "捧着冰镇西瓜正要咬下去（夏日抓拍）",
+     "en": "eating watermelon, holding watermelon slice, juicy"},
+    {"w": 4, "zh": "双手捧着马克杯喝热饮、低头轻轻吹气",
+     "en": "drinking from mug, holding cup, holding warm drink, steam"},
+    {"w": 4, "zh": "单脚踩在凳子上正要穿鞋",
+     "en": "putting on shoes, one foot on stool, leaning forward, dynamic pose"},
+    {"w": 4, "zh": "趴在地毯上翘起双腿玩掌上游戏机",
+     "en": "lying on stomach, on carpet, playing handheld game console, kicked up feet"},
+    {"w": 4, "zh": "戴上头戴式耳机闭眼跟着音乐轻轻摇头",
+     "en": "headphones around neck, listening to music, closed eyes, head tilted"},
+    {"w": 4, "zh": "抱着快递纸箱小跑过来",
+     "en": "carrying cardboard box, running, dynamic pose, leaning forward"},
+    {"w": 4, "zh": "咬着吐司边冲出家门（迟到抓拍）",
+     "en": "toast in mouth, running, dynamic pose, late for school"},
+    {"w": 3, "zh": "倚着墙低头专注刷手机",
+     "en": "leaning against wall, looking at phone, smartphone"},
+    {"w": 3, "zh": "转着伞踮脚跳过积水的水洼",
+     "en": "twirling umbrella, hopping over puddle, playful, dynamic pose"},
+    {"w": 3, "zh": "迎着风张开双臂闭眼深呼吸",
+     "en": "arms outstretched, closed eyes, wind, dynamic pose, hair flowing"},
+    {"w": 3, "zh": "把书盖在脸上打盹",
+     "en": "book covering face, sleeping, sitting"},
+    {"w": 3, "zh": "蹲在草地上吹散手心的蒲公英",
+     "en": "blowing dandelion seeds, kneeling on grass, seeds floating"},
+    {"w": 3, "zh": "举着手机给自己拍立得式自拍",
+     "en": "taking selfie, holding smartphone, self portrait"},
+    {"w": 3, "zh": "低角度仰拍的腾空跳跃（裙摆与头发一齐飞扬）",
+     "en": "jumping, mid-air, from below, dynamic pose, hair flowing, skirt flutter"},
+    {"w": 3, "zh": "坐在地板上手撑着下巴出神",
+     "en": "sitting on floor, chin rest, hand on own chin, spacing out"},
+    {"w": 3, "zh": "伸手去够飘在半空的肥皂泡",
+     "en": "reaching out, soap bubbles, chasing, dynamic pose, light particles"},
     # 立绘模板专用（tpl_ 主题用 pose_kw「标准站姿」精确命中）：character sheet 惯例
     # 是双臂自然下垂、正面直视，不摆性格姿势
     {"w": 0, "zh": "双臂自然下垂的标准站姿", "en": "standing, arms at sides, straight-on, full body"},
@@ -293,8 +394,12 @@ EXPRESSIONS = [
 
 # 姿势 → 表情锁定（v0.26.3）：睡着的姿势配「惊讶瞪眼」是硬伤，这类姿势直接
 # 把表情收窄到困倦 / 闭眼 / 平静；其余姿势仍走主题子集或全池。
+# v0.36.0：生活瞬间姿势扩后补两组——进食/饮品配开心系（吃西瓜配「平静淡然」
+# 也是硬伤）、闭眼类动作配闭眼系（「闭眼听歌 + 星星眼」自相矛盾）。
 _POSE_EXPR_LOCK = (
-    (("打瞌睡", "蜷缩", "睡着", "侧躺", "仰面躺"), ["困倦", "闭眼", "平静"]),
+    (("打瞌睡", "蜷缩", "睡着", "侧躺", "仰面躺", "盖在脸上"), ["困倦", "闭眼", "平静"]),
+    (("吃", "喝", "咬", "马克杯"), ["莞尔", "微笑", "星星眼", "眨眼"]),
+    (("闭眼",), ["闭眼", "平静", "莞尔"]),
 )
 
 # 纯画风主题（art_*）通用的立绘表情池：排除需要特定情境的困倦 / 惊讶 / 疑惑 /
@@ -1487,6 +1592,24 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "",
     return "，".join(parts) + tail
 
 
+# 视线 tag（v0.36.0）：此前 danbooru 底稿硬编码 looking at viewer——与回眸 /
+# 闭眼 / 移开视线的姿势表情直接打架（「闭眼享受阳光」却盯着镜头），也是
+# 「每张都盯着镜头」同质化的推手之一。默认仍看镜头（立绘惯例），姿势或
+# 表情自带视线语义时让位。
+_GAZE_AWAY_KWS = ("looking back", "from behind", "closed eyes", "looking away",
+                  "sleeping", "side view", "back view")
+
+
+def _gaze_tag(picks: dict) -> str:
+    """按姿势/表情派生视线 tag（纯函数）：默认 looking at viewer，视线类
+    姿势/表情在场时返回空串（视线交给它们自己表达）。"""
+    for k in ("pose", "expression"):
+        en = str((picks.get(k) or {}).get("en") or "").lower()
+        if any(w in en for w in _GAZE_AWAY_KWS):
+            return ""
+    return "looking at viewer"
+
+
 def build_t2i_prompt(entry: dict, picks: dict) -> str:
     """danbooru 系底模（anima/illustrious/noobai/pony 等）用：tags 拼装 + 变化 tag。
 
@@ -1494,8 +1617,12 @@ def build_t2i_prompt(entry: dict, picks: dict) -> str:
     这样底模更容易把整张图往该画风上拉。
     v0.33.0：帽子外套维度为「摘掉/更换」时，先从角色 tags 里剥掉 hat/jacket
     等外观 tag（否则底模按 tag 照画，主题换装也去不掉）。
+    v0.36.0：looking at viewer 不再硬编码——按 _gaze_tag 派生。
     """
-    base = "1girl, solo, best quality, looking at viewer"
+    base = "1girl, solo, best quality"
+    gaze = _gaze_tag(picks)
+    if gaze:
+        base += f", {gaze}"
     tags = _entry_tags(entry, picks)
     extra = []
     # v0.25.7：取景紧跟质量词；姿势 tag 里与取景矛盾的 "full body" 要摘掉
@@ -1585,8 +1712,12 @@ def build_t2i_qwen_local(entry: dict, picks: dict, custom: str = "") -> str:
     else:
         comp = "单人画面、只保留一个头部" + (f"，{framing_zh}" if framing_zh else "")
     # ⑤ 背景 ⑥ 光照（单独成句）
-    bg = str((picks.get("background") or {}).get("zh") or "").strip().strip("。")
-    light = "光照自然通透，主光柔和、边缘有一层淡轮廓光，明暗过渡细腻"
+    bg_pick = picks.get("background") or {}
+    bg = str(bg_pick.get("zh") or "").strip().strip("。")
+    # v0.36.0：光照句不再每张都一样——光线驱动类背景条目自带 light 字段
+    # （光的方向 / 时间感 / 色调），无 light 的条目回落通用光句。
+    light = (str(bg_pick.get("light") or "").strip().strip("。")
+             or "光照自然通透，主光柔和、边缘有一层淡轮廓光，明暗过渡细腻")
     segs = [medium, subj, comp]
     if bg:
         segs.append(bg)
@@ -1634,11 +1765,16 @@ _SYSTEM_T2I_NATURAL = (
     "ears / horns / wings / halo 等任何非人类部件，人物特征只以已给 tags 为准。"
     "构图取景按给定维度写（close-up / portrait / cowboy shot / full body），"
     "未给定时优先半身或胸像，不要默认 full body。"
+    "背景与光照必须写具体（这是画面氛围的来源，不要写成空荡的白底）：光源方向"
+    "与时间感（backlighting / dappled sunlight / golden hour / neon…）、空气感"
+    "（light particles / lens flare / depth of field）、整体色调倾向，让光成为"
+    "画面的一部分；若姿势/表情与视线冲突（looking back / closed eyes 等），"
+    "删掉 looking at viewer，视线服从动作。"
     "画风维度翻成对应英文风格词（modern anime illustration / cel shading / "
     "cinematic anime / watercolor…），整段保持同一画风。"
     "禁止：8k/highly detailed 之类质量词堆砌（最多以 best quality, highres 开头）、"
     "markdown、解释性文字。"
-    "输出纪律：只输出提示词本体，一段话，20~60 词，不超过 90 词。"
+    "输出纪律：只输出提示词本体，一段话，40~90 词，不超过 140 词。"
 )
 
 # 文生图（Qwen-Image-2.1）：官方黄金公式——媒介与画风 → 主体 → 动作 → 服装 →
@@ -1647,15 +1783,18 @@ _SYSTEM_T2I_QWEN = (
     "你为 Qwen-Image-2.1 撰写单人角色立绘的文生图提示词。严格按官方黄金公式"
     "的顺序写：媒介与画风 → 主体（角色名 + 外观 + 固有特征）→ 动作与姿势 →"
     "服装 → 构图取景 → 背景环境 → 光照 → 材质与细节；每个属性紧跟它修饰的"
-    "对象，写成一段连贯中文描述（5~10 句），首句先定框架。"
+    "对象，写成一段连贯中文描述（6~12 句），首句先定框架。"
     "必须遵守：① 角色固有特征以提示中给出的「必须保留的固有特征」字段为准："
     "有则逐项写进主体描述并强调「清晰可见、不可省略」；字段未给出时严禁凭空"
     "添加尾巴、兽耳、角、翅膀、光环等任何非人类部件（人物特征只以 tags 为准）；"
-    "② 光照单独成句；③ 构图取景按"
+    "② 光照单独成句，写足画面氛围三件套——光（方向/时间感/光斑粒子）、"
+    "环境层次（前后景元素与空气感）、整体色调倾向；背景与光照是画面「有生活」"
+    "的关键，不要写成空荡的纯色底；③ 构图取景按"
     "给定维度写（半身 / 胸像特写 / 膝上 / 全身），未给定时优先半身或胸像，"
     "不要默认全身；④ 只描述成品画面，绝不写「请画」「帮我生成」这类指令；"
     "⑤ 画面中只有这一个人物、只保留一颗头部，不出现第二个人；"
-    "⑥ 不写比例数字、不写 best quality 之类画质套话、不写标签串、不用 markdown。"
+    "⑥ 不写比例数字、不写 best quality 之类画质套话、不写标签串、不用 markdown；"
+    "⑦ 视线服从动作——姿势或表情是回眸 / 闭眼 / 移开视线时，不要写看镜头。"
     "输出纪律：只输出提示词本体一段话，不要解释、不要引号、不要分点。"
 )
 
@@ -1977,8 +2116,10 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
             except asyncio.TimeoutError:
                 logger.warning(f"[moe_waifu] 提示词 LLM 超时（>{timeout}s），回落本地模板")
                 return _t2i_local_of(style, entry, picks, custom)
+            # v0.36.0：限额放宽（qwen 400→650 / natural 300→450）——system prompt
+            # 现在要求写足氛围三件套，旧限额会把 LLM 写好的光照与层次又掐掉。
             text = sanitize_llm_output(getattr(resp, "completion_text", "") or "",
-                                       limit=400 if style == "qwen" else 300)
+                                       limit=650 if style == "qwen" else 450)
             if text:
                 return text, "llm"
             logger.warning("[moe_waifu] 提示词 LLM 返回为空，回落本地模板")

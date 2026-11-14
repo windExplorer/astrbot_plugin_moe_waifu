@@ -909,8 +909,11 @@ check("复古 90s 已降权",
 _q = prompt_gen.build_t2i_qwen_local(
     {"name": "初音未来", "tags_en": "hatsune miku, twintails"},
     prompt_gen.pick_variations(42))
+_bg42 = prompt_gen.pick_variations(42)["background"]
+_light42 = str(_bg42.get("light") or "") or "光照自然通透"
 check("Qwen 兜底首句定框架", _q.startswith("一幅"), _q[:40])
-check("Qwen 兜底光照单独成句", "光照" in _q)
+# v0.36.0：光照句跟随背景条目（光线驱动条目自带 light 光照句），单独成句
+check("Qwen 兜底光照单独成句", _light42[:8] in _q, _q[-70:])
 check("Qwen 兜底不写指令腔", "请画" not in _q and "帮我" not in _q)
 
 # ---------- v0.26.3：表情与主题 / 姿势协调 ----------
@@ -1144,5 +1147,58 @@ _f = prompt_gen.apply_dim_state(_p, 777, {"fixed": {"headwear": "戴上贝雷帽
 check("固装：面板显式锁定可覆盖", _f["headwear"]["zh"] == "戴上贝雷帽")
 _rf = prompt_gen.apply_dim_state(_p, 777, {"fixed": {"outfit": "哥特萝莉裙"}}, None, kk)
 check("固装：锁定穿搭重派生仍尊重固装", _rf["headwear"]["zh"] == "")
+
+# ---------- 画面表现力升级（v0.36.0）：光 / 生活瞬间 / 镜头语言 / 视线 ----------
+_bg_ens = [str(b.get("en") or "") for b in prompt_gen.BACKGROUNDS]
+check("背景池规模（v0.36.0 扩后 >= 55）", len(prompt_gen.BACKGROUNDS) >= 55)
+check("光线驱动背景在池（backlighting / dappled sunlight）",
+      any("backlighting" in e for e in _bg_ens)
+      and any("dappled sunlight" in e for e in _bg_ens))
+check("图形化背景在池（halftone + color blocks）",
+      any("halftone" in e and "color blocks" in e for e in _bg_ens))
+check("装饰拼贴背景在池（decorated frame 低权重实验位）",
+      any("decorated frame" in e for e in _bg_ens))
+check("光线驱动条目带 light 光照句（qwen 本地兜底用）",
+      sum(1 for b in prompt_gen.BACKGROUNDS if b.get("light")) >= 10)
+_bg_var = {prompt_gen.pick_variations(s)["background"]["zh"] for s in range(300)}
+check("背景 300 种子 >= 40 种（光与场景不再同质）", len(_bg_var) >= 40, str(len(_bg_var)))
+_pose_ens = [str(p.get("en") or "") for p in prompt_gen.POSES]
+check("生活瞬间姿势在池（吃西瓜 / 穿鞋 / 掌机）",
+      any("eating watermelon" in e for e in _pose_ens)
+      and any("putting on shoes" in e for e in _pose_ens)
+      and any("handheld game console" in e for e in _pose_ens))
+check("镜头语言写进姿势条目（from below 低角度仰拍）",
+      any("from below" in e for e in _pose_ens))
+_lock_bad = [(k, ek) for kws, eks in prompt_gen._POSE_EXPR_LOCK for ek in eks
+             if not any(ek in str(e.get("zh") or "") for e in prompt_gen.EXPRESSIONS)]
+check("姿势-表情锁定关键词全部可命中表情池", not _lock_bad, str(_lock_bad))
+check("gaze：回眸 / 闭眼让位（不再硬编码 looking at viewer）",
+      prompt_gen._gaze_tag({"pose": {"en": "from behind, looking back at viewer"}}) == ""
+      and prompt_gen._gaze_tag({"expression": {"en": "closed eyes, peaceful expression"}}) == "")
+check("gaze：默认仍看镜头",
+      prompt_gen._gaze_tag({"pose": {"en": "waving"},
+                            "expression": {"en": "gentle smile, soft expression"}})
+      == "looking at viewer")
+_gp = {"pose": {"en": ""}, "expression": {"en": "closed eyes, peaceful expression", "zh": ""}}
+check("danbooru 底稿：闭眼表情不再带 looking at viewer",
+      "looking at viewer" not in prompt_gen.build_t2i_prompt(
+          {"id": "x", "name": "x", "tags_en": "green hair"}, _gp))
+check("danbooru 底稿：默认视线保留",
+      "looking at viewer" in prompt_gen.build_t2i_prompt(
+          {"id": "x", "name": "x", "tags_en": "green hair"},
+          {"pose": {"en": "waving"}, "expression": {"en": "gentle smile, soft expression"}}))
+_lit = next(b for b in prompt_gen.BACKGROUNDS if b.get("light"))
+_pk = {k: {"zh": "", "en": ""} for k in ("pose", "outfit", "footwear", "headwear",
+                                         "outerwear", "expression", "body",
+                                         "framing", "compose", "artstyle")}
+_pk["background"] = dict(_lit)
+check("qwen 本地兜底：光照句跟随背景条目（不再每张同一句）",
+      _lit["light"][:8] in prompt_gen.build_t2i_qwen_local(
+          {"id": "x", "name": "魔女", "tags_en": ""}, _pk))
+_pk2 = dict(_pk)
+_pk2["background"] = {"zh": "教室", "en": "classroom"}
+check("qwen 本地兜底：无 light 条目回落通用光句",
+      "光照自然通透" in prompt_gen.build_t2i_qwen_local(
+          {"id": "x", "name": "魔女", "tags_en": ""}, _pk2))
 
 print("test_prompt_gen: ALL OK")
