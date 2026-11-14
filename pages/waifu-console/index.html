@@ -4389,10 +4389,32 @@
       var tryStyle = Vue.ref("");
       var tryPromptLoading = Vue.ref(false);
       var themes = Vue.ref([]);
+      // v0.41.0：主题下拉按类别排序——完整场景（scene_，整套构图手动选用）
+      // 放最前，普通选项（随机 + 内容主题）随后，立绘模板与画风放最后。
+      // 注意：页面 vendored 的 naive-ui 不支持 type:"group" 表头（选项会被
+      // 拍平显示、没有分组标题），所以一律平铺；分类靠 label 自带的
+      // 「完整场景 ·」「画风 ·」前缀区分，filterable 照常生效。平铺也让
+      // fillThemePool 这类「遍历选项」的消费方不必再理解分组结构。
       var themeOpts = Vue.computed(function () {
-        return (themes.value || []).map(function (t) {
+        var all = (themes.value || []).map(function (t) {
           return { label: t.label, value: t.id };
         });
+        var byPrefix = function (pfx) {
+          return all.filter(function (o) {
+            return String(o.value).indexOf(pfx) === 0;
+          });
+        };
+        var rest = all.filter(function (o) {
+          var v = String(o.value);
+          return v.indexOf("scene_") !== 0 && v.indexOf("tpl_") !== 0
+            && v.indexOf("art_") !== 0;
+        });
+        var out = [];
+        Array.prototype.push.apply(out, byPrefix("scene_"));
+        Array.prototype.push.apply(out, rest);
+        Array.prototype.push.apply(out, byPrefix("tpl_"));
+        Array.prototype.push.apply(out, byPrefix("art_"));
+        return out;
       });
       async function loadThemes() {
         try {
@@ -6413,12 +6435,26 @@
         var d = (batchProg.value && batchProg.value.done) || 0;
         return "补图中 " + d + "/" + galFillTotal.value;
       });
-      // 可轮换主题池（与后端 content_theme_ids 同口径：排除 random 与 tpl_ 模板）
+      // 可轮换主题池（与后端 content_theme_ids 同口径：排除 random、tpl_ 模板与
+      // scene_ 完整场景）。v0.41.0 回归修复：下拉一度按 type:"group" 分组，
+      // 这里只遍历顶层时，组项没有 value 且「画风」整组都在 children 里——
+      // 补齐配额的换一个 / 整体重随机里画风主题会全部消失。即使 themeOpts
+      // 现在已平铺，仍保留一次 group 拍平兼容，防止分组结构回来时复发。
       var fillThemePool = Vue.computed(function () {
-        return (themeOpts.value || [])
+        var flat = [];
+        (themeOpts.value || []).forEach(function (o) {
+          if (o.type === "group") {
+            (o.children || []).forEach(function (c) { flat.push(c); });
+          } else {
+            flat.push(o);
+          }
+        });
+        return flat
           .filter(function (o) {
-            var v = String(o.value || "");
-            return v !== "random" && v.indexOf("tpl_") !== 0;
+            if (!o.value) return false;
+            var v = String(o.value);
+            return v !== "random" && v.indexOf("tpl_") !== 0
+              && v.indexOf("scene_") !== 0;
           })
           .map(function (o) { return { id: String(o.value), label: o.label }; });
       });

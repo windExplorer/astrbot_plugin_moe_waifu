@@ -25,9 +25,9 @@ def check(name, cond, detail=""):
 
 def main():
     ids = bf.content_theme_ids()
-    check("内容主题 >= 10 且不含 random/tpl_",
+    check("内容主题 >= 10 且不含 random/tpl_/scene_",
           len(ids) >= 10 and "random" not in ids
-          and not any(str(t).startswith("tpl_") for t in ids))
+          and not any(str(t).startswith(("tpl_", "scene_")) for t in ids))
 
     # v0.32.2：build_char_tasks——详情页补齐配额的显式主题序列 → 任务
     # （预览弹窗确认过的序列原样下发，实跑不再走 theme_plan 复算）

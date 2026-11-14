@@ -1395,4 +1395,64 @@ check("图生图 system：环境矛盾调和许可",
       "以背景" in prompt_gen._SYSTEM_PROMPT and "调和" in prompt_gen._SYSTEM_PROMPT)
 check("qwen system：环境一致条款", "环境一致" in prompt_gen._SYSTEM_T2I_QWEN)
 
+# ---------- v0.41.0：完整场景（scene_ 主题包） ----------
+# 场景包 = 固定 outfit/footwear/pose/framing（设计好的整套构图）+ 背景/画风/
+# 表情小池子留变化；不进抽卡（主链路 theme 恒空天然无涉）、不进批量轮换与
+# 面板「随机」（content_theme_ids 排除）、LLM 通道短路（池外细节经不起改写）。
+_SCENE_THEMES = [t for t in prompt_gen.THEMES
+                 if str(t.get("id") or "").startswith("scene_")]
+check("完整场景包 >= 8 个", len(_SCENE_THEMES) >= 8)
+check("完整场景不进轮换池（content_theme_ids）",
+      not any(str(t).startswith("scene_")
+              for t in prompt_gen.content_theme_ids()))
+check("random 实摇永不摇中完整场景",
+      all(not str(prompt_gen.resolve_theme("random", s)[1] or "").startswith("scene_")
+          for s in range(400)))
+for _st in _SCENE_THEMES:
+    _fx = _st.get("fixed_dims") or {}
+    check(f"场景 {_st['id']} 固定 outfit/footwear/pose/framing",
+          all(_d in _fx for _d in ("outfit", "footwear", "pose", "framing")))
+    for _key, _pool in (("bg_kw", prompt_gen.BACKGROUNDS),
+                        ("artstyle_kw", prompt_gen.ARTSTYLES),
+                        ("expression_kw", prompt_gen.EXPRESSIONS)):
+        _kws = _st.get(_key) or []
+        _n = len([it for it in _pool
+                  if any(kw in str(it.get("zh") or "") for kw in _kws)])
+        check(f"场景 {_st['id']} {_key} 子集非空", _n >= 1, f"kws={_kws}")
+    _p0 = prompt_gen.pick_variations(1, _st)
+    check(f"场景 {_st['id']} 固定维度跨种子恒定",
+          all(prompt_gen.pick_variations(s, _st)[_d]["zh"] == _p0[_d]["zh"]
+              for _d in _fx for s in (7, 42, 12345)))
+# 首发包（用户参考图）：白蕾丝过膝袜 + 吊袜带 + 踩凳穿鞋必须原样进两条链路
+_maid = prompt_gen.get_theme("scene_maid_shoes")
+check("女仆场景固定值在位",
+      "蕾丝" in _maid["fixed_dims"]["footwear"]["zh"]
+      and "lace-trimmed thighhighs" in _maid["fixed_dims"]["footwear"]["en"]
+      and "one foot on stool" in _maid["fixed_dims"]["pose"]["en"])
+# 文生图链路（danbooru 桩）：fixed en 全部落到 tag 串（LLM 开启也短路）
+_t2i_maid, _src_t2i = asyncio.run(_run_llm(
+    _LlmContext(), dict(ENTRY, strategy_type="base"), "scene_maid_shoes"))
+check("场景文生图走本地且带白蕾丝过膝袜 tags",
+      _src_t2i == "local"
+      and "white lace-trimmed thighhighs" in _t2i_maid
+      and "putting on shoes" in _t2i_maid and "maid outfit" in _t2i_maid
+      and "full body" in _t2i_maid)
+# 图生图链路（源通常是三视图设定稿）：编辑指令带换装/鞋袜/姿势/取景条款
+_i2i_maid, _src_i2i = asyncio.run(_run_llm(
+    _LlmContext(), ENTRY, "scene_maid_shoes"))
+check("场景图生图走本地编辑指令", _src_i2i == "local")
+check("场景编辑指令含服装/鞋袜/姿势/取景条款",
+      "把角色的服装换成黑白女仆长裙配蕾丝围裙" in _i2i_maid
+      and "把鞋袜改为白色蕾丝边过膝袜" in _i2i_maid
+      and "让角色单脚踩在凳子上弯腰提鞋跟" in _i2i_maid
+      and "把画面取景改为全身构图" in _i2i_maid
+      and "唯一姿势" in _i2i_maid)
+check("场景编辑指令处理三视图源（只保留正面）",
+      "只保留其中一个视角" in _i2i_maid)
+# 用户改穿搭时：outfit 让位于用户输入，场景鞋袜不再硬套（跟随新穿搭派生）
+_p_user = prompt_gen.pick_variations(9, _maid, outfit_override="旗袍")
+check("场景 + 用户穿搭：服装随用户、鞋袜随派生",
+      _p_user["outfit"]["zh"] == "旗袍"
+      and _p_user["footwear"]["zh"] != _maid["fixed_dims"]["footwear"]["zh"])
+
 print("test_prompt_gen: ALL OK")

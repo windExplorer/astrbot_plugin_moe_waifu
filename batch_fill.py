@@ -39,13 +39,16 @@ except ImportError:  # pragma: no cover
 # ---------- 纯函数（可独立测试） ----------
 
 def content_theme_ids() -> list:
-    """可轮换的内容主题 id（排除 random 与 tpl_ 模板——模板是设定稿底稿，不是场景）。
+    """可轮换的内容主题 id（排除 random、tpl_ 模板与 scene_ 完整场景）。
 
+    模板是设定稿底稿，不是场景；完整场景（v0.41.0）是整套固定构图包——
+    批量补图套场景包会把同一个构图复制到每个角色身上，只在面板手动选用。
     v0.19.0：`art_*` 纯画风主题（只约束画风）也在此列——批量补图时「这一批换成
     水彩/水墨/赛博」是用户要的效果，不该只能一张张手点。
     """
     return [t["id"] for t in prompt_gen.THEMES
-            if t["id"] != "random" and not str(t["id"]).startswith("tpl_")]
+            if t["id"] != "random" and not str(t["id"]).startswith("tpl_")
+            and not str(t["id"]).startswith("scene_")]
 
 
 def theme_plan(char_id: str, salt: str, n: int, have: int = 0,

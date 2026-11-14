@@ -1131,6 +1131,135 @@ THEMES = (
     {"id": "art_glitch", "label": "画风 · 故障 VHS", "artstyle_kw": ["故障"]},
     {"id": "art_y2k", "label": "画风 · Y2K 千禧", "artstyle_kw": ["Y2K"]},
     {"id": "art_manhwa", "label": "画风 · 韩漫半写实", "artstyle_kw": ["韩漫"]},
+    # —— v0.41.0：完整场景（scene_ 前缀）。与内容主题的区别：
+    #    内容主题只「收窄」维度子集（穿搭/背景仍按种子在子集里摇）；完整场景
+    #    是**整套设计好的构图包**——穿搭 + 鞋袜 + 姿势 + 取景由 fixed_dims
+    #    锁死（fixed_dims 是主题级字段，pick_variations 末段整体覆盖，中文短语
+    #    走图生图编辑指令、英文 tag 走文生图串，三条 builder 零改动接入），
+    #    背景 / 画风 / 表情仍按主题子集小幅变化，让同一场景重画不至逐位相同。
+    #    首发包 scene_maid_shoes 即用户参考图（女仆踩凳穿高跟鞋 + 白蕾丝过膝袜
+    #    + 吊袜带——鞋袜池此前没有白色过膝袜，只有完整场景包能把这套组合固化）。
+    #    抽卡主链路 theme 恒空不受影响；批量补图轮换池与面板「随机」都在
+    #    content_theme_ids 排除了 scene_（同 tpl_ 待遇）——场景包只在面板
+    #    显式选择时生效，不进抽卡与自动批量补充。
+    #    图生图参考图（多为三视图设定稿）的处理沿用既有条款：单图源命中
+    #    _ref_clause_single_view 的「只保留正面视角、去掉拼接」，多图源以
+    #    正面全身那张为主——场景包无需特判。
+    {"id": "scene_maid_shoes", "label": "完整场景 · 女仆的日常（踩凳穿高跟鞋）",
+     "bg_kw": ["纯白色摄影棚"],
+     "artstyle_kw": ["现代日式动画", "赛璐璐", "清透厚涂", "轻小说"],
+     "expression_kw": ["平静淡然", "莞尔一笑"],
+     "fixed_dims": {
+         "outfit": {"zh": "黑白女仆长裙配蕾丝围裙",
+                    "en": "maid outfit, maid headdress, long dress, white lace-trimmed apron, frills"},
+         "footwear": {"zh": "白色蕾丝边过膝袜与吊袜带、黑色高跟鞋",
+                      "en": "white lace-trimmed thighhighs, garter straps, black high heels"},
+         "pose": {"zh": "单脚踩在凳子上弯腰提鞋跟",
+                  "en": "putting on shoes, one foot on stool, leaning forward, dynamic pose"},
+         "framing": {"zh": "全身构图（完整呈现站姿与鞋子）", "en": "full body, full length"},
+     }},
+    {"id": "scene_rainy_reading", "label": "完整场景 · 雨天窗边（抱膝读书）",
+     "bg_kw": ["雨天的窗边", "飘窗读书角"],
+     "artstyle_kw": ["水彩", "淡彩", "轻小说", "少女漫画"],
+     "expression_kw": ["若有所思", "平静淡然", "闭眼"],
+     "fixed_dims": {
+         "outfit": {"zh": "宽松针织毛衣与长裙", "en": "oversized sweater, long skirt"},
+         "footwear": {"zh": "毛绒拖鞋", "en": "slippers"},
+         "pose": {"zh": "坐在地板上手撑着下巴出神",
+                  "en": "sitting on floor, chin rest, hand on own chin, spacing out"},
+         "framing": {"zh": "全身构图（完整呈现站姿与鞋子）", "en": "full body, full length"},
+     }},
+    {"id": "scene_barefoot_beach", "label": "完整场景 · 夏日海边（拎鞋踏浪）",
+     "bg_kw": ["夏日海边", "海边黄昏"],
+     "artstyle_kw": ["现代日式动画", "新海诚式", "赛璐璐", "水彩"],
+     "expression_kw": ["闭眼", "莞尔", "温柔微笑"],
+     "fixed_dims": {
+         "outfit": {"zh": "碎花夏日连衣裙", "en": "floral summer dress"},
+         # 鞋袜置空：赤脚与凉鞋已由姿势短语表达，鞋袜维度再提一次会打架
+         "footwear": {"zh": "", "en": ""},
+         "pose": {"zh": "拎着凉鞋赤脚走在沙滩边",
+                  "en": "carrying sandals, barefoot, walking on beach, water edge"},
+         "framing": {"zh": "全身构图（完整呈现站姿与鞋子）", "en": "full body, full length"},
+     }},
+    {"id": "scene_cafe_mug", "label": "完整场景 · 咖啡馆午后（捧杯吹热气）",
+     "bg_kw": ["咖啡"],
+     "artstyle_kw": ["韩漫", "厚涂", "现代日式动画", "扁平"],
+     "expression_kw": ["莞尔", "害羞", "温柔微笑"],
+     "fixed_dims": {
+         "outfit": {"zh": "oversize 毛衣滑落露肩与格纹裙",
+                    "en": "off-shoulder sweater, falling off one shoulder, plaid skirt, collarbone"},
+         "footwear": {"zh": "黑色及膝袜与乐福鞋", "en": "black kneehighs, loafers"},
+         "pose": {"zh": "双手捧着马克杯喝热饮、低头轻轻吹气",
+                  "en": "drinking from mug, holding cup, holding warm drink, steam"},
+         "framing": {"zh": "膝上构图（露出膝盖以上）", "en": "cowboy shot, knees visible"},
+     }},
+    {"id": "scene_night_store", "label": "完整场景 · 深夜便利店（弯腰取饮料）",
+     "bg_kw": ["便利店", "霓虹闪烁"],
+     "artstyle_kw": ["赛博", "电影感", "现代日式动画"],
+     "expression_kw": ["平静淡然", "半眯", "若有所思"],
+     "fixed_dims": {
+         "outfit": {"zh": "oversize 连帽卫衣滑落单肩（内搭吊带）",
+                    "en": "oversized hoodie, falling off one shoulder, camisole, collarbone"},
+         "footwear": {"zh": "帆布鞋与白色短袜", "en": "sneakers, white socks"},
+         "pose": {"zh": "站在自动贩卖机前弯腰取饮料",
+                  "en": "vending machine, bending over, reaching out, night"},
+         "framing": {"zh": "全身构图（完整呈现站姿与鞋子）", "en": "full body, full length"},
+     }},
+    {"id": "scene_festival_lantern", "label": "完整场景 · 夏日祭典（浴衣回眸）",
+     "bg_kw": ["祭典", "红灯笼"],
+     "artstyle_kw": ["浮世绘", "水墨", "赛璐璐", "现代日式动画"],
+     "expression_kw": ["莞尔", "俏皮", "温柔微笑"],
+     "fixed_dims": {
+         "outfit": {"zh": "日式浴衣", "en": "yukata, japanese clothes"},
+         "footwear": {"zh": "光脚配木屐", "en": "geta, barefoot"},
+         "pose": {"zh": "回头看向镜头", "en": "looking back, looking at viewer"},
+         "framing": {"zh": "全身构图（完整呈现站姿与鞋子）", "en": "full body, full length"},
+     }},
+    {"id": "scene_rooftop_wind", "label": "完整场景 · 放学后天台（迎风张开双臂）",
+     "bg_kw": ["学校天台", "放学后的走廊"],
+     "artstyle_kw": ["现代日式动画", "赛璐璐", "轻小说", "新海诚式"],
+     "expression_kw": ["闭眼", "莞尔", "平静"],
+     "fixed_dims": {
+         "outfit": {"zh": "针织开衫JK制服（衬衫领结 + 百褶裙）",
+                    "en": "cardigan, school uniform, shirt, ribbon, pleated skirt"},
+         "footwear": {"zh": "黑色过膝袜与乐福鞋（绝对领域）",
+                      "en": "black thighhighs, loafers, zettai ryouiki"},
+         "pose": {"zh": "迎着风张开双臂闭眼深呼吸",
+                  "en": "arms outstretched, closed eyes, wind, dynamic pose, hair flowing"},
+         "framing": {"zh": "全身构图（完整呈现站姿与鞋子）", "en": "full body, full length"},
+     }},
+    {"id": "scene_winter_street", "label": "完整场景 · 冬日街头（倚栏插兜）",
+     "bg_kw": ["雪后初晴", "圣诞夜", "金色黄昏"],
+     "artstyle_kw": ["新海诚式", "电影感", "现代日式动画", "韩漫"],
+     "expression_kw": ["平静淡然", "若有所思", "微微移开视线"],
+     "fixed_dims": {
+         "outfit": {"zh": "冬季大衣与围巾", "en": "winter coat, scarf"},
+         "footwear": {"zh": "黑色长靴", "en": "black boots"},
+         "pose": {"zh": "双手插兜倚着栏杆",
+                  "en": "hands in pockets, leaning on railing, relaxed"},
+         "framing": {"zh": "全身构图（完整呈现站姿与鞋子）", "en": "full body, full length"},
+     }},
+    {"id": "scene_home_game", "label": "完整场景 · 周末宅家（趴毯玩掌机）",
+     "bg_kw": ["客厅", "卧室"],
+     "artstyle_kw": ["扁平", "现代日式动画", "轻小说", "少女漫画"],
+     "expression_kw": ["星星眼", "莞尔", "俏皮"],
+     "fixed_dims": {
+         "outfit": {"zh": "宽松T恤与居家短裤", "en": "oversized t-shirt, shorts"},
+         "footwear": {"zh": "光脚", "en": "barefoot"},
+         "pose": {"zh": "趴在地毯上翘起双腿玩掌上游戏机",
+                  "en": "lying on stomach, on carpet, playing handheld game console, kicked up feet"},
+         "framing": {"zh": "全身构图（完整呈现站姿与鞋子）", "en": "full body, full length"},
+     }},
+    {"id": "scene_stage_live", "label": "完整场景 · 演唱会舞台（比心打歌）",
+     "bg_kw": ["演唱会"],
+     "artstyle_kw": ["赛博", "3D 渲染", "现代日式动画", "Y2K"],
+     "expression_kw": ["星星眼", "开怀大笑", "俏皮", "眨眼"],
+     "fixed_dims": {
+         "outfit": {"zh": "演唱会打歌服", "en": "idol costume, stage outfit"},
+         "footwear": {"zh": "黑色高筒靴", "en": "black knee boots"},
+         "pose": {"zh": "双手在胸前比出爱心", "en": "heart hands"},
+         "framing": {"zh": "全身构图（完整呈现站姿与鞋子）", "en": "full body, full length"},
+     }},
 )
 
 
@@ -1142,10 +1271,16 @@ def get_theme(theme_id: str) -> dict | None:
 
 
 def content_theme_ids() -> list:
-    """内容主题 id（排除 random 与 tpl_ 模板；batch_fill 轮换池同口径）。"""
+    """内容主题 id（排除 random、tpl_ 模板与 scene_ 完整场景；batch_fill 轮换池同口径）。
+
+    v0.41.0：scene_ 完整场景是「整套构图手动选用」的包——固定穿搭/鞋袜/姿势/
+    取景，日常抽卡与批量补图套上它会显得千篇一律（场景包就该一张一个想法），
+    故与 tpl_ 同等对待：只在面板显式选择时生效。
+    """
     return [str(t["id"]) for t in THEMES
             if str(t.get("id") or "") != "random"
-            and not str(t.get("id") or "").startswith("tpl_")]
+            and not str(t.get("id") or "").startswith("tpl_")
+            and not str(t.get("id") or "").startswith("scene_")]
 
 
 def resolve_theme(theme_id: str, seed_int: int) -> tuple[dict | None, str]:
@@ -1343,6 +1478,19 @@ def pick_variations(seed_int: int, theme: dict | None = None,
     text = str(outfit_override or "").strip().strip("。，,")[:80]
     if text:
         picks["outfit"] = {"w": 0, "zh": text, "en": text}
+    # v0.41.0：完整场景（scene_ 主题）的固定维度分两段落位——
+    #   ① outfit 先于派生维度落位：鞋袜/头饰/外套要从**场景穿搭**派生
+    #      （女仆场景的帽子按女仆装处理，而不是按种子摇中的 random 穿搭）；
+    #      用户显式指定穿搭（outfit_override）优先于场景固定值——所见即所得。
+    #   ② 其余固定维度在派生之后整体覆盖（fixed footwear 压掉家族派生结果；
+    #      用户改穿其他服装时鞋袜也回归「跟随穿搭」派生，场景鞋袜不再硬套）。
+    _fixed_dims = (theme or {}).get("fixed_dims") or {}
+    if _fixed_dims:
+        _fix_outfit = _fixed_dims.get("outfit")
+        if isinstance(_fix_outfit, dict) and str(_fix_outfit.get("zh") or "").strip() \
+                and not text:
+            picks["outfit"] = {"w": 0, "zh": str(_fix_outfit.get("zh") or ""),
+                               "en": str(_fix_outfit.get("en") or "")}
     # v0.32.0：鞋袜跟随穿搭——穿搭 zh 非空才派生（家族候选内按种子摇）；
     # 空穿搭（含模板 plain_dims）置空 = 鞋袜跟随角色原本设定。
     # v0.34.1：头饰 / 外套同构派生（自洽沉默规则在 _follow_item 内）。
@@ -1353,6 +1501,15 @@ def pick_variations(seed_int: int, theme: dict | None = None,
             picks[tag] = {"w": 0, "zh": "", "en": ""}
         else:
             picks[tag] = _follow_item(tag, out_zh, seed_int, keep)
+    if _fixed_dims:
+        for _dim, _item in _fixed_dims.items():
+            _dim = str(_dim)
+            if _dim == "outfit" or _dim not in DIMS or not isinstance(_item, dict):
+                continue
+            if _dim == "footwear" and text:
+                continue
+            picks[_dim] = {"w": 0, "zh": str(_item.get("zh") or ""),
+                           "en": str(_item.get("en") or "")}
     # v0.26.3：纯画风主题（art_*）只锁画风、不约束表情，实测会出现「婚纱 +
     # 困倦惺忪」这类违和。给一个通用立绘表情池（排除需要特定情境的困倦 /
     # 惊讶 / 疑惑），让纯画风主题下的表情也落在自然范围。
@@ -2347,6 +2504,11 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
     # 通道甚至会写出「把构图改为…」的编辑指令口吻。模板提示词必须逐位确定：
     # 图生图走 build_local_instruction，文生图走 _t2i_local_of（含 qwen/natural）。
     is_tpl = bool(theme and str(theme.get("id") or "").startswith("tpl_"))
+    # v0.41.0：scene_ 完整场景与模板同待遇——场景包的固定维度（蕾丝过膝袜/
+    # 吊袜带这类池外细节）经不起 LLM 改写丢约束，跳过 LLM 通道走本地确定性
+    # 拼装（背景/画风/表情子集变化在 pick_variations 里已经完成）。
+    is_scene = bool(theme and str(theme.get("id") or "").startswith("scene_"))
+    is_fixed = is_tpl or is_scene
     keep = keep_dims_of(entry)
     try:
         stype = str(entry.get("strategy_type") or "base")
@@ -2374,7 +2536,7 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
             # 修「选了 Qwen 工作流却按全局底模拼 tags」的错位
             style = detect_t2i_style(context, effective_workflow(entry, cfg))
             if (not bool(cfg.get("prompt_llm_enabled", True)) or style == "danbooru"
-                    or is_tpl):
+                    or is_fixed):
                 return _t2i_local_of(style, entry, picks, custom)
             provider = await _resolve_provider(
                 context, cfg.get("prompt_llm_provider", ""))
@@ -2415,8 +2577,9 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
         # v0.14.0：维度级控制在强制单图之后——面板显式启用/锁定的 compose
         # 是用户意图，应能覆盖「随机命中被拦」的默认行为
         picks = apply_dim_state(picks, seed_int, dim_state, theme, keep)
-        if not bool(cfg.get("prompt_llm_enabled", True)) or is_tpl:
+        if not bool(cfg.get("prompt_llm_enabled", True)) or is_fixed:
             # v0.31.1：is_tpl 一并短路——模板的编辑指令走本地确定性拼装
+            # v0.41.0：scene_ 完整场景同理（fixed_dims 细节不容 LLM 改写）
             return build_local_instruction(entry, picks, custom), "local"
         provider = await _resolve_provider(context, cfg.get("prompt_llm_provider", ""))
         if provider is None:

@@ -2,6 +2,19 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.41.0 (2026-11-14)
+
+- **新功能：完整场景主题包（scene_，整套构图手动选用）**（用户参考图「女仆踩凳穿高跟鞋 + 白蕾丝过膝袜 + 吊袜带」这类组合，维度池各自随机永远摇不出来）：
+  - **现象 / 需求**：内容主题只「收窄」维度子集，穿搭 / 姿势 / 取景仍按种子各摇各的；想要一张设计好的整套构图（固定穿搭 + 鞋袜 + 姿势 + 取景，只留背景 / 画风 / 表情小幅变化）时，只能一条条手动锁定维度。
+  - **实现**：`prompt_gen.THEMES` 新增 10 个 `scene_` 主题（女仆换鞋 / 雨天窗边 / 夏日海边 / 咖啡馆午后 / 深夜便利店 / 夏日祭典 / 放学后天台 / 冬日街头 / 周末宅家 / 演唱会舞台），主题级 `fixed_dims` 由 `pick_variations` 末段整体覆盖；中文短语进图生图编辑指令、英文 tag 进文生图串，三条 builder 零改动接入。`/themes` 自动带出，工坊三处主题下拉与提示词预览直接可用。
+  - **边界**：整套构图复制到每个角色身上会千篇一律，故 `prompt_gen.content_theme_ids` 与 `batch_fill.content_theme_ids` 都排除 `scene_`（同 `tpl_` 待遇）——抽卡主链路 theme 恒空天然无涉、面板「随机」与批量补图轮换都摇不中，只在工坊显式选择时生效。LLM 通道一并短路（`is_fixed`），避免白蕾丝过膝袜这类池外细节被改写丢约束；用户在穿搭框手填服装时 outfit 让位、鞋袜跟随新穿搭派生，不硬套场景原配。
+  - 守卫：`test_prompt_gen` 新增场景段（固定维度齐全 / 背景画风表情子集非空 / 跨种子恒定 / 文生图与图生图两条链路落词 / 三视图源处理 / 用户穿搭让位），`test_batch_fill` 轮换池断言加 `scene_` 排除。
+- **修复：主题下拉分组表头不生效 + 补齐配额预览漏掉整个「画风」组**（本轮发现的两个问题）：
+  - **现象**：① 页面 vendored 的 naive-ui 不支持 `type:"group"` 表头，选项被拍平显示、没有分组标题；② `fillThemePool` 只遍历 `themeOpts` 顶层，组项本身没有 `value`、而「画风」整组都在 `group.children` 里 —— 补齐配额弹窗的「换一个 / 整体重随机」里全部 `art_*` 主题消失，与后端 `content_theme_ids`（`art_*` 本就在轮换池里）口径不一致；前端池子还会把 `scene_` 场景包混进补图序列。
+  - **根因**：下拉按 `type:"group"` 组织三类特殊主题，`fillThemePool` / `rerollFillRow` / `rerollFillAll` 这些消费方却一直按平铺数组遍历；`scene_` 排除规则只加在后端，前端没跟上。
+  - **修复**：① `themeOpts` 改回平铺（顺序仍是 完整场景 → 普通 → 模板 → 画风），分类靠 label 自带的「完整场景 ·」「画风 ·」前缀区分，`filterable` 不受影响；② `fillThemePool` 先把 group 项拍平再筛，排除 `random` / `tpl_` / `scene_`，即使分组结构以后回来也不复发；③ 新增 `tests/test_theme_options.py`：抽出页面内联 JS 交给 node 真跑，比对后端 `THEMES` 全量覆盖、轮换池与 `content_theme_ids` 同口径、画风组一个不少、喂回分组结构仍不漏。
+  - 验证：25 个脚本式自检全过（含 `test_inline_js` / `test_template_compile` / `test_html_integrity` / `test_webui_contract`；`uv run --no-project --python 3.12 --with aiohttp --with pillow`）。
+
 ## v0.40.0 (2026-11-14)
 
 - **修复：人设固装开关保存后重开即丢**（用户报「人设固定无法保存」）：
