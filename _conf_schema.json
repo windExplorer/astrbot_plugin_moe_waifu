@@ -73,6 +73,20 @@
     "type": "int",
     "default": 4
   },
+  "card_scrim": {
+    "description": "卡面底部遮罩浓度",
+    "hint": "百分比，100 = 默认。卡片下半部的压暗层：越大白字越清楚、立绘露出越少；觉得立绘被压得太黑就调到 70~85（再低白字会开始糊）",
+    "type": "int",
+    "default": 100
+  },
+  "card_seal_pos": {
+    "description": "档位印章位置",
+    "hint": "默认在角色名右侧；左上角 / 右上角适合留白多的立绘（左下与右下被「同款统计」和「日期」占着）。放顶部时会自动加一层顶部压暗",
+    "type": "string",
+    "options": ["name", "top_left", "top_right"],
+    "labels": ["名字右侧（默认）", "左上角", "右上角"],
+    "default": "name"
+  },
   "draw_workflow": {
     "description": "文生图工作流",
     "hint": "base/lora 策略交给萌绘的工作流名；留空使用萌绘自己的默认动漫工作流",

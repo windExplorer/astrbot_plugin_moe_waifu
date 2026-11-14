@@ -4149,7 +4149,9 @@ async def h_debug_rerender(plugin) -> dict:
     card_path = await asyncio.to_thread(
         card.render_card, src, entry, date_str=date, same_count=1, total_count=1,
         rerolled=bool(row["rerolled"]), out_path=str(out),
-        data_dir=Path(plugin._data_dir))
+        data_dir=Path(plugin._data_dir),
+        seal_pos=plugin._cfg("card_seal_pos", "name"),
+        scrim=plugin._cfg("card_scrim", 100))
     plugin._store.update_draw_card(uid, date, card_path)
     await asyncio.to_thread(plugin._store.debug_log, "rerender", uid, f"{date} 重渲染卡片")
     return ok({"card_path": card_path, "date": date})
@@ -4322,9 +4324,11 @@ def _card_debug_core(plugin, body: dict) -> dict:
         from . import card  # 延迟导入：Pillow 只在真的渲染时才需要
     except ImportError:  # pragma: no cover - 平铺调试
         import card  # type: ignore
-    card_path = card.render_card(src, entry, date_str=date, same_count=same,
-                                 total_count=total, rerolled=rerolled,
-                                 out_path=str(out), data_dir=data_root)
+    card_path = card.render_card(
+        src, entry, date_str=date, same_count=same, total_count=total,
+        rerolled=rerolled, out_path=str(out), data_dir=data_root,
+        seal_pos=plugin._cfg("card_seal_pos", "name"),
+        scrim=plugin._cfg("card_scrim", 100))
     _card_debug_prune(out_dir)
     try:
         rel_card = Path(card_path).resolve().relative_to(data_root.resolve()).as_posix()

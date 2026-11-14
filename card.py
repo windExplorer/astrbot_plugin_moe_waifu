@@ -17,6 +17,18 @@
   漫画体（站酷快乐体，SIL OFL 1.1），名字 / 档位字母 / 印象语优先用它；用户也
   可把自己的字体丢进 `data_dir/fonts/`（文件名含 comic/kuaile/漫画 等即优先）。
   漫画体缺字（生僻日文汉字，如「凪」「雫」）逐字回落等线，绝不出现豆腐块。
+
+版式 v5（v0.47.0，按用户第二轮反馈）：
+- **底部改成一整行页脚**：左 = 「今日同款 N 人 · 第 M 次抽到她」，右 = 日期
+  （漫画体、带字距、右对齐），重抽标贴在日期左侧。原来日期和统计各占一行、
+  还都在左边，像堆在一起的注释。
+- **眉标只留作品名**：不再拼「作品 · 游戏」这种类型后缀（用户：去掉「游戏」）。
+- **遮罩浓度可配**：`card_scrim`（百分比，100=默认），传入 `scrim=` 缩放
+  黑色压暗 + 角色色染色的峰值；调小 = 立绘更透、白字更糊。
+- **印章位置可配**：`card_seal_pos` = `name`（默认，名字右侧）/ `top_left` /
+  `top_right`。左下与右下被页脚占用，所以不提供。放顶部时自动加一层顶部压暗，
+  亮色立绘上白字母印章也读得清。
+
 只有拿到立绘才会渲染（PRD 铁律 1：不存在无图版式）。
 """
 from __future__ import annotations
@@ -29,6 +41,7 @@ CARD_W, CARD_H = 700, 1200
 _CARD_RADIUS = 30       # 圆角卡片
 _PAD_X = 54             # 左右安全边（文字一律从这里起排）
 _SEAL = 92              # 档位印章边长（不含内边距）
+SEAL_POSITIONS = ("name", "top_left", "top_right")   # 档位章位置（配置 card_seal_pos）
 
 _FONT_DIR = Path(__file__).resolve().parent / "fonts"   # 随包字体（漫画体）
 
@@ -298,7 +311,7 @@ def _ramp(h: int, knots, peak: float, w: int = 1) -> Image.Image:
     return r.resize((w, h))
 
 
-def _bottom_scrim(w: int, h: int, rgb: tuple) -> Image.Image:
+def _bottom_scrim(w: int, h: int, rgb: tuple, factor: float = 1.0) -> Image.Image:
     """底部双层遮罩：黑色压暗（保文字对比）+ 角色色染色（保氛围）。
 
     不做满版边框，层次全交给这层渐变：立绘上半身完整露出，下半身文字浮在
@@ -306,19 +319,50 @@ def _bottom_scrim(w: int, h: int, rgb: tuple) -> Image.Image:
 
     曲线用折线 + smoothstep 而不是幂函数：亮色立绘（白 / 浅粉）上白字要能读，
     必须让暗场在文字区（下半部 40%）迅速到位；幂函数曲线在那里永远偏浅。
+
+    v0.47.0：`factor` 来自配置 `card_scrim`（百分比，100=默认）——用户觉得
+    压得太黑就往下调，白字会变糊一点，取舍交给他自己。
     """
     # 文字区在卡高 55%~100%：那里给到 0.75+ 的压暗，白字才够对比度；
     # 上沿斜坡拉长（0.12→0.62），避免出现一条「硬边横带」把立绘切断。
     dark_knots = ((0.0, 0.0), (0.12, 0.03), (0.30, 0.26), (0.46, 0.58),
                   (0.62, 0.82), (0.82, 0.93), (1.0, 1.0))
     tint_knots = ((0.0, 0.0), (0.32, 0.14), (0.62, 0.52), (1.0, 1.0))
+    f = max(0.0, min(1.6, float(factor or 1.0)))
     out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     black = Image.new("RGB", (w, h), (6, 8, 12))
-    black.putalpha(_ramp(h, dark_knots, 246, w))
+    black.putalpha(_ramp(h, dark_knots, min(255, 246 * f), w))
     out = Image.alpha_composite(out, black)
     tint = Image.new("RGB", (w, h), _shade(rgb, 0.46))
-    tint.putalpha(_ramp(h, tint_knots, 150, w))
+    tint.putalpha(_ramp(h, tint_knots, min(255, 150 * f), w))
     return Image.alpha_composite(out, tint)
+
+
+def _top_scrim(w: int, h: int, factor: float = 1.0) -> Image.Image:
+    """顶部压暗（只在印章放到顶部时才加）：亮色立绘上白色字母印章仍可读。"""
+    knots = ((0.0, 1.0), (0.34, 0.56), (0.68, 0.16), (1.0, 0.0))
+    f = max(0.0, min(1.6, float(factor or 1.0)))
+    layer = Image.new("RGB", (w, h), (8, 10, 14))
+    layer.putalpha(_ramp(h, knots, min(255, 120 * f), w))
+    return layer.convert("RGBA")
+
+
+def normalize_seal_pos(value) -> str:
+    """印章位置配置归一：name（默认，名字右侧）/ top_left / top_right。
+
+    左下与右下被「统计行」「日期」占着，所以不提供；写错一律回落默认。
+    """
+    v = str(value or "").strip().lower().replace("-", "_")
+    return v if v in SEAL_POSITIONS else "name"
+
+
+def normalize_scrim(value) -> float:
+    """卡面遮罩浓度配置归一：百分比（100 = 默认），返回 0.0~1.6 的倍率。"""
+    try:
+        pct = float(value)
+    except (TypeError, ValueError):
+        pct = 100.0
+    return max(0.0, min(160.0, pct)) / 100.0
 
 
 def _tier_seal(size: int, letter: str, rgb: tuple, data_dir=None) -> Image.Image:
@@ -408,56 +452,69 @@ def _quote_layout(text: str, data_dir, max_w: int) -> tuple:
 
 def render_card(portrait_path, entry: dict, *, date_str: str, same_count: int = 1,
                 total_count: int = 1, rerolled: bool = False, out_path=None,
-                data_dir=None) -> str:
-    """渲染今日老婆卡，返回输出路径。portrait 必须存在（无图不渲染）。"""
+                data_dir=None, seal_pos="name", scrim=100) -> str:
+    """渲染今日老婆卡，返回输出路径。portrait 必须存在（无图不渲染）。
+
+    `seal_pos` 印章位置（name / top_left / top_right）、`scrim` 遮罩浓度百分比
+    （100 = 默认）都直接吃插件配置值，本函数内部自行归一，调用方不用预处理。
+    """
     src = Path(portrait_path)
     if not src.is_file():
         raise FileNotFoundError(f"立绘不存在，拒绝渲染无图卡: {src}")
     entry = entry or {}
+    seal_pos = normalize_seal_pos(seal_pos)
+    scrim_k = normalize_scrim(scrim)
     rgb = _hex_rgb(entry.get("color"))
     t_rgb = _tier_rgb(entry, rgb)
     canvas = _cover_fit(Image.open(src), CARD_W, CARD_H).convert("RGBA")
 
-    # 底部双层渐变（v0.45.0：不画宽边框，层次交给渐变 + 排版）。
+    # 底部双层渐变（层次交给渐变 + 排版，不画宽边框）。
     # 高度 860 是实测定下来的：亮色立绘（白/浅粉）上也够暗，白字不会消失。
-    canvas.alpha_composite(_bottom_scrim(CARD_W, 860, rgb), (0, CARD_H - 860))
+    canvas.alpha_composite(_bottom_scrim(CARD_W, 860, rgb, scrim_k),
+                           (0, CARD_H - 860))
+    if seal_pos.startswith("top"):     # 印章在顶部时补一层顶部压暗
+        canvas.alpha_composite(_top_scrim(CARD_W, 230, scrim_k), (0, 0))
 
     # ⚠️ 装饰画在独立透明层上，最后 alpha_composite 合成：Pillow 的 Draw 直写
     # 像素（带 alpha 时覆盖而非混合），半透明/阴影必须靠图层叠加。
     layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
 
-    date_f = load_font(17, "soft", data_dir)
-    meta_f = load_font(19, "body", data_dir)
+    # 日期换漫画体（正文字体印数字太规整、也不像卡面）；小字整体收一档
+    date_f = load_font(19, "comic", data_dir)
+    date_fb = load_font(19, "name", data_dir)
+    meta_f = load_font(17, "body", data_dir)
     bio_f = load_font(23, "body", data_dir)
     brow_f = load_font(20, "body", data_dir)
 
     bottom = CARD_H - 58
 
-    # ---- 第 7 层（最淡）：日期 + 重抽标 ----
-    draw.text((_PAD_X, bottom - date_f.size), f"{date_str}",
-              font=date_f, fill=(255, 255, 255, 140))
-    if rerolled:
-        rt = "重抽"
-        tw = draw.textlength(rt, font=date_f)
-        bx0 = CARD_W - _PAD_X - tw - 26
-        draw.rounded_rectangle((bx0, bottom - date_f.size - 6,
-                                CARD_W - _PAD_X, bottom + 7),
-                               radius=13, fill=(255, 255, 255, 32),
-                               outline=(255, 255, 255, 118), width=1)
-        draw.text((bx0 + 13, bottom - date_f.size), rt, font=date_f,
-                  fill=(255, 255, 255, 232))
-    bottom -= date_f.size + 16
-
-    # ---- 第 6 层：统计行（档位色圆点 + 小字） ----
+    # ---- 页脚一整行：左 = 统计，右 = 日期（重抽标贴在日期左侧） ----
     stats = f"今日同款 {max(1, same_count)} 人 · 第 {max(1, total_count)} 次抽到她"
     dot_r = 3
     dot_cy = bottom - meta_f.size // 2
     draw.ellipse((_PAD_X, dot_cy - dot_r, _PAD_X + dot_r * 2, dot_cy + dot_r),
                  fill=(*t_rgb, 230))
-    _mixed(layer, (_PAD_X + dot_r * 2 + 11, bottom - meta_f.size), stats, meta_f,
-           None, (255, 255, 255, 170))
-    bottom -= meta_f.size + 22
+    _mixed(layer, (_PAD_X + dot_r * 2 + 10, bottom - meta_f.size), stats, meta_f,
+           None, (255, 255, 255, 176))
+
+    dtext = str(date_str or "")
+    dspace = 1.2                      # 日期逐字加一点字距，像页脚小标尺
+    dw = text_width(dtext, date_f, date_fb) + dspace * len(dtext)
+    dx = CARD_W - _PAD_X - dw
+    if rerolled:
+        rt = "重抽"
+        rtw = draw.textlength(rt, font=meta_f)
+        bx1 = dx - 14
+        bx0 = bx1 - rtw - 22
+        draw.rounded_rectangle((bx0, bottom - meta_f.size - 5, bx1, bottom + 6),
+                               radius=12, fill=(255, 255, 255, 30),
+                               outline=(255, 255, 255, 112), width=1)
+        draw.text((bx0 + 11, bottom - meta_f.size), rt, font=meta_f,
+                  fill=(255, 255, 255, 228))
+    _mixed(layer, (dx, bottom - date_f.size), dtext, date_f, date_fb,
+           (255, 255, 255, 200), spacing=dspace)
+    bottom -= max(date_f.size, meta_f.size) + 24
 
     # ---- 第 5 层：印象语（左侧档位色引文竖线 + 漫画体） ----
     quote = str(entry.get("quote") or "").strip()
@@ -496,8 +553,9 @@ def render_card(portrait_path, entry: dict, *, date_str: str, same_count: int = 
         bottom -= step * (len(blines) - 1) + bio_f.size + 16
 
     # ---- 第 2 层：角色名（漫画体大标题，超长自动缩字号） ----
+    # 印章占名字右侧时，名字的可排版宽度要让出那一块
     name = str(entry.get("name") or "")
-    name_max = CARD_W - _PAD_X * 2 - _SEAL - 34
+    name_max = CARD_W - _PAD_X * 2 - (_SEAL + 34 if seal_pos == "name" else 0)
     nsize = 78
     nf = load_font(nsize, style="comic", data_dir=data_dir)
     nfb = load_font(nsize, style="name", data_dir=data_dir)
@@ -508,26 +566,30 @@ def render_card(portrait_path, entry: dict, *, date_str: str, same_count: int = 
     _mixed(layer, (_PAD_X, bottom - nsize), name, nf, nfb, (255, 255, 255, 252),
            shadow=(0, 0, 0, 150))
 
-    # ---- 第 1 层（点睛）：档位印章，落在名字右侧 ----
+    # ---- 第 1 层（点睛）：档位印章（位置可配：名字右侧 / 左上 / 右上） ----
     seal = _tier_seal(_SEAL, str(entry.get("tier") or ""), t_rgb, data_dir)
-    sx = CARD_W - _PAD_X - _SEAL - 16
-    # 印章视觉中心对齐名字的字面中心（CJK 字面中心≈基线上下 0.45em 处）
-    sy = int(bottom - nsize * 0.45 - seal.height / 2 + 16)
+    if seal_pos == "name":
+        sx = CARD_W - _PAD_X - _SEAL - 16
+        # 视觉中心对齐名字字面中心（CJK 字面中心≈基线上下 0.45em 处）
+        sy = int(bottom - nsize * 0.45 - seal.height / 2 + 16)
+    else:
+        margin = 44                       # 视觉块到卡片边缘
+        sx = (CARD_W - margin - _SEAL - 16) if seal_pos == "top_right" \
+            else (margin - 16)
+        sy = margin - 16
     shadow = Image.new("RGBA", seal.size, (0, 0, 0, 0))
     shadow.putalpha(seal.getchannel("A").point(lambda a: int(a * 0.45)))
     layer.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(9)), (sx, sy + 7))
     layer.alpha_composite(seal, (sx, sy))
     bottom -= nsize + 16
 
-    # ---- 第 0 层（最上，最小字）：作品眉标（档位色竖线 + 小字，字距略开） ----
+    # ---- 第 0 层（最上，最小字）：作品眉标（只写作品名，不再拼类型后缀） ----
     series = str(entry.get("series") or "").strip()
-    cat = CATEGORY_LABELS.get(str(entry.get("category") or "").strip().lower(), "")
-    brow = "  ·  ".join([x for x in (series, cat) if x])
-    if brow:
+    if series:
         draw.rounded_rectangle((_PAD_X, bottom - 17, _PAD_X + 3, bottom),
                                radius=2, fill=(*t_rgb, 240))
-        _mixed(layer, (_PAD_X + 15, bottom - brow_f.size), brow, brow_f, None,
-               _tint(t_rgb, 0.30) + (240,), spacing=1.2)
+        _mixed(layer, (_PAD_X + 15, bottom - brow_f.size), series, brow_f, None,
+               _tint(t_rgb, 0.30) + (240,), spacing=1.6)
 
     # ---- 收边：1px 半透明细线（替代原来的 14px 档位色宽边框） ----
     hair = Image.new("RGBA", canvas.size, (0, 0, 0, 0))

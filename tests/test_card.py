@@ -107,4 +107,82 @@ with tempfile.TemporaryDirectory() as td:
                      out_path=rare)
     check("生僻字名字仍能渲染", Path(rare).stat().st_size > 1000)
 
+    # ---- v0.47.0 版式 v5：页脚左右分栏 / 眉标只写作品 / 遮罩与印章位置可配 ----
+    from PIL import ImageChops
+
+    def diff_box(p1, p2):
+        with Image.open(p1) as i1, Image.open(p2) as i2:
+            return ImageChops.difference(i1.convert("RGB"),
+                                         i2.convert("RGB")).getbbox()
+
+    # 日期在右下角：只换日期文本，差异区必须落在右下
+    d1 = td / "date_a.png"
+    d2 = td / "date_b.png"
+    card.render_card(portrait, ENTRY, date_str="2026-11-11", out_path=d1)
+    card.render_card(portrait, ENTRY, date_str="2028-01-09", out_path=d2)
+    box = diff_box(d1, d2)
+    check("日期在右下角", bool(box) and box[0] > card.CARD_W // 2
+          and box[1] > card.CARD_H - 90)
+
+    # 统计在左下角：只改同款人数 / 次数
+    s1 = td / "stat_a.png"
+    s2 = td / "stat_b.png"
+    card.render_card(portrait, ENTRY, date_str="2026-11-11",
+                     same_count=1, total_count=2, out_path=s1)
+    card.render_card(portrait, ENTRY, date_str="2026-11-11",
+                     same_count=37, total_count=88, out_path=s2)
+    box = diff_box(s1, s2)
+    check("同款统计在左下角", bool(box) and box[2] < card.CARD_W // 2
+          and box[1] > card.CARD_H - 90)
+
+    # 眉标只写作品名：分类（动漫 / 游戏）不同不该影响卡面
+    c1 = td / "cat_a.png"
+    c2 = td / "cat_b.png"
+    card.render_card(portrait, dict(ENTRY, category="anime"), date_str="2026-11-11",
+                     out_path=c1)
+    card.render_card(portrait, dict(ENTRY, category="game"), date_str="2026-11-11",
+                     out_path=c2)
+    check("眉标不再显示分类（只写作品）", c1.read_bytes() == c2.read_bytes())
+
+    # 遮罩浓度可配：值越小，文字区越亮
+    dark = td / "scrim_dark.png"
+    light = td / "scrim_light.png"
+    card.render_card(portrait, ENTRY, date_str="2026-11-11", scrim=130,
+                     out_path=dark)
+    card.render_card(portrait, ENTRY, date_str="2026-11-11", scrim=40,
+                     out_path=light)
+    with Image.open(dark) as im:
+        dark_px = sum(im.convert("RGB").getpixel((350, 1000)))
+    with Image.open(light) as im:
+        light_px = sum(im.convert("RGB").getpixel((350, 1000)))
+    check("card_scrim 能调浅遮罩", light_px > dark_px + 30)
+    check("card_scrim 归一（越界不炸）",
+          card.normalize_scrim("abc") == 1.0 and card.normalize_scrim(0) == 0.0
+          and card.normalize_scrim(9999) == 1.6)
+
+    # 印章位置可配：右上角必须有档位色块，默认（名字右侧）同一区域则没有
+    tr = td / "seal_tr.png"
+    nm = td / "seal_name.png"
+    card.render_card(portrait, ENTRY, date_str="2026-11-11", seal_pos="top_right",
+                     out_path=tr)
+    card.render_card(portrait, ENTRY, date_str="2026-11-11", seal_pos="name",
+                     out_path=nm)
+
+    def _gold_pixels(p):
+        with Image.open(p) as im:
+            rgb = im.convert("RGB")
+            n = 0
+            for x in range(540, 690, 3):
+                for y in range(20, 170, 3):
+                    r, g, b = rgb.getpixel((x, y))
+                    if r > 150 and b < 130 and g > 110:
+                        n += 1
+            return n
+
+    check("印章可放右上角", _gold_pixels(tr) > 40)
+    check("默认印章不在顶部", _gold_pixels(nm) < 10)
+    check("印章位置配置归一（写错回落默认）",
+          card.normalize_seal_pos("bottom_left") == "name"
+          and card.normalize_seal_pos("TOP-RIGHT") == "top_right")
+
 print("test_card: ALL OK")

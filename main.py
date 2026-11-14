@@ -317,6 +317,8 @@ class MoeWaifuPlugin(Star):
                         rerolled=bool(existing["rerolled"]),
                         out_path=str(self._data_dir / "cards" / f"{uid}_{date}.png"),
                         data_dir=self._data_dir,
+                        seal_pos=self._cfg("card_seal_pos", "name"),
+                        scrim=self._cfg("card_scrim", 100),
                     )
                 except Exception:
                     logger.error(f"[{PLUGIN_NAME}] 卡图重渲染失败\n{traceback.format_exc()}")
@@ -621,6 +623,8 @@ class MoeWaifuPlugin(Star):
                 card.render_card, src, entry,
                 date_str=date, same_count=same, total_count=total, rerolled=rerolled,
                 out_path=str(cards_dir / f"{uid}_{date}.png"), data_dir=self._data_dir,
+                seal_pos=self._cfg("card_seal_pos", "name"),
+                scrim=self._cfg("card_scrim", 100),
             )
         except Exception:
             # 渲染异常只写日志：群里只回一句通用失败提示，不把栈信息抛给用户
