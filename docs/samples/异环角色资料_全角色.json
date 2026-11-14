@@ -1,0 +1,626 @@
+{
+  "_readme": "《异环》(Neverness to Everness) 全角色资料样例（20 位：此前已导入的 5 位 + 新增 15 位）。用于「角色库 → 导入资料」一次性导入：勾「未匹配的角色新建条目」即可把库里没有的角色建出来；已有角色按「跳过（只补空）」不会动你已改过的内容。资料 2026-11-15 检索整理自萌娘百科 / 官方公告 / 攻略站，可能与游戏内最新文本有出入；印象语为整理 + 仿写的角色口吻台词（非官方原文逐字引用），仅供导入测试。零的生日由玩家自选，故留空。男性角色（白藏 / 阿德勒 / 卡厄斯 / 翳 / 埃德嘉）未收录——本插件出图按女性角色写提示词。",
+  "series": "异环",
+  "entries": [
+    {
+      "id": "yihuan_mint",
+      "name": "薄荷",
+      "series": "异环",
+      "category": "game",
+      "tier": "A",
+      "color": "#8FE3D8",
+      "tags_en": "1girl, solo, mint hair, pink eyes, cat ears, cat tail, hairband, thick eyebrows, cross-shaped pupils, bell, gloves, high-waist shorts, thigh ring, white thighhighs, short boots, waist bag",
+      "profile": {
+        "tagline": "收容二组的开心果，海特洛没有她聊不起来的人",
+        "bio": "异象管理局收容二组预备骨干，同事街坊的人名词典，海特洛市平价美食活地图。",
+        "birthday": "6月1日",
+        "cv": "陈雨（中）／鬼头明里（日）",
+        "title": "异象管理局收容二组 · 预备骨干",
+        "personality": "元气话痨、自来熟、嗅觉灵敏、考试苦手",
+        "traits": "猫耳猫尾、青发粉瞳、粗眉、十字瞳孔、铃铛",
+        "memo": "异能「猫力喷嚏」，灵属性近战输出。梦想是成为异象管理局收容组骨干，最怕收容安全考试的成绩通告。"
+      },
+      "quotes": [
+        "呀嚯！是收容二组的薄荷！有什么需要帮忙的尽管找我，可可！",
+        "收容安全考试的成绩通告……那个不算，别提那个。",
+        "大热天出外勤也能偷吃一支碎雪冰淇淋，这可是我的小确幸！",
+        "这条街上的店，从老板到常客我都能叫出名字哦。",
+        "什么话题我都能接——大概吧，除了考试成绩单。",
+        "想找便宜又好吃的地方？跟着我的鼻子走就对了！",
+        "猫力喷嚏！……啊不对，要先把招呼打完。",
+        "今天也要好好出外勤，离「骨干」再近一步！",
+        "别看我这样，收容组的工作我可是很认真的。",
+        "收拾收拾心情，打理打理衣服——好，出发！"
+      ]
+    },
+    {
+      "id": "yihuan_nanally",
+      "name": "娜娜莉",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#E86A6A",
+      "tags_en": "1girl, solo, red hair, red eyes, animal ears, ahoge, hair intakes, x hair ornament, glasses, collar, necktie, pleated skirt, white thighhighs, high heels, tail",
+      "profile": {
+        "tagline": "桥间地的一代目，重振家族就从今天开始",
+        "bio": "古董店「伊波恩」一号台柱，桥间地最有名望的家族「柯林斯家族」一代目，自称未来全海特洛最伟大的家族老大。",
+        "birthday": "8月20日",
+        "cv": "宋媛媛（中）／竹达彩奈（日）",
+        "title": "伊波恩古董店 · 一号台柱／柯林斯家族一代目",
+        "personality": "张扬爽朗、大大咧咧、中二、爱幻想、极看重同伴",
+        "traits": "红发赤瞳、兽耳、呆毛、眼镜、X 形发饰、百褶裙",
+        "memo": "S 级灵属性主 C，异能操控重力，反重力跑墙；长文档看两行就走神。全名娜娜莉·柯林斯（Nanally Coluccis）。"
+      },
+      "quotes": [
+        "在下——不对，咳咳，鄙人……我！娜娜莉·柯林斯，是未来全海特洛最伟大的家族——「柯林斯家族」的一代目！",
+        "重振家族荣光，就从今天开始！你，要不要加入我的家族？",
+        "那种又长又绕的卷宗……看两行就走神，别指望我。",
+        "桥间地这块地盘，谁不认识我娜娜莉？",
+        "稳重威仪、慷慨仁慈、睿智冷静——说的就是我，嗯。",
+        "我的搭档随时待命，别小看一代目的底牌。",
+        "计划？先冲上去再说，反正最后都会赢的嘛。",
+        "家族的事我从不含糊，同伴的事更不含糊。",
+        "「团三郎的复仇」那种场面，我见得多了。",
+        "站到我旁边来，别掉队——一代目的队伍不等人。"
+      ]
+    },
+    {
+      "id": "yihuan_sakiri",
+      "name": "早雾",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#7FA8C9",
+      "tags_en": "1girl, solo, grey-blue hair, short hair, blue eyes, single horn, beret, hair clip, sweater, necktie, sailor collar, pleated skirt, bandaid, loose socks, loafers, child, fang",
+      "profile": {
+        "tagline": "伊波恩最凶的小霸王，锤子比人还高",
+        "bio": "古董店「伊波恩」店员，冰箱便利贴规则的制定者，自称伊波恩最厉害的「小霸王」。",
+        "birthday": "11月7日",
+        "cv": "蔡书瑾（中）／伊藤美来（日）",
+        "title": "伊波恩古董店 · 冰箱规则制定者",
+        "personality": "古灵精怪、嚣张毒舌、对规则较真、重情义",
+        "traits": "幼儿体型、额前小尖角、贝雷帽、虎牙、黑白水手服、巨锤鬼郎丸",
+        "memo": "S 级咒属性控场辅助，异能「捉鬼游戏」可召唤饕餮鬼郎丸（平时化作异象巨锤）。从小被店长零收养。"
+      },
+      "quotes": [
+        "第一，不准给鬼郎丸乱喂东西！第二，不准低头看人！第三，不准打开冰箱冷藏室第三格！",
+        "本大爷就是伊波恩最厉害的早雾！",
+        "什么东西被吞了，或者被咬了屁股，伊波恩古董店概不赔付。",
+        "空瓶？什、什么牛奶空瓶！你看错了。",
+        "冰箱上那些便利贴全是我写的，谁敢不遵守？",
+        "别摸我的角！会、会长不高的……大概。",
+        "鬼郎丸，上！——啊，它又睡着了。",
+        "店里的小鬼们，今天也不许捣乱。",
+        "我可不是小孩子，我是伊波恩的一霸。",
+        "有事找我，没事别烦我，除非你带了布丁。"
+      ]
+    },
+    {
+      "id": "yihuan_hotori",
+      "name": "浔",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#B0484B",
+      "tags_en": "1girl, solo, black hair, long hair, red eyes, kimono, japanese clothes, off-shoulder, wide sleeves, eyeshadow, earrings, paper umbrella, katana, geta, tall",
+      "profile": {
+        "tagline": "撑伞的时间魔女，每天醉着看账本",
+        "bio": "伊波恩古董店的店长，掌管时间流速的「时间魔女」，每天酩酊大醉却总在关键处稳住局面的成年人。",
+        "birthday": "12月20日",
+        "cv": "龟娘（中）／伊藤静（日）",
+        "title": "伊波恩古董店 · 店长",
+        "personality": "散漫慵懒、精打细算的财迷、城府深、默默庇护店内所有人",
+        "traits": "黑发赤瞳、黑红和服、赤红油纸伞、太刀、木屐、酒豪但酒品差",
+        "memo": "S 级光属性输出，异能「杜伊诺哀歌」操控时间流速。全名月退浔（Tsukinoki Hotori），娜娜莉崇拜的大姐头。"
+      },
+      "quotes": [
+        "「现在」，兴许是最值得纪念的时候……也说不定呢？",
+        "成交！……唔，这宝贝好像亏了。算了，先喝一杯。",
+        "古董店的门槛，可不是谁都能踩进来的。",
+        "时间啊……它从不为谁停下，除了我。",
+        "账要算清楚，酒也要喝痛快。",
+        "小家伙们闹够了没有？店要打烊了哦。",
+        "这一杯，敬「现在」。",
+        "别急着走，你这单生意我还没算完呢。",
+        "过去的账，我一笔一笔都记着。",
+        "伊波恩的伞下，雨总要慢半拍。"
+      ]
+    },
+    {
+      "id": "yihuan_hathor",
+      "name": "哈索尔",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#C9CFD8",
+      "tags_en": "1girl, solo, silver hair, long hair, grey eyes, single wing, white wings, ahoge, hair intakes, hair streaks, gloves, high-waist shorts, thigh ring, knee boots, motorcycle, delivery uniform",
+      "profile": {
+        "tagline": "银翼信使，暴风雨里也不会迟到",
+        "bio": "斯特利速递的王牌快递员，派件极快、永不迟到，暴风雨里也能精准抵达没有门牌的地址。",
+        "birthday": "8月29日",
+        "cv": "洪海天（中）／市之濑加那（日）",
+        "title": "斯特利速递 · 精英快递员",
+        "personality": "冷静寡言、极度自律、时间观念极强、外冷内热、重诺守信",
+        "traits": "银白长发、灰瞳、单侧白羽翼、呆毛、机车制服、过膝靴",
+        "memo": "S 级相属性高机动近战爆发，异能「役徊生」。异能曾严重失控，被「老师」担保并训练后学会控制，仍有失控风险。"
+      },
+      "quotes": [
+        "遵照委托，请您核对快递，并于「签收凭证」上签署姓名；确定签收后，委托费用即刻扣除。",
+        "路线再远、楼层再高，都不是迟到的理由。",
+        "……请不要靠太近。我的异能，还没有完全听话。",
+        "时间表已经排好，误差控制在三分钟以内。",
+        "地址写错了？没关系，我能找到。",
+        "斯特利速递，使命必达——这不是口号，是流程。",
+        "淋了雨的包裹会受潮，所以我从不迟到。",
+        "你的名字我记下了，下次不必再报第二遍。",
+        "这对翅膀不是装饰，是警告。",
+        "签收完成。下一单，已经在我脑子里了。"
+      ]
+    },
+    {
+      "id": "yihuan_zero",
+      "name": "零",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#C9D3E8",
+      "tags_en": "1girl, solo, white hair, short hair, blue eyes, purple eyes, hairband, elf ears, necktie, fingerless gloves, bolero jacket, arm rings, pleated skirt, safety shorts, thigh ring, platform shoes",
+      "profile": {
+        "tagline": "谜团里现身的鉴定师，伊波恩的新人",
+        "bio": "对异象的「奇点」有敏锐洞察力的异能者，作为新人「鉴定师」加入古董店兼异象猎人团体「伊波恩」，尚未取得异象猎人资格证。",
+        "birthday": "",
+        "cv": "曾彤（中）／内田真礼（日）",
+        "title": "伊波恩古董店 · 鉴定师",
+        "personality": "柔软热忱、共情力强、嘴硬掩饰害羞、关键时刻意志坚定",
+        "traits": "白发、蓝紫瞳、短发、精灵耳发型、波列罗夹克、百褶裙、腿环、厚底鞋",
+        "memo": "光属性，异能「第零感」。生日由玩家自选故留空；别名：可可、招财宝。本文件取女性形象（男性形象未收录）。"
+      },
+      "quotes": [
+        "嗯，我对异象事件也很感兴趣。",
+        "哎呀，要说完全合规的东西，恐怕咱们店里根本数不上……",
+        "异象的「奇点」……我能看见。",
+        "还没拿到异象猎人资格证，这样真的没问题吗？",
+        "店长，这单会不会有点太危险了？",
+        "娜娜莉，先别冲，等我确认一下。",
+        "我没事，只是有点累。",
+        "大家的心事，我多少能感觉到一点。",
+        "该怕的时候会怕，但该上的时候我会上的。",
+        "走吧，回家。"
+      ]
+    },
+    {
+      "id": "yihuan_daffodill",
+      "name": "达芙蒂尔",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#4A5568",
+      "tags_en": "1girl, solo, black hair, blue hair streaks, grey eyes, hair over one eye, long hair, uniform, gloves, high heels, expressionless",
+      "profile": {
+        "tagline": "伊波恩的贴身保镖，冰面之下有晴光",
+        "bio": "伊波恩古董店员工、店长浔的贴身保镖，实力深不可测；外冷内热，极重同伴。曾是「红字」成员，代号「水仙」。",
+        "birthday": "1月19日",
+        "cv": "陈彦亦（中）／大原沙耶香（日）",
+        "title": "伊波恩古董店 · 贴身保镖",
+        "personality": "寡言、冷面、不擅闲聊、内里柔软",
+        "traits": "黑发蓝色挑染、灰瞳、遮单眼发、制服、手套、高跟鞋、冰美人",
+        "memo": "暗属性。娜娜莉的师父，残虹的姐姐，养母是「T女士」（伊南娜）。别称小水仙、大福。"
+      },
+      "quotes": [
+        "抱歉，我并不擅长闲聊，有需要请直接咨询「伊波恩」古董店。",
+        "并非不爱说话——只是不知道如何开口。",
+        "如果有需要的话……我在。",
+        "比起探查人心，我更擅长观察异象与事物本身。",
+        "站到我身后。",
+        "目标确认。三秒。",
+        "不必谢我，这是工作。",
+        "「小水仙」……这个名字，已经很久没人叫了。",
+        "娜娜莉，别把后背露出来。",
+        "我认可的人，我会用这把刀守住。"
+      ]
+    },
+    {
+      "id": "yihuan_fadia",
+      "name": "法帝娅",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#9B59D0",
+      "tags_en": "1girl, solo, purple hair, purple eyes, hair streaks, ahoge, long hair, choker, tentacles, glasses, detached sleeves, nail polish, dress, slit skirt, boots",
+      "profile": {
+        "tagline": "爱与死的使徒，紫发下的欲望猎手",
+        "bio": "异象管理局 E.T.D 四队成员，前特赦犯人；自称「爱与死的使徒」，顺从他人欲望把他们带往「渴求的乐园」。",
+        "birthday": "10月31日",
+        "cv": "裴致莹（中）／真堂圭（日）",
+        "title": "异象管理局 E.T.D 四队 · 成员",
+        "personality": "慵懒戏谑、为所欲为、战斗时冷硬可靠、护得住队友",
+        "traits": "紫发紫瞳、挑染、交叉刘海、分叉长发、项圈、触手、眼镜、开叉裙、长靴",
+        "memo": "魂属性承伤辅助，异能「敌神者」（化形十字盾），为队友承伤撑盾；喜欢啃苹果、调戏同事。全名法帝娅·DD。"
+      },
+      "quotes": [
+        "欲壑难平，永不满足——这是你我，更是所有人类的痼疾。",
+        "我其实、其实也没有在期待什么……然后嘴巴就被封住了！",
+        "——呜呜呜，那可是我的初吻呐！",
+        "别害怕，痛苦让位于狂喜。",
+        "你想要什么？说出来，我带你去看。",
+        "盾我撑着，你只管站在里面。",
+        "苹果？最后一个了，不给。",
+        "闭眼。乖孩子。",
+        "乐园的门票，从来都很贵。",
+        "「爱与死」，你更喜欢哪一个？"
+      ]
+    },
+    {
+      "id": "yihuan_lacrimosa",
+      "name": "安魂曲",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#8A7FBF",
+      "tags_en": "1girl, solo, split-color hair, black hair, white hair, red eyes, ahoge, twintails, x hair ornament, diamond-shaped pupils, choker, bowtie, nail polish, jacket off shoulder, black pantyhose, platform shoes",
+      "profile": {
+        "tagline": "番茄城堡里住着的小王牌",
+        "bio": "E.T.D 四队最可爱的小王牌，寡言少语却人气极高；异能「安魂弥撒」，习惯用第三人称称呼自己。",
+        "birthday": "6月26日",
+        "cv": "宴宁（中）／长绳麻理亚（日）",
+        "title": "异象管理局 E.T.D 四队 · 队员",
+        "personality": "慵懒、怕麻烦、不善交际、番茄狂热",
+        "traits": "阴阳发（左白右黑）、红瞳、呆毛、双马尾、菱形瞳孔、项圈领结、黑色连裤袜、厚底鞋",
+        "memo": "暗属性，异能「安魂弥撒」。投诉信数量与公物损毁率成正比，粉丝信同样多得惊人。别名草莓牛奶小姐、小弥撒。"
+      },
+      "quotes": [
+        "番茄，最好了。安魂曲以后……要住在番茄城堡里，在番茄床上睡觉。",
+        "不工作，没有人吵安魂曲睡觉。",
+        "安魂曲起床了，就可以吃番茄酱。",
+        "嗯……安魂曲，现在可以回家了吗？",
+        "番茄酱被独占的话，就只能用冰淇淋蘸薯条了。",
+        "安魂曲不擅长说话，但是……谢谢。",
+        "那个，可以让一下吗？挡到安魂曲的路了。",
+        "睡着的时候，世界就安静了。",
+        "妈妈说，不可以浪费食物。",
+        "晚安。安魂曲要睡了。"
+      ]
+    },
+    {
+      "id": "yihuan_jiuyuan",
+      "name": "九原",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#9B8FC7",
+      "tags_en": "1girl, solo, silver hair, purple eyes, very long hair, wide-brimmed hat, spiral hair, earrings, bracelet, pants, high heels, revolver",
+      "profile": {
+        "tagline": "把玫瑰装进枪膛的情报商人",
+        "bio": "斯特利速递的代理店长兼王牌派送员，情报网络的调度者，哈索尔的老师；人称「夜莺」。",
+        "birthday": "7月24日",
+        "cv": "张安琪（中）／田中理惠（日）",
+        "title": "斯特利速递 · 代理店长／情报调度",
+        "personality": "成熟优雅、冷静睿智、杀伐果断、言语带疏离感",
+        "traits": "银发紫瞳、宽檐礼帽、偏分、螺旋鬓发、耳坠、长裤高跟、转轮手枪",
+        "memo": "灵属性远程主 C，异能「枯荣条例」以「致命玫约」挂持续伤害再引爆清算；曾任 E.T.D 顶尖特工。"
+      },
+      "quotes": [
+        "聪明的鸟儿知道自己该什么时候迷路。",
+        "你是个聪明人，应该知道如何做选择。",
+        "在斯特利，情报往往比包裹更早抵达。",
+        "我的异能，大概是在关键时刻，把玫瑰化作子弹。",
+        "沉默，有时比喧嚣更难应对。",
+        "咖啡要趁热，消息要趁新。",
+        "别急着谈条件，先说说你能给我什么。",
+        "这单我接了——代价，你付得起吗？",
+        "沙龙里的每个人都在说话，只有我在听。",
+        "我那些学生……唉，一个比一个不省心。"
+      ]
+    },
+    {
+      "id": "yihuan_chiz",
+      "name": "小吱",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#F7A8C4",
+      "tags_en": "1girl, solo, pink hair, pink eyes, halo, ahoge, twin braids, hairband, x hair ornament, bow, bandaid, cape, sleeveless dress, thigh ring, bandages, boots",
+      "profile": {
+        "tagline": "粉爪银行的大堂经理，最怕被当成骗子",
+        "bio": "粉爪银行新赫兰德区总部大堂经理（工号 018888），德沃夏克家族相关；条款倒背如流，却是极度社恐的外勤。",
+        "birthday": "2月28日",
+        "cv": "则灵（中）／小原好美（日）",
+        "title": "粉爪银行 · 大堂经理（工号 018888）",
+        "personality": "软萌腼腆、胆小结巴、极度社恐、工作认真执着",
+        "traits": "粉发粉瞳、光环、呆毛、环形辫、X 形发饰、绷带创可贴、披风、无袖连衣裙",
+        "memo": "光属性持续输出，异能「露水的世」可凝聚「金谷」；免费 S 级，新手主 C。"
+      },
+      "quotes": [
+        "你、你好，要办卡吗……等等，我、我不是骗子！",
+        "别、别叫治安所！我真的不是骗子！",
+        "我叫小吱，目前任职于粉爪银行，工号 018888。",
+        "粉爪银行（新赫兰德区总部）——大堂经理，就是、就是我。",
+        "条款我都记得，第 3 章第 12 条……你、你要听吗？",
+        "方斯很重要，食物、药物、衣服，都要用方斯换。",
+        "等攒够了能让我回家的方斯，大概就不那么重要了吧。",
+        "创可贴？这、这个是工作事故，不是摔的……",
+        "今天也、也要鼓起勇气去外勤。",
+        "谢、谢谢你愿意听我说话。"
+      ]
+    },
+    {
+      "id": "yihuan_haniel",
+      "name": "哈尼娅",
+      "series": "异环",
+      "category": "game",
+      "tier": "A",
+      "color": "#F2A6C0",
+      "tags_en": "1girl, solo, pink hair, green hair streaks, gradient eyes, animal ears, bob cut, x hair ornament, hair clips, choker, headphones, t-shirt, shoulder bag, wristband, nail polish, big bow, leg warmers, fishnet pantyhose, platform shoes",
+      "profile": {
+        "tagline": "海特洛掌管耳机的神，斯特利最快配送记录保持者",
+        "bio": "斯特利速递的情报员与加密通讯中枢，头生猫头鹰耳羽，能捕捉极微弱的声波；乐队「猫头音!!!!」成员。",
+        "birthday": "1月10日",
+        "cv": "苏子芜（中）／石见舞菜香（日）",
+        "title": "斯特利速递 · 情报与加密通讯",
+        "personality": "元气活泼、机敏俏皮、好奇心强、工作时专业可靠",
+        "traits": "粉发绿挑染、渐变瞳、猫头鹰耳羽、战术耳机、X 形发饰、网袜厚底鞋",
+        "memo": "魂属性辅助，异能「奇异恩典」。全名哈尼娅·克雷斯维尔（Haniel Cresswell）；目标是集齐所有联名耳机。"
+      },
+      "quotes": [
+        "当当当~斯特利本月最快配送记录保持者登场！",
+        "吾乃「哈尼娅」，海特洛市掌管耳机的神！",
+        "我以「动感小耳朵」的名字起誓，只要是你的呼唤，我绝对会听到的！",
+        "收到信号！一切尽在掌握~",
+        "这单的路线我十分钟前就排好了。",
+        "新出的联名款？零点秒杀，手速不能输。",
+        "古早款只能在二手市场慢慢蹲，这也算一种修行。",
+        "底噪？那叫味道，你懂不懂。",
+        "监听、加密、转达——交给我就好。",
+        "前辈，今天也一起加油吧！"
+      ]
+    },
+    {
+      "id": "yihuan_aurelia",
+      "name": "海月",
+      "series": "异环",
+      "category": "game",
+      "tier": "A",
+      "color": "#F5A9C8",
+      "tags_en": "1girl, solo, pink hair, pink eyes, twin braids, blue hair streaks, beret, rabbit hair bow, earrings, bowtie, nail polish, midriff, pleated skirt, mismatched legwear, sandals",
+      "profile": {
+        "tagline": "把海的声音写进歌里的温柔姐姐",
+        "bio": "玉饼街居民协会成员、音乐人，异能「青春情结」；身边总跟着一位活泼好动的「孩子」。",
+        "birthday": "3月9日",
+        "cv": "葛子瑞（中）／高桥花林（日）",
+        "title": "玉饼街居民协会 · 音乐人",
+        "personality": "温柔恬静、爱尝试新事物但三分钟热度、战斗时果敢冷静",
+        "traits": "粉发粉瞳、双麻花辫、蓝色挑染、贝雷帽、兔耳蝴蝶结、露脐装百褶裙、长短袜",
+        "memo": "魂属性，异能「青春情结」。与明音凛同属「平行线」乐队。官方印象台词「美妙的音乐不会只由一个音符组成」。"
+      },
+      "quotes": [
+        "美妙的音乐不会只由一个音符组成。",
+        "抱歉，这孩子一兴奋就有点管不住，请见谅。",
+        "只要望着远方的海天线，听着涛声的韵律，心情就会平静下来。",
+        "我啊，什么都想试试，不过常常三分钟热度……",
+        "唯一坚持了很久的爱好，大概就是看海了。",
+        "在大海面前，好像一切烦恼都不再是烦恼。",
+        "乐谱上多留一点空白，才听得见呼吸。",
+        "下次的演出，你会来吗？",
+        "别担心，战斗的时候我不会手软。",
+        "要不要一起，去听一场海边的演唱会？"
+      ]
+    },
+    {
+      "id": "yihuan_blackbird",
+      "name": "黑羽",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#3A3A4A",
+      "tags_en": "1girl, solo, black hair, yellow eyes, very long hair, hair over eyes, witch hat, crystal ball, feathers, chains, pendant, long gloves, dress, cape, barefoot, wings",
+      "profile": {
+        "tagline": "鸟儿飞在空中，不知道自己是星星",
+        "bio": "「魔女之家」的黑羽，被称作「魔女小姐」的占卜师，寡言端庄，能借水晶球洞察世间万物；最初是一只从火里飞出的鸟。",
+        "birthday": "1月20日",
+        "cv": "井琉（中）／能登麻美子（日）",
+        "title": "魔女之家 · 占卜师",
+        "personality": "寡言端庄、冷淡疏离、沉静、藏着漫长过往",
+        "traits": "黑发黄瞳、超长发遮眼、魔法帽子、水晶球、羽毛锁链、裸足",
+        "memo": "魂属性，异能「告殁反舌」；尤克阿什庭相关。爱好是研究怎么用最少的钱买到最多的打折商品。"
+      },
+      "quotes": [
+        "鸟儿飞在空中，不知道自己是白天的星星。",
+        "我的收藏，大多承载着某段历史，某个故事，以及……某种念想。",
+        "对这个世界好奇？……终有一天，你会知晓。",
+        "水晶球里的答案，从来不止一个。",
+        "火很温暖，也很贪心。",
+        "不必害怕安静，安静里才有回声。",
+        "占卜不是预言，是看见你已经在走的那条路。",
+        "打折日……请不要打扰我。",
+        "羽毛落到哪里，风都知道。",
+        "你身上的影子，很像从前的我。"
+      ]
+    },
+    {
+      "id": "yihuan_akane_rin",
+      "name": "明音凛",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#E8C34A",
+      "tags_en": "1girl, solo, blonde hair, pink eyes, bob cut, ahoge, bow, hairband, hair clips, choker, sailor collar, necktie, wristband, garter straps, torn pantyhose, electric guitar",
+      "profile": {
+        "tagline": "金发的懒散前辈，一把电吉他劈开夜空",
+        "bio": "Star Sign Livehouse 的店员与乐队吉他手，相属性异能「空白之星」；看似漫不经心，实则可靠护短。",
+        "birthday": "5月27日",
+        "cv": "陈怡萱（中）／长谷川育美（日）",
+        "title": "Star Sign · 吉他手／店员",
+        "personality": "懒散随性、嘴硬护短、对音乐极认真、偶尔捉弄熟人",
+        "traits": "黄发粉瞳、妹妹头、呆毛、水手服领带、护腕、破洞袜、电吉他",
+        "memo": "相属性，异能「空白之星」；「猫头音!!!!」与「平行线」两支乐队都有参与，被后辈当作靠谱前辈。"
+      },
+      "quotes": [
+        "呦~我是明音。自我介绍之类的话就不必多说了吧？",
+        "为了下个月新出的专辑，辛苦一点也可以接受吧。",
+        "以我们在乐队中的默契配合，不论做什么都不成问题。对吧？",
+        "音响别碰，那台我调了三个晚上。",
+        "前辈嘛……总要有个前辈的样子。",
+        "走音了？不，那叫即兴。",
+        "你站的位置正好在回授点上，帅吧？",
+        "累了就歇，舞台不会跑。",
+        "别把我当懒人，我只是在保存体力。",
+        "下一首，一起。"
+      ]
+    },
+    {
+      "id": "yihuan_zankou",
+      "name": "残虹",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#B03A48",
+      "tags_en": "1girl, solo, white hair, green eyes, long hair, high ponytail, hairband, hair over ears, diagonal bangs, choker, pendant, tube top, fingerless gloves, thigh ring, katana, large breasts",
+      "profile": {
+        "tagline": "红字最锋利的刀，一场只属于你的噩梦",
+        "bio": "前秘密组织「红字」核心成员、代号「赤葵」，如今是格赫罗斯岛的囚犯；伊南娜的养女与侍卫，手执妖刀。",
+        "birthday": "11月13日",
+        "cv": "陈婷婷（中）／井上喜久子（日）",
+        "title": "「红字」· 赤葵",
+        "personality": "危险优雅、戏谑猎奇、擅长洞察人心、只对强者抬眼",
+        "traits": "白发绿瞳（粉色虹膜）、高马尾、遮耳发、抹胸、妖刀、腿环",
+        "memo": "咒属性主 C，异能「惑乱之眼」能嗅探情绪、引发幻觉，可在「现实」与「幻境」两种形态间切换。达芙蒂尔的妹妹。"
+      },
+      "quotes": [
+        "只有在深夜里，人们才愿意展露自己的真容。",
+        "你可以把我当成一个秘密，一袭幻影，一场独属于你的噩梦。",
+        "恐惧的味道……很甜。",
+        "别紧张，我只是想看看你会怎么逃。",
+        "幻境里的刀不会痛，醒来才会。",
+        "母亲的刀，从不问理由。",
+        "你很有趣。我准许你多活一会儿。",
+        "水面下的影子，才是真的我。",
+        "挣扎吧，越用力越好看。",
+        "如果连梦都困不住你……那才值得我出手。"
+      ]
+    },
+    {
+      "id": "yihuan_shinku",
+      "name": "真红",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#D94F4F",
+      "tags_en": "1girl, solo, black hair, red hair, red eyes, twin horns, ahoge, hair streaks, nail polish, short shorts, white thighhighs, large bow",
+      "profile": {
+        "tagline": "把背影留给同伴的笨拙龙少女",
+        "bio": "异象管理局收容二组组员、龙族少女，永远独自活跃在最危险的区域；薄荷的后辈。",
+        "birthday": "8月13日",
+        "cv": "唐夏芳（中）／田所梓（日）",
+        "title": "异象管理局收容二组 · 组员",
+        "personality": "外冷内热、别扭、任务中极度可靠、不擅处理人际关系",
+        "traits": "黑发红发、红瞳、双角、呆毛、挑染、白色过膝袜、热裤、大蝴蝶结",
+        "memo": "光属性，异能「月夜红龙」；能龙化。喜欢收集联名盲盒大隐藏、错版杂志与海边形状有趣的石头。"
+      },
+      "quotes": [
+        "想消磨时间的话，找我可不是个好选择。",
+        "这家伙不好对付，交给我。",
+        "别跟太近，前面很脏。",
+        "我不擅长说话……总之，跟紧我就对了。",
+        "龙化之后，我自己也控制不好力度。",
+        "这些东西？只是随手捡的。",
+        "薄荷前辈嘛……她话是多了点。",
+        "背对同伴，是我能想到的保护方式。",
+        "哭什么，我又没死。",
+        "下次，也让我在前面。"
+      ]
+    },
+    {
+      "id": "yihuan_oneiroi",
+      "name": "伊洛伊",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#7FD1A8",
+      "tags_en": "1girl, solo, green hair, pink eyes, twin horns, ahoge, detached sleeves, fingerless gloves, dress, garter straps, white thighhighs, stirrup legwear",
+      "profile": {
+        "tagline": "薄荷绿的羊角少女，会把你带进好梦",
+        "bio": "异象管理局收容二组组员，本名奥涅伊洛伊；曾在异象福利院「一意向阳」做志愿，异能「胎儿之梦」能编织安抚暴走异象的梦。",
+        "birthday": "12月21日",
+        "cv": "汪悦（中）／日高里菜（日）",
+        "title": "异象管理局收容二组 · 组员",
+        "personality": "热情可亲、天然呆、说话轻快、内里通透、藏着小恶作剧",
+        "traits": "绿发粉瞳、双角、呆毛、分离袖子、连衣裙、吊带袜、白色过膝袜",
+        "memo": "灵属性治疗，首位限定 S 级奶辅，身边常跟三只梦灵小羊。全名奥涅伊洛伊（Oneiroi），日常自称伊洛伊。"
+      },
+      "quotes": [
+        "你好！我的名字是奥涅伊洛伊。名字太拗口啦，叫我伊洛伊就好~",
+        "你喜欢做梦吗？要不要来我的梦里看看？",
+        "记得要走牛角做的门哦，走进象牙门的话，连我都救不了你。",
+        "有什么需要帮忙的都可以喊我哦，就这样啦，回见！",
+        "梦里那个，才是真正的我。",
+        "小羊们又跑出去了……等等，别踩到它们。",
+        "受伤的话别硬撑，交给我。",
+        "我可以给你织一个安稳的梦，代价我自己付。",
+        "真正的「我」，从来不在镜子里。",
+        "晚安，做个好梦——这次是真的好梦。"
+      ]
+    },
+    {
+      "id": "yihuan_elyms",
+      "name": "曳尔沐",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#B8C4DC",
+      "tags_en": "1girl, solo, silver hair, gradient eyes, long hair, ahoge, hair intakes, hair clips, bow, neck cover, off-shoulder, gloves, id card, thigh ring, high heel boots",
+      "profile": {
+        "tagline": "E.T.D 六队副队长，也是队里的导演",
+        "bio": "E.T.D 六队副队长，团队里的「导演」与摄影师；银发渐变瞳，服饰上到处是雪花纹样。",
+        "birthday": "9月3日",
+        "cv": "陈章（中）／雨宫天（日）",
+        "title": "异象管理局 E.T.D 六队 · 副队长",
+        "personality": "软萌外表、爱聊天爱社交、喜欢电子游戏、上岗时冷静",
+        "traits": "银发、渐变瞳（粉→蓝）、呆毛、进气口发型、发夹蝴蝶结、脖套、露肩装、高跟靴",
+        "memo": "光属性功能辅助，核心「拍照定格」可范围限制移动、打断 BOSS 技能；签名带雪花印记，异能名未公开。"
+      },
+      "quotes": [
+        "是我是我，好久不见啊？你现在怎么样了？",
+        "我这边现在在异象管理局的 E.T.D 六队担当副队长的职务哦。",
+        "在吗？——我最讨厌这个开头，但也只能从这儿开始。",
+        "别动，这个角度很好，站住三秒。",
+        "咔嚓。好了，你的表情我收下了。",
+        "电话粥、邮件、语音、视频……每种联络方式都有风味。",
+        "打游戏？来啊，不过我不太会让。",
+        "六队的人，一个比一个让我操心。",
+        "我拍的不是照片，是还没发生的事。",
+        "队长那边……算了，等我先把这个拍完。"
+      ]
+    },
+    {
+      "id": "yihuan_linko",
+      "name": "灵可",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#F08BC0",
+      "tags_en": "1girl, solo, pink hair, green eyes, headphones, antenna, ahoge, messy hair, bob cut, backpack, television, midriff, fingerless gloves, short shorts, tail, thigh ring, sneakers",
+      "profile": {
+        "tagline": "电波少女，正在执行「找你出去玩」的任务",
+        "bio": "E.T.D 六队新成员，能感知他人的「电波」并与队友、异象同频共振；身边跟着恶灵伙伴「小贞」。",
+        "birthday": "2月14日",
+        "cv": "胡影佳（中）／小仓唯（日）",
+        "title": "异象管理局 E.T.D 六队 · 队员",
+        "personality": "电波系、直球、思路跳跃、共情力强、爱看电影",
+        "traits": "粉发绿瞳、耳机天线、呆毛乱发、妹妹头、背包电视机、露脐装、尾巴腿环",
+        "memo": "灵属性，异能「心电感应」，战斗中可触发「同频合击」。家里有一整柜电影碟片，最爱外星人与灵异题材。"
+      },
+      "quotes": [
+        "哗啵哔啵——呼叫鉴定师，这里是 E.T.D 六队的灵可，正在执行「找你出去玩」的任务！",
+        "小贞说，与其看特效虚构的东西，不如看她这个货真价实的恶灵。",
+        "电波对上了，那我们就是同伴了。",
+        "我感觉得到……你现在的频率有点乱。",
+        "同频合击！准备好了吗？",
+        "今晚看片，随机抽一张，来不来？",
+        "外星人一定是存在的，不然天顶那些光点是什么？",
+        "别怕，梦里我陪你走一趟。",
+        "小贞，别吓他啦——虽然确实很好玩。",
+        "下次任务，还找我哦。"
+      ]
+    }
+  ]
+}
