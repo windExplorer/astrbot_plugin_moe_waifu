@@ -282,6 +282,17 @@ check("tab 换成分段下划线风格（不再是 999px 胶囊）",
       and ".gal-tab { padding: 5px 14px; border-radius: 999px" not in PAGE)
 check("总览横幅 + 进度条", "ov-hero" in PAGE and "ovFullPct" in PAGE
       and "ov-quick-btn" in PAGE)
+# v0.42.2 实测事故：.ov-card 的 height:100% 在默认 content-box 下会让
+# 卡片比 grid 行高出 padding(28)+border(2)，父容器仍按行高排布 → 下一行
+# 区块压在前一行卡片上（Chrome 实测 n-grid 120px / card 150px）。
+check("总览卡片不再用 height:100%（防区块重叠复发）",
+      ".ov-card { position: relative; box-sizing: border-box; overflow: hidden;" in PAGE
+      and "padding: 14px 16px; height: 100%;" not in PAGE
+      and "height: 100%;" not in PAGE.split(".ov-card {")[1].split("}")[0])
+check("总览两个 grid 都用 ov-grid 让卡片等高且不溢出",
+      PAGE.count('<n-grid class="ov-grid"') == 2
+      and ".ov-grid > div { display: flex; }" in PAGE
+      and ".ov-grid .ov-card { flex: 1 1 auto; width: 100%; }" in PAGE)
 check("配置页分区锚点 + 悬浮保存条",
       "config-save-float" in PAGE and "cfg-sec-" in PAGE
       and "configDirty" in PAGE and "scrollToConfigSection" in PAGE)

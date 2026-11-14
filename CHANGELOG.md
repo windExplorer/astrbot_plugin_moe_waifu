@@ -2,6 +2,15 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.42.2 (2026-11-15)
+
+- **总览页区块重叠修复**（用户实报「总览页面样式有问题，有区块重叠了」）。
+  - **现象**：四张指标卡底部的进度条被裁掉半截；第二行「立绘配额与出卡源 / 最近抽签」压在指标卡下缘；最下面的快捷入口按钮行又压在第二行卡上。三行内容层层叠在一起。
+  - **根因**：`.ov-card` 写了 `height: 100%`，而本页**没有全局 `box-sizing: border-box`**（默认 `content-box`）。百分比高度按 `n-gi` 的 grid 行高解析成**内容盒**高度，`padding: 14px 16px`（上下共 28px）+ 1px 边框（共 2px）额外加在外面 → 每张卡实际比 grid 行高出 30px；但 `n-grid` 父容器仍按行高排布，后面的兄弟元素就按「矮了 30px」的位置继续排，视觉上直接压上来。同时 `overflow: hidden` 把超出的 `.ov-bar` 裁掉，看起来又像内容缺失。
+  - **实测证据**（headless Chrome 1440×1000 + 桩桥注入假数据，`getBoundingClientRect()`）：第一个 `n-grid` 行高 `120.375px`、卡片 border-box `150px`；第二个 `n-grid` 行高 `211.125px`、卡片 `241px`；`.ov-quick` 的 `top=537` 落在第二行卡片 `bottom=555` 之上 → 重叠 18px。这个 bug 纯 JS/CSS 静态检查抓不到，必须真渲染量几何。
+  - **修复**：① `.ov-card` 去掉 `height: 100%`、显式 `box-sizing: border-box`；② 两个总览 `n-grid` 加 `class="ov-grid"`，用 `.ov-grid > div { display: flex; }` + `.ov-grid .ov-card { flex: 1 1 auto; width: 100%; }` 让卡片在 grid 行内等高对齐而不溢出（`n-gi` 渲染为无 class 的直接子 div，所以选择器用 `> div`）；③ `.ov-icon` 从 `float: right` 改成绝对定位右上角，不再挤占标题行的文本流。
+  - **验证**：修复后重新截图 + 逐块测量 —— `n-grid#0 bottom=302` 与 4 张指标卡 `bottom=302` 完全一致，`n-grid#1 bottom=525` 与 2 张卡一致，快捷入口 `top=537` 与其保持 12px 间距；6 张卡内部最后一个子元素的 bottom 全部小于卡片 bottom（无裁切）。`tests/test_ui_v042.py` 加静态守卫，防止 `height: 100%` 被加回来或 `ov-grid` 类被漏掉。27 个脚本式自检全过。
+
 ## v0.42.1 (2026-11-14)
 
 - **「删除立绘图片」全仓安全审计 + 加固**（用户要求对 v0.42.0 那个数据事故做全局复查，而不是只修触发它的那一条路径）。审计范围：`store.py` 全部 `DELETE FROM`、`webui_api.py` 全部破坏性路由与 `unlink`/`shutil.move`/`rmtree`、`main.py`/`draw.py`/`batch_fill.py` 的后台清理、前端所有 `apiPost` 删除端点与两段确认。结论：**没有任何后台自动逻辑会删 `portraits/`**（启动时只清 `cards/*.png` >90 天与 `try_cache/*.png` >7 天；出图 staging 只删副本）；但查出 5 处同类隐患，其中 2 处是真会「删了找不回来」的。
