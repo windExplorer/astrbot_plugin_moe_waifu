@@ -62,6 +62,7 @@ galAvatarThumb galAvatarBusy galAvatarUploadOpen galAvatarNote
 galAvatarPickOpen openAvatarPick doAvatarSet avatarClear doAvatarGenerate
 onAvatarPanelFiles galAvBatchOpen galAvBatch startAvatarBatch stopAvatarBatch
 galAvPreviewOpen galAvPreview galAvPreviewLoading openAvatarBatchPreview
+galAvOverwrite setAvOverwrite
 avatarThumbs avatarThumbsLoading
 galFillBusy galFillLabel startGalFill stopGalFill
 galFillOpen galFillRows galFillHave galFillQuota galFillLoading

@@ -120,6 +120,9 @@ def main():
     avseg = page.split('title="批量头像 · 预览"', 1)[1][:400]
     check("批量头像预览容器不是 n-space（div.stack）",
           "<n-space" not in avseg and '<div class="stack">' in avseg)
+    # v0.50.1：预览里有「覆盖已有头像」开关（默认值来自配置）
+    check("批量头像预览有覆盖开关",
+          "galAvOverwrite" in page and "setAvOverwrite" in page)
 
     if FAILURES:
         print(f"test_template_structure: {len(FAILURES)} FAILED")

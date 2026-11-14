@@ -162,10 +162,27 @@ def test_avatar_batch_plan():
     one = api._avatar_batch_preview(plan, limit=1)
     check("预览清单按 limit 截断并标 truncated",
           len(one["items"]) == 1 and one["truncated"] is True)
+    # v0.50.1：关闭「覆盖已有头像」后，已有头像的那批单独统计
+    plan2 = {"total": 3, "targets": [targets[1]], "skipped": [skipped[0]],
+             "skipped_avatar": [targets[0]["entry"]], "overwrite": 0,
+             "overwrite_cfg": False}
+    pv2 = api._avatar_batch_preview(plan2)
+    check("关闭覆盖：已有头像单独计入 skipped_avatar",
+          pv2["skipped_avatar"] == 1 and pv2["overwrite"] == 0
+          and pv2["overwrite_cfg"] is False
+          and "甲" in pv2["skipped_avatar_text"])
     check("AvatarRunner 快照带 overwrite 字段",
           "overwrite" in avatars.AvatarRunner().snapshot())
     src = (ROOT / "avatars.py").read_text(encoding="utf-8")
     check('批量头像固定走图生图（mode="i2i"）', 'mode="i2i"' in src)
+    api_src = (ROOT / "webui_api.py").read_text(encoding="utf-8")
+    check("批量头像覆盖开关读配置 avatar_batch_overwrite",
+          '"avatar_batch_overwrite"' in api_src
+          and "skipped_avatar" in api_src)
+    schema = json.loads((ROOT / "_conf_schema.json").read_text(encoding="utf-8"))
+    check("schema 有 avatar_batch_overwrite（bool，默认开）",
+          schema.get("avatar_batch_overwrite", {}).get("type") == "bool"
+          and schema["avatar_batch_overwrite"].get("default") is True)
 
 
 def test_avatar_prompt():

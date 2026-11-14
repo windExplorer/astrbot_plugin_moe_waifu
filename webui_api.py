@@ -5583,17 +5583,24 @@ def _avatar_runner(plugin):
     return r
 
 
-def _avatar_batch_plan(plugin) -> dict:
-    """批量头像候选计划（v0.49.0）。
+def _avatar_batch_plan(plugin, overwrite=None) -> dict:
+    """批量头像候选计划（v0.49.0 / v0.50.1）。
 
     用户口径（v0.49.0）：批量头像 = 以角色的**图生图参考图**为基准生成头像
     特写，产物直接覆盖原头像（不再二次确认）；**没有参考图的角色一律跳过**，
     不再像旧版那样回落文生图（批量重画容易把角色画歪，用户明确要求跳过）。
 
+    v0.50.1：`overwrite` 为 None 时读配置 `avatar_batch_overwrite`（默认开）。
+    关掉后**已有头像的角色也跳过**（只补空缺），跳过的分两拨返回，前端统计
+    能清楚看出「因已有头像跳过」和「因无参考图跳过」各多少。
+
     返回 {"total", "targets": [{"entry", "has_avatar"}], "skipped": [entry],
-          "overwrite"}；`overwrite` = targets 里已有可用头像文件的人数。
+          "skipped_avatar": [entry], "overwrite", "overwrite_cfg"}；
+    `overwrite` = targets 里已有可用头像文件的人数。
     """
     data_dir = str(plugin._data_dir or "")
+    if overwrite is None:
+        overwrite = bool(plugin._cfg("avatar_batch_overwrite", True))
     seen = set()
     entries = []
     for pack in pool.load_packs(_pools_dir(plugin), logger):
@@ -5610,8 +5617,14 @@ def _avatar_batch_plan(plugin) -> dict:
     for t in targets:
         t["has_avatar"] = _safe_data_file(
             plugin, t["entry"].get("avatar")) is not None
+    skipped_avatar = []
+    if not overwrite:
+        skipped_avatar = [t["entry"] for t in targets if t["has_avatar"]]
+        targets = [t for t in targets if not t["has_avatar"]]
     return {"total": len(entries), "targets": targets, "skipped": skipped,
-            "overwrite": sum(1 for t in targets if t["has_avatar"])}
+            "skipped_avatar": skipped_avatar,
+            "overwrite": sum(1 for t in targets if t["has_avatar"]),
+            "overwrite_cfg": bool(overwrite)}
 
 
 def _avatar_batch_preview(plan: dict, limit: int = 300) -> dict:
@@ -5629,48 +5642,63 @@ def _avatar_batch_preview(plan: dict, limit: int = 300) -> dict:
         "has_avatar": bool(t["has_avatar"]),
     } for t in plan["targets"]]
     skipped = [label(e) for e in plan["skipped"]]
+    skipped_av = [label(e) for e in (plan.get("skipped_avatar") or [])]
     return {
         "total": int(plan["total"]),
         "with_refs": len(items),
         "overwrite": int(plan["overwrite"]),
+        "overwrite_cfg": bool(plan.get("overwrite_cfg", True)),
         "skipped": len(skipped),
         "skipped_text": "、".join(skipped[:20]) + ("…" if len(skipped) > 20 else ""),
+        "skipped_avatar": len(skipped_av),
+        "skipped_avatar_text": ("、".join(skipped_av[:20])
+                               + ("…" if len(skipped_av) > 20 else "")),
         "items": items[:limit],
         "truncated": len(items) > limit,
     }
 
 
 async def h_avatars_batch_preview(plugin) -> dict:
-    """批量头像预览（v0.49.0）：将生成 / 覆盖 / 跳过（无参考图）/ 总角色数。"""
-    return ok(_avatar_batch_preview(_avatar_batch_plan(plugin)))
+    """批量头像预览（v0.49.0 / v0.50.1）：将生成 / 覆盖 / 两类跳过 / 总角色数。
+
+    body 可选 `overwrite`（bool）：不带则用配置 `avatar_batch_overwrite`；
+    预览弹窗里按次勾选时前端会显式带上。
+    """
+    body = await _body()
+    ov = body.get("overwrite")
+    plan = _avatar_batch_plan(plugin, None if ov is None else bool(ov))
+    return ok(_avatar_batch_preview(plan))
 
 
 async def h_avatars_batch(plugin) -> dict:
-    """批量生成头像：串行后台队列，**覆盖**原头像，无参考图的角色跳过。
+    """批量生成头像：串行后台队列，无参考图的角色跳过。
 
-    body（都可选）：`ids` 限定角色子集；`overwrite=false` 退回旧语义（只补
-    没有头像的角色）；`workflow` 指定萌绘工作流。前端默认不带 ids/overwrite。
+    body（都可选）：`ids` 限定角色子集；`overwrite` 覆盖已有头像与否
+    （不带则用配置 `avatar_batch_overwrite`，默认覆盖）；`workflow` 指定工作流。
     """
     body = await _body()
     workflow = str(body.get("workflow") or "").strip()
     ids = body.get("ids")
     id_sel = ({str(x).strip() for x in ids if str(x or "").strip()}
               if isinstance(ids, list) else set())
-    overwrite = body.get("overwrite", True) is not False
-    plan = _avatar_batch_plan(plugin)
+    ov = body.get("overwrite")
+    plan = _avatar_batch_plan(plugin, None if ov is None else bool(ov))
     targets = [t for t in plan["targets"]
                if not id_sel or str(t["entry"].get("id")) in id_sel]
-    if not overwrite:
-        targets = [t for t in targets if not t["has_avatar"]]
     entries = [t["entry"] for t in targets]
     if not entries:
         if not plan["targets"]:
-            note = ("没有可生成的角色：批量头像只处理有参考图的角色，"
-                    "没有参考图的会跳过（先去「参考图」给角色上传并设为生成源）")
+            if plan["skipped_avatar"]:
+                note = ("批次里没有需要生成的角色：已有头像的都跳过了"
+                        "（想重画就勾上「覆盖已有头像」）")
+            else:
+                note = ("没有可生成的角色：批量头像只处理有参考图的角色，"
+                        "没有参考图的会跳过（先去「参考图」给角色上传并设为生成源）")
         else:
             note = "筛选后没有需要生成的角色"
         return ok({"total": 0, "note": note,
                    "skipped": len(plan["skipped"]),
+                   "skipped_avatar": len(plan["skipped_avatar"]),
                    "with_refs": len(plan["targets"])})
     over = sum(1 for t in targets if t["has_avatar"])
     n = _avatar_runner(plugin).start(plugin, entries, workflow=workflow,
@@ -5679,6 +5707,7 @@ async def h_avatars_batch(plugin) -> dict:
         return err("批量头像已在运行中")
     return ok({"total": n, "overwrite": over,
                "skipped": len(plan["skipped"]),
+               "skipped_avatar": len(plan["skipped_avatar"]),
                "with_refs": len(plan["targets"])})
 
 

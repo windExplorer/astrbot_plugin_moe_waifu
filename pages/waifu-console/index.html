@@ -3598,21 +3598,32 @@
       </div>
     </n-modal>
 
-    <!-- ============ 批量头像预览弹窗（v0.49.0）：统计 + 清单 + 跳过无参考图。
+    <!-- ============ 批量头像预览弹窗（v0.49.0 / v0.50.1）：统计 + 清单 + 覆盖开关。
          容器用 div.stack（带 v-if 的兄弟节点不能放 n-space：槽 key 全 1 会错位补丁） ============ -->
     <n-modal v-model:show="galAvPreviewOpen" preset="dialog" title="批量头像 · 预览"
              style="width: 560px;">
       <div class="stack">
         <div class="bind-tip">
           以角色的图生图参考图为基准生成头像特写（与「AI 生成头像 → 图生图」同一口径）；
-          产物<b>直接覆盖</b>原头像，保存即生效，不再二次确认。
-          没有可用参考图的角色会跳过（批量头像不做文生图重画）。
+          生成即生效、不再二次确认。没有可用参考图的角色会跳过（批量头像不做文生图重画）。
+        </div>
+        <!-- v0.50.1：覆盖与否按次勾选（默认值来自配置 avatar_batch_overwrite） -->
+        <div class="av-pv-ops">
+          <n-switch :value="galAvOverwrite" size="small"
+                    @update:value="setAvOverwrite"></n-switch>
+          <span style="font-size: 13px;">覆盖已有头像</span>
+          <span class="bind-tip" style="margin-top: 0;">
+            {{ galAvOverwrite ? "重画有参考图的全部角色，原头像被替换" : "只补还没有头像的角色，已有的跳过" }}
+          </span>
         </div>
         <div class="av-pv-stats" v-if="galAvPreview">
           <div class="av-pv-stat"><b>{{ galAvPreview.with_refs }}</b><span>将生成</span></div>
           <div class="av-pv-stat"><b>{{ galAvPreview.overwrite }}</b><span>覆盖已有头像</span></div>
           <div class="av-pv-stat hot" v-if="galAvPreview.skipped > 0">
             <b>{{ galAvPreview.skipped }}</b><span>跳过（无参考图）</span>
+          </div>
+          <div class="av-pv-stat hot" v-if="galAvPreview.skipped_avatar > 0">
+            <b>{{ galAvPreview.skipped_avatar }}</b><span>跳过（已有头像）</span>
           </div>
           <div class="av-pv-stat"><b>{{ galAvPreview.total }}</b><span>角色总数</span></div>
         </div>
@@ -3635,7 +3646,10 @@
           没有可生成的角色：角色库为空，或所有角色都还没有参考图。
         </div>
         <div class="bind-tip" v-if="galAvPreview && galAvPreview.skipped_text">
-          跳过：{{ galAvPreview.skipped_text }}
+          跳过（无参考图）：{{ galAvPreview.skipped_text }}
+        </div>
+        <div class="bind-tip" v-if="galAvPreview && galAvPreview.skipped_avatar_text">
+          跳过（已有头像）：{{ galAvPreview.skipped_avatar_text }}
         </div>
         <div class="bind-tip" v-if="galAvPreview && galAvPreview.truncated">
           清单只列前 {{ galAvPreview.items.length }} 个角色，实跑按上面统计数字执行。
@@ -7877,6 +7891,9 @@
       var galAvPreviewOpen = Vue.ref(false);
       var galAvPreview = Vue.ref(null);
       var galAvPreviewLoading = Vue.ref(false);
+      // v0.50.1：是否覆盖已有头像（默认值来自配置 avatar_batch_overwrite，
+      // 首次预览由后端 overwrite_cfg 带回；勾选后按次生效，不写回配置）
+      var galAvOverwrite = Vue.ref(true);
       // v0.49.0：角色库「头像墙」缩略（id → data URL），懒加载，不进 /pools
       var avatarThumbs = Vue.ref({});
       var avatarThumbsLoaded = Vue.ref(false);
@@ -7923,16 +7940,26 @@
         }
         galAvPreviewOpen.value = true;
         galAvPreview.value = null;
-        loadAvatarBatchPreview();
+        loadAvatarBatchPreview(false);
       }
-      async function loadAvatarBatchPreview() {
+      async function loadAvatarBatchPreview(explicit) {
         galAvPreviewLoading.value = true;
         try {
-          var res = await apiPost("avatars/batch_preview", {});
+          // explicit=false：不带 overwrite，让后端按配置算（并回传 overwrite_cfg
+          // 给开关做初始值）；explicit=true：用弹窗里勾选的值重新统计
+          var body = explicit ? { overwrite: !!galAvOverwrite.value } : {};
+          var res = await apiPost("avatars/batch_preview", body);
+          if (res && !explicit) {
+            galAvOverwrite.value = res.overwrite_cfg !== false;
+          }
           galAvPreview.value = res || null;
         } catch (e) { /* 已提示 */ } finally {
           galAvPreviewLoading.value = false;
         }
+      }
+      function setAvOverwrite(v) {
+        galAvOverwrite.value = !!v;
+        loadAvatarBatchPreview(true);
       }
       Vue.watch(galSummary, function (s) {
         // 保守同步：summary 带缩略才更新；「明确无头像」才清空——job 侧刚拿到
@@ -8058,16 +8085,17 @@
       });
       async function startAvatarBatch() {
         try {
-          // v0.49.0：默认覆盖原头像、只收有参考图的角色（后端同口径）
-          var res = await apiPost("avatars/batch", {});
+          // v0.49.0：只收有参考图的角色；v0.50.1：覆盖与否按弹窗开关下发
+          var res = await apiPost("avatars/batch", { overwrite: !!galAvOverwrite.value });
           var total = (res && res.total) || 0;
           if (!total) {
             message.info((res && res.note) || "没有可生成头像的角色（需要参考图）");
             return;
           }
-          if (res && res.skipped) {
-            message.info("已跳过 " + res.skipped + " 个没有参考图的角色");
-          }
+          var skips = [];
+          if (res && res.skipped) { skips.push("无参考图 " + res.skipped); }
+          if (res && res.skipped_avatar) { skips.push("已有头像 " + res.skipped_avatar); }
+          if (skips.length) { message.info("已跳过：" + skips.join(" · ")); }
           galAvPreviewOpen.value = false;
           galAvBatch.value = null;
           galAvBatchOpen.value = true;
@@ -9762,7 +9790,7 @@
         { title: "萌绘生图", keys: ["gen_source_mode", "img2img_prob", "artist_draw_enabled", "draw_workflow", "img2img_workflow",
                                     "draw_width", "draw_height", "draw_timeout", "img2img_denoise",
                                     "draw_negative_enabled", "draw_negative_prompt", "announce_enabled",
-                                    "batch_require_ref"] },
+                                    "batch_require_ref", "avatar_batch_overwrite"] },
         { title: "提示词与变化", keys: ["prompt_llm_enabled", "prompt_llm_provider",
                                         "prompt_llm_timeout", "variations_enabled"] }
       ];
@@ -10234,6 +10262,7 @@
         // v0.49.0：批量头像预览 + 头像墙缩略
         galAvPreviewOpen: galAvPreviewOpen, galAvPreview: galAvPreview,
         galAvPreviewLoading: galAvPreviewLoading,
+        galAvOverwrite: galAvOverwrite, setAvOverwrite: setAvOverwrite,
         openAvatarBatchPreview: openAvatarBatchPreview,
         avatarThumbs: avatarThumbs, avatarThumbsLoading: avatarThumbsLoading,
         // v0.50.0：头像 / 角色缩略点开看大图

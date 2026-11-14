@@ -2,6 +2,25 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.50.1 (2026-11-15)
+
+- **批量头像加「已有头像不覆盖」开关**（用户：「批量头像 能不能加个配置，已经有头像就不覆盖了」）。
+  - 新配置 `avatar_batch_overwrite`（bool，默认**开**，在「配置 → 萌绘生图」里）：
+    关闭后批量头像只补「还没有头像」的角色，已有头像的一律跳过；开启则维持 v0.49.0
+    的覆盖语义。
+  - 预览弹窗顶部加**按次勾选**的「覆盖已有头像」开关，初始值取上面的配置
+    （后端 `batch_preview` 回传 `overwrite_cfg`），勾/去勾会立即重新统计——只影响
+    这一次，不写回配置。`POST /avatars/batch` 也随之接收 `overwrite`。
+  - 预览统计拆成两拨跳过：**跳过（无参考图）** 与 **跳过（已有头像）**，清单与底部
+    两行跳过文本分开列，避免「关闭覆盖后 0 张」看起来像统计出错。
+  - 后端 `_avatar_batch_plan(plugin, overwrite=None)`：`None` = 读配置，
+    `skipped_avatar` 单独返回；`h_avatars_batch` 的提示文案同步（「想重画就勾上
+    覆盖已有头像」）。
+  - 守卫：`test_profile_avatar` 新增 3 项（关闭覆盖后的 `skipped_avatar` 统计、
+    `webui_api` 真的读配置、schema 默认值）；`test_template_structure` 新增 1 项
+    （预览弹窗有覆盖开关）；`test_webui_contract` 契约清单补登 `galAvOverwrite` /
+    `setAvOverwrite`（schema 键同时登记进 CONFIG_SECTIONS，否则配置页看不见）。
+
 ## v0.50.0 (2026-11-15)
 
 - **调试工具「状态与修签」：查询历史卡片下线，改成按钮右侧的最近 QQ 标签**（用户：「状态标签里的
