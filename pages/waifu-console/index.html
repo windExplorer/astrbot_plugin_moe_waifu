@@ -7381,6 +7381,33 @@
             "只写资料：strategy（参考图 / 画法）、cover、avatar、verified、added_at 一概不碰。",
             "预览里的「写入 / 覆盖 / 跳过」是按当前开关实时算的，改开关立刻变；改完不用重新解析。"
           ]
+        },
+        {
+          key: "draw_rules",
+          title: "抽卡规则与概率",
+          intro: "角色基础概率完全相等；只有「这个人最近抽到过的角色」会被降权——只是更容易换人，不会彻底抽不到。同一个角色再次抽到时，立绘按「你没见过的」顺序轮着出，全部看过才开始新一轮。",
+          where: "可调项：配置页 →「抽卡规则」（draw_recency 降权强度 / prefer_unused_portrait 库存优先）。",
+          fields: [
+            { name: "基础概率", type: "权重 1", required: false,
+              desc: "每位角色权重都是 1，按权重占比抽取（145 位即各约 0.69%），没有任何隐藏加成；候选里同名 id 已去重，不会有人概率翻倍。" },
+            { name: "近期重复降权", type: "权重", required: false,
+              desc: "今天（换老婆时的上一签）×0.15；1 天前 ×0.25；2 天前 ×0.4；3~4 天 ×0.55；5~7 天 ×0.75；更早或没抽过 ×1.0。" },
+            { name: "实际效果", type: "—", required: false,
+              desc: "100 个候选时：昨天抽到过的那位从 1% 降到约 0.25%；「7 天内没抽过的角色」总概率从约 93% 提到约 97%。连续两天同一个人的概率降约 75%。" },
+            { name: "立绘轮回", type: "—", required: false,
+              desc: "按「用户 × 角色」记录用过的图：优先出这个用户没见过的；一轮全部出过后清空重来，新一轮第一张不会立刻撞上一轮最后一张（池里只有 1 张时无从避免）。" },
+            { name: "库存优先", type: "开关", required: false,
+              desc: "prefer_unused_portrait 开启时，还有没见过的库存图就直接取（省算力 + 保证不重复），整轮看完才画新图；关掉则按原配额规则（未满就现画）。图生图重绘始终现画。" },
+            { name: "不会锁死", type: "—", required: false,
+              desc: "降权后权重仍大于 0，任何角色都抽得到；长期统计里每个角色的频率趋同，不存在被永久压制的角色。" },
+            { name: "清签 / 重置", type: "—", required: false,
+              desc: "「调试工具 → 清签」会删掉该用户的抽签流水：角色降权历史与立绘轮回一并重置（等于当没抽过）。" }
+          ],
+          notes: [
+            "确定性：同一用户 + 同一天 + 同一 nonce 结果恒定（历史只取这一签之前的），所以工坊「模拟抽签 / 卡片调试」与真机完全一致。",
+            "「今日同款」只统计角色，与用哪张立绘无关：同一个角色换不同图不算不同款。",
+            "draw_recency = 0 回到纯等概率；= 200 时上表取平方（昨天那位 ×0.0625），= 50 时取开方（更温和）。"
+          ]
         }
       ];
 
@@ -9505,6 +9532,8 @@
                                 "allow_unverified", "ui_grid_cols", "disabled_groups"] },
         // v0.47.2：卡面外观（v0.47.0 加了这两个键却没登记分区 → 配置页里根本看不到）
         { title: "卡面", keys: ["card_scrim", "card_seal_pos"] },
+        // v0.48.0：抽卡公平性（避开最近抽到的角色 / 立绘按用户遍历）
+        { title: "抽卡规则", keys: ["draw_recency", "prefer_unused_portrait"] },
         { title: "萌绘生图", keys: ["gen_source_mode", "img2img_prob", "artist_draw_enabled", "draw_workflow", "img2img_workflow",
                                     "draw_width", "draw_height", "draw_timeout", "img2img_denoise",
                                     "draw_negative_enabled", "draw_negative_prompt", "announce_enabled",

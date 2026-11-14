@@ -387,6 +387,23 @@ class Store:
         ).fetchone()
         return dict(row) if row else None
 
+    def draw_history(self, user_id: str) -> list:
+        """该用户的抽签流水（**旧 → 新**），v0.48.0 只读。
+
+        返回 [{date, char_id, nonce, portrait_file}]。用途两个：
+        ① 抽卡时给「最近抽到过的角色」降权（`pool.recency_weights`）；
+        ② 立绘按用户遍历（`pool.portrait_cycle_pick`，避开这个人用过的图）。
+
+        为什么读 `draw_events` 而不是 `draws`：`draws` 每人每天只留最后一行
+        （换老婆会原地覆盖），看不出「今天之前抽过谁、用过哪张图」；流水是只追加的。
+        走已有索引 `idx_draw_events_user_date(user_id, date, id)`。
+        """
+        rows = self._conn.execute(
+            "SELECT date, char_id, nonce, portrait_file FROM draw_events"
+            " WHERE user_id=? ORDER BY id ASC", (str(user_id),)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def upsert_draw(
         self, user_id: str, date: str, char_id: str, nonce: int, rerolled: bool,
         nickname: str = "", group_id: str = "", group_name: str = "",

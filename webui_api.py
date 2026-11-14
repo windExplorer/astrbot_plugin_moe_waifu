@@ -3836,6 +3836,45 @@ def _debug_state_core(plugin, uid: str) -> dict:
     }
 
 
+def _draw_history_rows(plugin, uid: str, date: str = "", nonce: int = 0) -> list:
+    """抽签流水（旧→新），排除当前这一签；读不到就按「没有历史」处理。
+
+    抽卡（加权避开最近抽到的角色）与立绘轮回都吃这一份；模拟抽签也必须用同一份，
+    否则「预览会抽到谁」和真机结果不一致。
+    """
+    try:
+        rows = plugin._store.draw_history(uid)
+    except Exception:
+        logger.warning(f"[{PLUGIN_NAME}] 读取抽签流水失败（按无历史处理）\n"
+                       f"{traceback.format_exc()}")
+        return []
+    if not date:
+        return rows
+    out = []
+    for r in rows:
+        if str(r.get("date") or "") == date and int(r.get("nonce") or 0) >= int(nonce):
+            continue
+        out.append(r)
+    return out
+
+
+def _recency_strength(plugin) -> float:
+    """`draw_recency` 配置（百分比）→ 0.0~2.0 的惩罚强度（0 = 关闭）。"""
+    try:
+        pct = float(plugin._cfg("draw_recency", 100) or 0)
+    except (TypeError, ValueError):
+        pct = 0.0
+    return max(0.0, min(2.0, pct / 100.0))
+
+
+def _used_portrait_files(plugin, uid: str, char_id: str, date: str = "",
+                         nonce: int = 0) -> list:
+    """该用户在这个角色上已经抽到过的立绘文件（旧→新）。"""
+    return [str(r.get("portrait_file") or "")
+            for r in _draw_history_rows(plugin, uid, date, nonce)
+            if str(r.get("char_id") or "") == char_id and r.get("portrait_file")]
+
+
 def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
                          salt: str, group_id: str) -> dict:
     """只读模拟抽签（dry-run）：不写库、不生图、不发消息。
@@ -3865,8 +3904,15 @@ def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
                 "note": "只读预览不会写库；把角色卷启用或标为 verified 后再试"}
     seed = pool.derive_seed(date, uid, salt, nonce,
                             plugin._store.get_epoch(uid) if plugin._store else 0)
-    index = pool.sub_int(seed, "char", len(candidates))
-    entry = candidates[index]
+    # v0.48.0：与真机同口径——等概率基线 + 近期重复降权（draw_recency）
+    strength = _recency_strength(plugin)
+    weights = None
+    if strength > 0:
+        hist = [(r.get("date"), r.get("char_id"))
+                for r in _draw_history_rows(plugin, uid, date, nonce)]
+        weights = pool.recency_weights(candidates, hist, date, strength)
+    entry = pool.pick_character_weighted(seed, candidates, weights)
+    index = candidates.index(entry) if entry in candidates else 0
     s = plugin._store
     today_row = s.portrait_by_date(entry["id"], date)
     pool_size = s.count_portraits(entry["id"])
@@ -3888,12 +3934,24 @@ def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
                                           has_src, i2i_prob, roll,
                                           today_portrait=bool(today_row))
     pick = None
+    # v0.48.0：与真机同口径——有「这人没抽到过」的库存图时优先取库存
+    prefer_note = ""
+    pool_rows = s.list_portraits(entry["id"]) or []
+    pool_files = [str(r["file"]) for r in pool_rows]
+    used = _used_portrait_files(plugin, uid, entry["id"], date, nonce)
+    unused = [f for f in pool_files if f not in set(used)]
+    if (decision == "generate"
+            and bool(plugin._cfg("prefer_unused_portrait", True)) and unused):
+        decision = "from_pool"
+        prefer_note = f"；优先用没抽到过的库存立绘（还剩 {len(unused)} 张没抽到过）"
     if decision == "reuse_today":
         pick = {"file": today_row["file"] if today_row else "", "index": None}
     elif decision == "from_pool":
-        rows = s.list_portraits(entry["id"])
-        pidx = pool.pool_index(entry["id"], date, pool_size, salt) % len(rows) if rows else 0
-        pick = {"file": rows[pidx]["file"] if rows else "", "index": pidx}
+        rel, used_n, new_round = pool.portrait_cycle_pick(pool_files, used, seed)
+        pidx = pool_files.index(rel) if rel in pool_files else None
+        pick = {"file": rel, "index": pidx, "used": used_n, "new_round": new_round}
+    if prefer_note:
+        decision_note += prefer_note
     current = s.get_draw(uid, date)
     return {
         "ok": True, "readonly": True,
@@ -4180,15 +4238,16 @@ def _card_debug_rows(plugin, char_id: str) -> list:
 
 
 def _card_debug_src(rows: list, pick: str, char_id: str, date: str,
-                    salt: str) -> tuple:
+                    salt: str, seed: bytes = None, used=None) -> tuple:
     """按 pick 选一张立绘 → (相对路径, 序号)。
 
-    auto = 按种子取（`pool.pool_index`，与真实「库存取图」同一口径，换日期/种子
-    就会换图，调试时能看出库里的图是不是都好看）；其余是人工指定。
+    auto = 与真机同口径（v0.48.0：`portrait_cycle_pick` 在这个用户没用过的图里挑）；
+    其余是人工指定（latest / first / index:N）。
     """
     if not rows:
         return "", None
     pick = str(pick or "auto").strip()
+    files = [str(r["file"]) for r in rows]
     if pick.startswith("index:"):
         try:
             idx = int(pick.split(":", 1)[1])
@@ -4199,6 +4258,9 @@ def _card_debug_src(rows: list, pick: str, char_id: str, date: str,
         idx = 0
     elif pick == "latest":
         idx = len(rows) - 1
+    elif seed is not None:
+        rel, _n, _nr = pool.portrait_cycle_pick(files, used or [], seed)
+        return rel, (files.index(rel) if rel in files else None)
     else:
         idx = pool.pool_index(char_id, date, len(rows), salt) % len(rows)
     return str(rows[idx]["file"]), idx
@@ -4258,9 +4320,12 @@ def _card_debug_core(plugin, body: dict) -> dict:
                               "或改用随机抽（会自动跳过没立绘的角色）",
                     "note": "卡片必须有一张立绘才渲染（PRD 铁律：不存在无图版式）"}
         seed_bytes = pool.derive_seed(date, uid, salt, nonce, epoch)
-        src_rel, src_idx = _card_debug_src(rows, pick_pref, entry["id"], date, salt)
+        used = _used_portrait_files(plugin, uid, entry["id"], date, nonce)
+        src_rel, src_idx = _card_debug_src(rows, pick_pref, entry["id"], date, salt,
+                                           seed=seed_bytes, used=used)
         decision = "manual"
-        decision_note = f"指定角色调试：用第 {src_idx + 1}/{len(rows)} 张立绘"
+        decision_note = (f"指定角色调试：用第 {(src_idx or 0) + 1}/{len(rows)} 张立绘"
+                         f"（该角色已抽到过 {len(set(used))} 张）")
     else:
         candidates = pool.candidates_for(
             packs, gid, str(plugin._cfg("group_pools", "") or ""),
@@ -4269,14 +4334,22 @@ def _card_debug_core(plugin, body: dict) -> dict:
             return {"ok": False, "mode": mode,
                     "reason": "候选角色为空：检查卷是否启用、群绑定与 verified 标记"}
         tried = _CARD_DEBUG_MAX_SKIP if ensure else 1
+        strength = _recency_strength(plugin)
         for _ in range(max(1, tried)):
             seed = pool.derive_seed(date, uid, salt, nonce, epoch)
-            cand = pool.pick_character(seed, candidates)
+            weights = None
+            if strength > 0:
+                hist = [(r.get("date"), r.get("char_id"))
+                        for r in _draw_history_rows(plugin, uid, date, nonce)]
+                weights = pool.recency_weights(candidates, hist, date, strength)
+            cand = pool.pick_character_weighted(seed, candidates, weights)
             cand_rows = _card_debug_rows(plugin, cand["id"])
             if cand_rows:
                 entry, rows, seed_bytes = cand, cand_rows, seed
+                used = _used_portrait_files(plugin, uid, cand["id"], date, nonce)
                 src_rel, src_idx = _card_debug_src(cand_rows, pick_pref,
-                                                   cand["id"], date, salt)
+                                                   cand["id"], date, salt,
+                                                   seed=seed, used=used)
                 break
             skipped += 1
             nonce += 1

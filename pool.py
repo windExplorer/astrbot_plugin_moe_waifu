@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import re
@@ -78,11 +79,130 @@ def pick_quote(entry: dict, seed: bytes) -> str:
 
 
 def pool_index(char_id: str, date_str: str, pool_size: int, salt: str) -> int:
-    """满库后从立绘库取哪一张：同角色同天恒定 → 同群同款共享同一张图。"""
+    """满库后从立绘库取哪一张：同角色同天恒定 → 同群同款共享同一张图。
+
+    v0.48.0 起**抽卡主链路不再用它**（改为 `portrait_cycle_pick` 按用户遍历），
+    只留给旧调用/对照；新代码别再用，否则会出现「同一用户反复抽到同一张」。
+    """
     raw = f"pick|{char_id}|{date_str}|{salt}".encode("utf-8")
     if pool_size <= 0:
         return 0
     return int.from_bytes(hashlib.sha256(raw).digest()[:8], "big") % pool_size
+
+
+# ---------- 公平性：近期重复降权（v0.48.0） ----------
+# 角色基础概率本来就是**完全相等**的（sub_int 均匀取模、候选按 id 去重）。这里
+# 只对「这个人最近抽到过的角色」打折：越近打得越狠，但**权重恒 > 0**——用户明确
+# 要求「增大抽到不一样的概率」，不是完全避免（不会有人被永久挡住）。
+# 长期看这是负反馈：谁都可能被压一档，但被压的人下一次更容易换人。
+RECENT_PENALTY = ((0, 0.15), (1, 0.25), (2, 0.40), (4, 0.55), (7, 0.75))
+_RECENT_FALLBACK = 1.0
+
+
+def _iso_date(value):
+    try:
+        return datetime.date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def recency_weight(days, strength: float = 1.0) -> float:
+    """距今 `days` 天抽到过的角色权重系数。
+
+    strength 是幂指数（配置 `draw_recency` / 100）：
+      0 → 恒 1.0（等同关闭）；1 → 上表原值；2 → 表值平方（更狠，昨天那位 ×0.0625）。
+    用幂而不是线性，是因为线性在 strength>1 时会越过 0 变负、语义反转。
+    """
+    if days is None:
+        return 1.0
+    w = _RECENT_FALLBACK
+    for limit, weight in RECENT_PENALTY:
+        if days <= limit:
+            w = weight
+            break
+    k = max(0.0, min(2.0, float(strength)))
+    if k <= 0:
+        return 1.0
+    return max(1e-6, w ** k)
+
+
+def recency_weights(candidates: list, history, today: str,
+                    strength: float = 1.0) -> list:
+    """候选权重表。history 为可迭代的 `(date, char_id)`，顺序无所谓。
+
+    同一角色出现多次取**最近一次**（天差最小）；未来日期（脏数据）不参与。
+    """
+    base = _iso_date(today)
+    recent: dict = {}
+    if base is not None:
+        for item in history or []:
+            try:
+                d, cid = item[0], item[1]
+            except (TypeError, IndexError, KeyError):
+                continue
+            cid = str(cid or "")
+            day = _iso_date(d)
+            if not cid or day is None:
+                continue
+            gap = (base - day).days
+            if gap < 0:
+                continue
+            if cid not in recent or gap < recent[cid]:
+                recent[cid] = gap
+    return [recency_weight(recent.get(str(c.get("id") or "")), strength)
+            for c in candidates]
+
+
+def pick_character_weighted(seed: bytes, candidates: list, weights=None) -> dict:
+    """按权重确定性选一位；weights 缺失/长度不符时退化成等概率取模。"""
+    if not candidates:
+        raise ValueError("候选角色为空，无法抽取")
+    if not weights or len(weights) != len(candidates):
+        return candidates[sub_int(seed, "char", len(candidates))]
+    # 权重换成整数（百万分之一精度）后取模：确定性、无浮点累积误差
+    ints = [max(0, int(round(float(w) * 1_000_000))) for w in weights]
+    total = sum(ints)
+    if total <= 0:
+        return candidates[sub_int(seed, "char", len(candidates))]
+    r = sub_int(seed, "charw", total)
+    acc = 0
+    for cand, w in zip(candidates, ints):
+        acc += w
+        if r < acc:
+            return cand
+    return candidates[-1]
+
+
+def portrait_cycle_pick(pool_files, used_files, seed: bytes) -> tuple:
+    """按用户遍历立绘（v0.48.0）：在「这个用户还没抽到过」的图里确定性选一张。
+
+    `used_files` 必须是**从旧到新**的历史文件列表（`store.draw_history` 的顺序）。
+    一轮走完（池里每张都出现过）就清空已用、进入下一轮；新一轮的第一张不会立刻
+    撞上一轮最后一张（池里只有 1 张时无从避免）。
+
+    返回 (文件, 本轮已用张数, 是否刚进入新一轮)；池为空返回 ("", 0, False)。
+    """
+    files = [str(f) for f in (pool_files or []) if str(f or "").strip()]
+    if not files:
+        return "", 0, False
+    pool = set(files)
+    used: set = set()
+    last = ""
+    new_round = False
+    for f in used_files or []:
+        f = str(f or "")
+        if f not in pool:
+            continue
+        used.add(f)
+        last = f
+        if len(used) >= len(pool):      # 这一轮凑齐了 → 下一张起进入新一轮
+            used, new_round = set(), True
+    remain = [f for f in files if f not in used]
+    if new_round and len(remain) > 1 and last in remain:
+        remain = [f for f in remain if f != last]
+    if not remain:
+        remain = files
+    return remain[sub_int(seed, "portrait", len(remain))], len(used), new_round
 
 
 # ---------- 群绑定 ----------

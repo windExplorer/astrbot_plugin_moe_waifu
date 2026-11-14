@@ -358,9 +358,8 @@ class MoeWaifuPlugin(Star):
                 "（pools/ 下没有启用的角色卷，或卷内角色均未 verified）")
             yield event.plain_result("抽卡失败，暂时没有可抽的角色，请稍后再试。")
             return
-        salt = str(self._cfg("salt", "moe-waifu"))
-        entry = pool.pick_character(
-            pool.derive_seed(date, uid, salt, 0, self._store.get_epoch(uid)), candidates)
+        # v0.48.0：等概率基线 + 近期重复降权（`draw_recency`），见 _pick_character
+        entry = self._pick_character(candidates, uid, date, 0)
         key = (uid, date)
         if key in self._inflight:
             yield event.plain_result("正在抽卡中，请稍后再查看。")
@@ -406,10 +405,8 @@ class MoeWaifuPlugin(Star):
             logger.warning(f"[{PLUGIN_NAME}] 重抽失败：没有可抽角色")
             yield event.plain_result("抽卡失败，暂时没有可抽的角色。")
             return
-        salt = str(self._cfg("salt", "moe-waifu"))
-        entry = pool.pick_character(
-            pool.derive_seed(date, uid, salt, used + 1, self._store.get_epoch(uid)),
-            candidates)
+        # v0.48.0：同一天更早的签也进历史（权重 ×0.15）→ 「换老婆」更容易换到别人
+        entry = self._pick_character(candidates, uid, date, used + 1)
         key = (uid, date)
         if key in self._inflight:
             yield event.plain_result("正在抽卡中，请稍后再查看。")
@@ -441,6 +438,60 @@ class MoeWaifuPlugin(Star):
             "角色库、试画、立绘维护等管理功能在 AstrBot 后台的插件页里，仅管理员可见。"
         )
 
+    # ---------- 公平性：历史（v0.48.0） ----------
+
+    def _draw_history(self, uid: str, date: str = "", nonce: int = 0) -> list:
+        """该用户的抽签流水（旧→新），排除当前这一签（同 date 且 nonce ≥ 本次）。
+
+        排除自身是为了「同一天多次计算 / 换老婆 / 工坊重渲染」结果稳定：历史只由
+        **更早的签**构成，算多少次都一样；已写库的本次签不会反过来改变自己的结果。
+        """
+        try:
+            rows = self._store.draw_history(uid)
+        except Exception:
+            logger.warning(f"[{PLUGIN_NAME}] 读取抽签流水失败（按无历史处理）\n"
+                           f"{traceback.format_exc()}")
+            return []
+        if not date:
+            return rows
+        out = []
+        for r in rows:
+            if str(r.get("date") or "") == date and int(r.get("nonce") or 0) >= int(nonce):
+                continue
+            out.append(r)
+        return out
+
+    def _pick_character(self, candidates: list, uid: str, date: str, nonce: int) -> dict:
+        """抽卡 = 等概率基线 + 近期重复降权（`draw_recency` 百分比，0 = 关闭）。
+
+        权重只跟**这个人自己的历史**有关，所以「同一天同一位」的语义不变，别人抽到
+        谁与你无关；同角色永远有权重 > 0，不会被永久挡住。
+        """
+        seed = pool.derive_seed(date, uid, str(self._cfg("salt", "moe-waifu")),
+                                nonce, self._store.get_epoch(uid))
+        try:
+            pct = float(self._cfg("draw_recency", 100) or 0)
+        except (TypeError, ValueError):
+            pct = 0.0
+        weights = None
+        if pct > 0:
+            hist = [(r.get("date"), r.get("char_id"))
+                    for r in self._draw_history(uid, date, nonce)]
+            weights = pool.recency_weights(candidates, hist, date, pct / 100.0)
+        return pool.pick_character_weighted(seed, candidates, weights)
+
+    def _portrait_cycle_state(self, uid: str, char_id: str, date: str,
+                              nonce: int) -> tuple:
+        """(该角色文件真实存在的池, 这个用户用过的文件[旧→新])。"""
+        rows = self._store.list_portraits(char_id) or []
+        files = [str(r["file"]) for r in rows
+                 if str(r.get("file") or "")
+                 and (self._data_dir / str(r["file"])).is_file()]
+        used = [str(r.get("portrait_file") or "")
+                for r in self._draw_history(uid, date, nonce)
+                if str(r.get("char_id") or "") == char_id and r.get("portrait_file")]
+        return files, used
+
     # ---------- 核心产出 ----------
 
     async def _produce(self, event: AstrMessageEvent, entry: dict, uid: str, date: str,
@@ -464,6 +515,10 @@ class MoeWaifuPlugin(Star):
         quota = max(1, int(self._cfg("portraits_per_char", 5)))
         today_row = self._store.portrait_by_date(char_id, date)
         pool_size = self._store.count_portraits(char_id)
+        # v0.48.0：立绘按「用户 × 角色」遍历——同角色重复抽到时优先换一张没用过的
+        pool_files, used_files = self._portrait_cycle_state(uid, char_id, date, nonce)
+        used_set = set(used_files)
+        unused_files = [f for f in pool_files if f not in used_set]
         # v0.9.6：种子先派生（重置轮次 epoch 一并计入），出图方式按种子规划——
         # 同一签恒定（ mix 模式下「取库存还是图生图」不随重试漂移）
         seed_bytes = pool.derive_seed(date, uid, salt, nonce, self._store.get_epoch(uid))
@@ -495,6 +550,15 @@ class MoeWaifuPlugin(Star):
         if decision == "generate_i2i" and not draw_src:
             decision = "generate"
             i2i_degraded = True
+        # v0.48.0：还有这个人没抽到过的库存图 → 优先取库存（立绘不重复，也不烧算力）。
+        # 只在「本来要文生图」时接管：图生图重绘是用户显式要新图，不抢。
+        prefer_note = ""
+        if (decision == "generate"
+                and bool(self._cfg("prefer_unused_portrait", True))
+                and unused_files):
+            decision = "from_pool"
+            prefer_note = (f"优先用没抽到过的库存立绘"
+                           f"（该角色还有 {len(unused_files)} 张你没见过）")
         if decision == "generate_i2i":
             # 把指定的出卡源注入 ref：generate_portrait 只认显式 ref，
             # 不退回参考图库随机取图；条目本身是 img2img 也强制用这一张。
@@ -515,13 +579,13 @@ class MoeWaifuPlugin(Star):
             src = self._data_dir / today_row["file"]
             rel_path = str(today_row["file"])
         elif decision == "from_pool":
-            idx = pool.pool_index(char_id, date, pool_size, salt)
-            rows = self._store.list_portraits(char_id)
-            row = rows[idx % len(rows)]
-            rel_path = str(row["file"])
-            src = self._data_dir / rel_path
-            if not src.is_file():  # 库文件被手动删了：回退为重新生成
+            # v0.48.0：在这个用户还没抽到过的图里确定性挑一张；整轮抽完自动进下一轮
+            rel_path, _used_n, _new_round = pool.portrait_cycle_pick(
+                pool_files, used_files, seed_bytes)
+            src = (self._data_dir / rel_path) if rel_path else None
+            if src is None or not src.is_file():   # 库文件被手动删了：回退为重新生成
                 src = None
+                rel_path = ""
                 decision = "generate"  # 记录真实发生的决策，别把它记成「库存复用」
                 pool_missing = True
 
@@ -598,6 +662,8 @@ class MoeWaifuPlugin(Star):
             note += "；该库存立绘文件已丢失，本次改为重新生成"
         if i2i_degraded:
             note += "；出卡源在规划后不可用，降级为按角色画法生成"
+        if prefer_note:
+            note += "；" + prefer_note
         logger.info(
             "[" + PLUGIN_NAME + "] 抽卡决策 "
             + f"{entry.get('name') or char_id}（{char_id}）uid={uid} "
