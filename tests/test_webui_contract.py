@@ -100,11 +100,14 @@ piOpen piTitle piMode piText piPlaceholder piFillSample piOnFile piParsing
 piParse piPreview piSummaryText piBadText piDimList piDims piDimsAll
 piConflict piCreate piPack piSelAll piPlanText piRows piSel piSelCount
 piResult piResultText piDoImport piBusy piFocus piOnlyFocus
+cdMode cdCharId cdPortrait cdPortraitOpts cdUid cdDate cdNonce cdGroup cdEnsure
+cdTier cdTierOpts cdSame cdTotal cdRerolled cdTagline cdQuote cdHintText
+cdBusy cdResult doCardDebug cdShuffle
 """.split()
 
 ROUTES = """
 /records /records/detail /records/events /stats /users /user /user/avatar /filters
-/debug/state /debug/history /debug/simulate /debug/rerender
+/debug/state /debug/history /debug/simulate /debug/rerender /debug/card
 /portraits/move_to_ref /refs/move_to_portrait /refs/orphans
 /refs/orphan_delete
 /portraits/restore /portraits/delete_hard
@@ -146,9 +149,14 @@ def main():
     check("后端存在 _UI_MENUS", ui_block is not None)
     back_keys = re.findall(r'"(\w+)"', ui_block.group(1)) if ui_block else []
     check("页签前后一致（页签记忆不会写入被拒）",
-          front_keys == back_keys and len(front_keys) == 12
+          front_keys == back_keys and len(front_keys) == 13
           and front_keys[0] == "overview",
           f"front={front_keys} back={back_keys}")
+    # v0.46.0：卡片调试页签（模拟抽卡直接出卡）
+    check("卡片调试页签已挂上（debug 之后）",
+          "carddbg" in front_keys
+          and front_keys.index("carddbg") == front_keys.index("debug") + 1,
+          f"front={front_keys}")
     check("四个新页签齐全",
           {"records", "stats", "users", "debug"} <= set(front_keys))
 

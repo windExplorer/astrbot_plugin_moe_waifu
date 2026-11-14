@@ -2599,6 +2599,97 @@
             </n-drawer-content>
           </n-drawer>
 
+          <!-- ============ 卡片调试（v0.46.0） ============
+               用户诉求：「找个地方做一下模拟抽卡吧，免得每次都要 qq 上输入指令然后
+               重置，直接在 webui 里弄一个，这样出卡就能很方便调试了」。
+               这里是「真出卡」：复用真实种子链路 + card.render_card，但不写抽签记录、
+               不生图、不消耗换老婆次数；产物落 data/debug_cards/（后端只留最近 24 张）。
+               ⚠️ 容器用普通 div + flex，不用 n-space：vendored Space 的固定 key 在
+               v-if 切换时会串页（v0.9.8 工坊实锤过）。 -->
+          <div v-if="menu === 'carddbg'">
+            <div class="sticky-head">
+              <div class="sec-title" style="margin: 0;">卡片调试
+                <span class="cnt">模拟抽卡 / 指定角色 → 直接出一张卡（不写库、不生图、不耗次数）</span>
+              </div>
+            </div>
+            <div style="display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;">
+              <n-card size="small" :bordered="true" style="flex: 1 1 430px; min-width: 340px;">
+                <div class="stack">
+                  <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <n-radio-group v-model:value="cdMode" size="small">
+                      <n-radio-button value="random">随机抽（真实种子链路）</n-radio-button>
+                      <n-radio-button value="char">指定角色</n-radio-button>
+                    </n-radio-group>
+                    <n-button size="small" type="primary" :loading="cdBusy" @click="doCardDebug">出卡</n-button>
+                    <n-button size="small" :disabled="cdBusy || cdMode !== 'random'" @click="cdShuffle">换一个人</n-button>
+                  </div>
+
+                  <div v-if="cdMode === 'char'" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <n-select v-model:value="cdCharId" :options="charOpts" filterable clearable
+                              placeholder="选角色（括号里是作品）" style="width: 300px;"></n-select>
+                    <n-select v-model:value="cdPortrait" :options="cdPortraitOpts" size="small"
+                              style="width: 220px;"></n-select>
+                  </div>
+                  <div v-else style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <n-input v-model:value="cdUid" size="small" placeholder="用户 ID（决定抽到谁）"
+                             style="width: 170px;"></n-input>
+                    <n-input v-model:value="cdDate" size="small" placeholder="日期（空=今天）"
+                             style="width: 150px;"></n-input>
+                    <n-input-number v-model:value="cdNonce" size="small" :min="0" :max="9999"
+                                    placeholder="nonce" style="width: 110px;"></n-input-number>
+                    <n-input v-model:value="cdGroup" size="small" placeholder="群号（空=全部卷）"
+                             style="width: 150px;"></n-input>
+                    <n-checkbox v-model:checked="cdEnsure">跳过没立绘的角色</n-checkbox>
+                  </div>
+
+                  <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <n-select v-model:value="cdTier" :options="cdTierOpts" size="small"
+                              style="width: 170px;"></n-select>
+                    <n-input-number v-model:value="cdSame" size="small" :min="1" :max="999"
+                                    style="width: 120px;"></n-input-number>
+                    <span class="bind-tip" style="margin: 0;">同款人数</span>
+                    <n-input-number v-model:value="cdTotal" size="small" :min="1" :max="999"
+                                    style="width: 120px;"></n-input-number>
+                    <span class="bind-tip" style="margin: 0;">总次数</span>
+                    <n-checkbox v-model:checked="cdRerolled">显示「重抽」标</n-checkbox>
+                  </div>
+
+                  <n-input v-model:value="cdTagline" size="small" clearable
+                           placeholder="一句话简介覆盖（空 = 用角色资料的 tagline / bio）"></n-input>
+                  <n-input v-model:value="cdQuote" type="textarea" size="small"
+                           :autosize="{ minRows: 1, maxRows: 3 }" clearable
+                           placeholder="印象语覆盖（空 = 按种子从印象语池选，与真实抽卡一致）"></n-input>
+
+                  <div class="bind-tip" style="margin-top: 0;">{{ cdHintText }}</div>
+
+                  <div v-if="cdResult && cdResult.ok" class="rec-note" style="margin-top: 0;">
+                    抽到 <b>{{ cdResult.char.char_name }}</b>（{{ cdResult.char.char_id }}）·
+                    {{ cdResult.portrait.file }}
+                    <template v-if="cdResult.portrait.index !== null && cdResult.portrait.index !== undefined">
+                      · 第 {{ cdResult.portrait.index + 1 }}/{{ cdResult.portrait.count }} 张
+                    </template>
+                    <template v-if="cdResult.skipped"> · 跳过 {{ cdResult.skipped }} 位没立绘的角色</template>
+                    <br />
+                    {{ cdResult.decision_note }}
+                  </div>
+                </div>
+              </n-card>
+
+              <div style="width: 320px; flex: none;">
+                <n-card v-if="cdResult && cdResult.ok && cdResult.preview" size="small" :bordered="true"
+                        :title="'预览 · ' + cdResult.char.char_name">
+                  <img :src="cdResult.preview" @click="openViewer(cdResult.card_path, '卡片原图')"
+                       style="width: 100%; display: block; border-radius: 12px; cursor: zoom-in;" />
+                  <div class="bind-tip" style="margin-bottom: 0;">点图看原图（700×1200 PNG）</div>
+                </n-card>
+                <n-card v-else size="small" :bordered="true" title="预览">
+                  <n-empty size="small"
+                           :description="(cdResult && cdResult.reason) ? cdResult.reason : '点「出卡」渲染一张'"></n-empty>
+                </n-card>
+              </div>
+            </div>
+          </div>
+
           <!-- ============ 分群绑定 ============
                v0.13.2：结构化编辑（群号 + 卷多选），进入页签自动拉当前绑定——
                旧版文本框永远空开（后端 GET /group_pools 没人调），空文本「保存」
@@ -4423,6 +4514,7 @@
         { label: "数据统计", key: "stats" },
         { label: "用户查询", key: "users" },
         { label: "调试工具", key: "debug" },
+        { label: "卡片调试", key: "carddbg" },
         { label: "分群绑定", key: "bind" },
         { label: "素材库", key: "presets" },
         { label: "帮助", key: "help" },
@@ -8859,6 +8951,90 @@
                                    "dbg:clrport");
       }
 
+      // ---- 卡片调试（v0.46.0）：网页里模拟抽卡 → 直接出卡 ----
+      // 复用真实种子链路（derive_seed → candidates_for → pick_character）与
+      // card.render_card，但不写抽签记录、不生图、不消耗换老婆次数；
+      // 产物落 data/debug_cards/（后端只留最近 24 张）。
+      var cdMode = Vue.ref("random");
+      var cdCharId = Vue.ref("");
+      var cdPortrait = Vue.ref("auto");
+      var cdUid = Vue.ref("10000");
+      var cdDate = Vue.ref("");
+      var cdNonce = Vue.ref(0);
+      var cdGroup = Vue.ref("");
+      var cdEnsure = Vue.ref(true);
+      var cdTier = Vue.ref("");
+      var cdTagline = Vue.ref("");
+      var cdQuote = Vue.ref("");
+      var cdSame = Vue.ref(1);
+      var cdTotal = Vue.ref(1);
+      var cdRerolled = Vue.ref(false);
+      var cdBusy = Vue.ref(false);
+      var cdResult = Vue.ref(null);
+      var cdTierOpts = [
+        { label: "档位（跟随角色）", value: "" },
+        { label: "S", value: "S" }, { label: "A", value: "A" },
+        { label: "B", value: "B" }, { label: "C", value: "C" },
+        { label: "D", value: "D" }
+      ];
+      // 指定角色时列出立绘序号（张数用 /pools 的 counts，不额外请求）
+      var cdPortraitOpts = Vue.computed(function () {
+        var n = Number((meta.value.counts || {})[cdCharId.value] || 0);
+        var opts = [
+          { label: "按种子取图（同真实抽卡）", value: "auto" },
+          { label: "最新一张", value: "latest" },
+          { label: "第一张", value: "first" }
+        ];
+        for (var i = 0; i < n; i++) {
+          opts.push({ label: "第 " + (i + 1) + " 张", value: "index:" + i });
+        }
+        return opts;
+      });
+      var cdHintText = Vue.computed(function () {
+        if (cdMode.value === "char") {
+          return "指定角色模式：档位 / 简介 / 印象语只是临时覆盖，改完不写回角色库。";
+        }
+        return "随机抽与 /今日老婆 同一条种子链路：用户 ID + 日期 + nonce 决定抽到谁，"
+          + "改 nonce 就等于「换老婆」的结果。";
+      });
+      function cdShuffle() {
+        // 换一个用户 ID = 换个人抽，比反复点「换老婆」直观
+        cdUid.value = String(10000 + Math.floor(Math.random() * 89999));
+        cdNonce.value = 0;
+        doCardDebug();
+      }
+      async function doCardDebug() {
+        if (cdBusy.value) return;
+        if (cdMode.value === "char" && !cdCharId.value) {
+          message.warning("先选一个角色");
+          return;
+        }
+        cdBusy.value = true;
+        try {
+          var res = await apiPost("debug/card", {
+            mode: cdMode.value,
+            char_id: cdMode.value === "char" ? cdCharId.value : "",
+            portrait: cdPortrait.value || "auto",
+            user_id: cdUid.value || "",
+            date: cdDate.value || "",
+            nonce: Number(cdNonce.value || 0),
+            group_id: cdGroup.value || "",
+            ensure_portrait: !!cdEnsure.value,
+            tier: cdTier.value || "",
+            tagline: cdTagline.value || "",
+            quote: cdQuote.value || "",
+            same_count: Number(cdSame.value || 1),
+            total_count: Number(cdTotal.value || 1),
+            rerolled: !!cdRerolled.value
+          });
+          cdResult.value = res || null;
+          if (res && res.ok) { message.success("已出卡：" + res.char.char_name); }
+          else { message.warning((res && res.reason) || "出卡失败"); }
+        } catch (e) { /* 桥已提示 */ } finally {
+          cdBusy.value = false;
+        }
+      }
+
       Vue.watch(menu, function (m) {
         // v0.10.1：以前只有 4 个页签切过去会重拉，角色库/作品库/试画台/
         // 分群绑定/配置切回去一直是首屏旧快照。补齐后即使某个写操作漏刷，
@@ -8871,6 +9047,10 @@
           if (dbgTab.value === "audit") { loadDebugHistory(); }
           else if (dbgTab.value === "diag") { loadRelStatus(); }
           else if (dbgTab.value === "trash") { loadTrash(); }
+        }
+        else if (m === "carddbg") {
+          // 角色下拉与立绘张数都来自 /pools；首屏没拉到才补一次
+          if (!meta.value.packs || !meta.value.packs.length) { fetchPools(); }
         }
         else if (m === "overview") { loadOverview(); }
         else if (m === "chars") { fetchPools(); }
@@ -9713,6 +9893,13 @@
         simScopeText: simScopeText, cfgBoundGroups: cfgBoundGroups,
         doSimulate: doSimulate, simulateNext: simulateNext, pickSimGroup: pickSimGroup,
         dbgRenderUid: dbgRenderUid, dbgRenderDate: dbgRenderDate, doRerender: doRerender,
+        // v0.46.0：卡片调试（模拟抽卡 → 直接出卡）
+        cdMode: cdMode, cdCharId: cdCharId, cdPortrait: cdPortrait,
+        cdPortraitOpts: cdPortraitOpts, cdTier: cdTier, cdTierOpts: cdTierOpts,
+        cdUid: cdUid, cdDate: cdDate, cdNonce: cdNonce, cdGroup: cdGroup,
+        cdEnsure: cdEnsure, cdSame: cdSame, cdTotal: cdTotal, cdRerolled: cdRerolled,
+        cdTagline: cdTagline, cdQuote: cdQuote, cdHintText: cdHintText,
+        cdBusy: cdBusy, cdResult: cdResult, doCardDebug: doCardDebug, cdShuffle: cdShuffle,
         dbgUid: dbgUid, dbgDate: dbgDate, dbgUid2: dbgUid2, dbgDate2: dbgDate2,
         dbgChar: dbgChar, dbgChar2: dbgChar2, dbgBusy: dbgBusy,
         doForceReroll: doForceReroll, doClearDraws: doClearDraws,

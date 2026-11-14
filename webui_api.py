@@ -3130,8 +3130,9 @@ async def h_config_set(plugin) -> dict:
 # v0.10.0：新增「总览」并放到第一栏，同时成为无记忆时的默认页签。
 # v0.43.0：新增「素材库」页签（主题 / 模板 / 场景 / 维度词表增删改）
 # v0.44.0：新增「帮助」页签（导入格式等文档；放在「配置」之前）
+# v0.46.0：新增「卡片调试」页签（网页里模拟抽卡直接出卡；放在「调试工具」之后）
 _UI_MENUS = ("overview", "chars", "works", "try", "records", "stats",
-             "users", "debug", "bind", "presets", "help", "config")
+             "users", "debug", "carddbg", "bind", "presets", "help", "config")
 
 
 def _ui_state_path(plugin) -> Path:
@@ -4152,6 +4153,220 @@ async def h_debug_rerender(plugin) -> dict:
     plugin._store.update_draw_card(uid, date, card_path)
     await asyncio.to_thread(plugin._store.debug_log, "rerender", uid, f"{date} 重渲染卡片")
     return ok({"card_path": card_path, "date": date})
+
+
+# ---------- 卡片调试（v0.46.0）：网页里模拟抽卡 → 直接出一张卡 ----------
+# 用户诉求：「找个地方做一下模拟抽卡吧，免得每次都要 qq 上输入指令然后重置，
+# 你直接在 webui 里面弄一个，这样出卡就能很方便调试了」。
+# 与 /debug/simulate 的分工：那个只算「会抽到谁」（不出图），这里真的渲染一张卡。
+# 三条纪律：不写 draws、不生图、不消耗换老婆次数；产物落 debug_cards/，
+# 不进 cards/（那是正式卡图，按 uid_date 命名且会被 _prune_cards 清）。
+
+_CARD_DEBUG_DIR = "debug_cards"
+_CARD_DEBUG_KEEP = 24        # 只留最近 24 张，调试产物不该无限长
+_CARD_DEBUG_MAX_SKIP = 40    # 随机抽时最多跳过多少个「没有立绘」的角色
+
+
+def _card_debug_rows(plugin, char_id: str) -> list:
+    """该角色「文件真的在磁盘上」的立绘行（只读，顺序同 list_portraits）。"""
+    out = []
+    for row in plugin._store.list_portraits(char_id) or []:
+        rel = str(row.get("file") or "")
+        if rel and (Path(plugin._data_dir) / rel).is_file():
+            out.append(row)
+    return out
+
+
+def _card_debug_src(rows: list, pick: str, char_id: str, date: str,
+                    salt: str) -> tuple:
+    """按 pick 选一张立绘 → (相对路径, 序号)。
+
+    auto = 按种子取（`pool.pool_index`，与真实「库存取图」同一口径，换日期/种子
+    就会换图，调试时能看出库里的图是不是都好看）；其余是人工指定。
+    """
+    if not rows:
+        return "", None
+    pick = str(pick or "auto").strip()
+    if pick.startswith("index:"):
+        try:
+            idx = int(pick.split(":", 1)[1])
+        except (TypeError, ValueError):
+            idx = 0
+        idx = max(0, min(idx, len(rows) - 1))
+    elif pick == "first":
+        idx = 0
+    elif pick == "latest":
+        idx = len(rows) - 1
+    else:
+        idx = pool.pool_index(char_id, date, len(rows), salt) % len(rows)
+    return str(rows[idx]["file"]), idx
+
+
+def _card_debug_prune(out_dir: Path) -> None:
+    """只留最近 _CARD_DEBUG_KEEP 张调试卡（按 mtime），清不掉不致命。"""
+    try:
+        files = sorted((p for p in out_dir.glob("*.png") if p.is_file()),
+                       key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in files[_CARD_DEBUG_KEEP:]:
+            try:
+                old.unlink()
+            except OSError:
+                break
+    except Exception:
+        logger.warning(f"[{PLUGIN_NAME}] 清理调试卡失败（忽略）\n{traceback.format_exc()}")
+
+
+def _card_debug_core(plugin, body: dict) -> dict:
+    """渲染一张调试卡（同步、只读业务数据）。
+
+    mode=random：复用 `derive_seed → candidates_for → pick_character` 真实链路，
+    撞到「没有立绘」的角色就 nonce+1 继续抽（`ensure_portrait` 关闭则只抽一次）；
+    mode=char：直接指定角色 + 立绘序号。两种模式都可覆盖档位 / 简介 / 印象语 /
+    同款人数 / 重抽标——**只影响这一次渲染，绝不写回角色库**。
+    """
+    packs = pool.load_packs(_pools_dir(plugin), logger)
+    date = str(body.get("date") or "").strip() or plugin._today()
+    salt = str(body.get("salt") or "").strip() or str(plugin._cfg("salt", "moe-waifu"))
+    uid = str(body.get("user_id") or "").strip() or "10000"
+    gid = str(body.get("group_id") or "").strip()
+    mode = "char" if str(body.get("mode") or "").strip() == "char" else "random"
+    try:
+        nonce = max(0, int(body.get("nonce") or 0))
+    except (TypeError, ValueError):
+        nonce = 0
+    ensure = bool(body.get("ensure_portrait", True))
+    pick_pref = str(body.get("portrait") or "auto").strip() or "auto"
+    epoch = plugin._store.get_epoch(uid) if plugin._store else 0
+
+    entry, rows, seed_bytes, src_rel, src_idx = None, [], b"", "", None
+    decision, decision_note, skipped = "", "", 0
+
+    if mode == "char":
+        cid = str(body.get("char_id") or "").strip()
+        entry = pool.find_entry(packs, cid) if cid else None
+        if entry is None:
+            return {"ok": False, "mode": mode,
+                    "reason": "没找到这个角色（可能刚被改名或删除），刷新角色库再试"}
+        rows = _card_debug_rows(plugin, entry["id"])
+        if not rows:
+            return {"ok": False, "mode": mode,
+                    "char": {"char_id": entry["id"], "char_name": entry["name"],
+                             "series": entry.get("series") or ""},
+                    "reason": "该角色还没有可用立绘：先去「试画台 / 角色详情」补一张，"
+                              "或改用随机抽（会自动跳过没立绘的角色）",
+                    "note": "卡片必须有一张立绘才渲染（PRD 铁律：不存在无图版式）"}
+        seed_bytes = pool.derive_seed(date, uid, salt, nonce, epoch)
+        src_rel, src_idx = _card_debug_src(rows, pick_pref, entry["id"], date, salt)
+        decision = "manual"
+        decision_note = f"指定角色调试：用第 {src_idx + 1}/{len(rows)} 张立绘"
+    else:
+        candidates = pool.candidates_for(
+            packs, gid, str(plugin._cfg("group_pools", "") or ""),
+            bool(plugin._cfg("allow_unverified", False)))
+        if not candidates:
+            return {"ok": False, "mode": mode,
+                    "reason": "候选角色为空：检查卷是否启用、群绑定与 verified 标记"}
+        tried = _CARD_DEBUG_MAX_SKIP if ensure else 1
+        for _ in range(max(1, tried)):
+            seed = pool.derive_seed(date, uid, salt, nonce, epoch)
+            cand = pool.pick_character(seed, candidates)
+            cand_rows = _card_debug_rows(plugin, cand["id"])
+            if cand_rows:
+                entry, rows, seed_bytes = cand, cand_rows, seed
+                src_rel, src_idx = _card_debug_src(cand_rows, pick_pref,
+                                                   cand["id"], date, salt)
+                break
+            skipped += 1
+            nonce += 1
+        if entry is None:
+            return {"ok": False, "mode": mode, "skipped": skipped,
+                    "reason": f"连抽 {skipped} 位角色都没有可用立绘：先在工坊补几张，"
+                              "或关掉「跳过没立绘的角色」看看具体是谁",
+                    "note": "抽卡链路本身没问题，只是立绘库存是空的"}
+        decision = "debug_simulate"
+        decision_note = ("按真实种子链路抽到（未写库）；改用户 ID / 日期 / nonce "
+                         "就等于换一个人 / 换一天 / 换老婆")
+
+    entry = dict(entry)
+    tier = str(body.get("tier") or "").strip().upper()[:2]
+    if tier:
+        entry["tier"] = tier
+    quote = str(body.get("quote") or "").strip()
+    if quote:
+        entry["quote"] = quote
+    elif seed_bytes:
+        # 与真实出卡同口径：印象语按签从 quotes 池确定性选一句
+        entry["quote"] = pool.pick_quote(entry, seed_bytes)
+    tagline = str(body.get("tagline") or "").strip()
+    if tagline:
+        prof = dict(entry.get("profile") or {})
+        prof["tagline"] = tagline
+        entry["profile"] = prof
+    try:
+        same = max(1, int(body.get("same_count") or 1))
+    except (TypeError, ValueError):
+        same = 1
+    try:
+        total = max(1, int(body.get("total_count") or 1))
+    except (TypeError, ValueError):
+        total = 1
+    rerolled = bool(body.get("rerolled"))
+
+    data_root = Path(plugin._data_dir)
+    src = data_root / src_rel
+    out_dir = data_root / _CARD_DEBUG_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    safe_id = re.sub(r"[^\w\-]+", "_", str(entry.get("id") or "char"))[:40] or "char"
+    out = out_dir / f"{date}_{safe_id}_{nonce}_{int(time.time() * 1000)}.png"
+    try:
+        from . import card  # 延迟导入：Pillow 只在真的渲染时才需要
+    except ImportError:  # pragma: no cover - 平铺调试
+        import card  # type: ignore
+    card_path = card.render_card(src, entry, date_str=date, same_count=same,
+                                 total_count=total, rerolled=rerolled,
+                                 out_path=str(out), data_dir=data_root)
+    _card_debug_prune(out_dir)
+    try:
+        rel_card = Path(card_path).resolve().relative_to(data_root.resolve()).as_posix()
+    except ValueError:  # pragma: no cover - 理论上不会发生
+        rel_card = Path(card_path).name
+    return {
+        "ok": True, "readonly": True, "mode": mode,
+        "date": date, "user_id": uid, "nonce": nonce, "skipped": skipped,
+        "seed_hex": seed_bytes.hex() if seed_bytes else "",
+        "char": {
+            "char_id": entry["id"], "char_name": entry["name"],
+            "series": entry.get("series") or "", "pack": entry.get("pack") or "",
+            "category": entry.get("category") or "",
+            "tier": entry.get("tier") or "", "color": entry.get("color") or "",
+            "verified": bool(entry.get("verified")),
+        },
+        "portrait": {"file": src_rel, "index": src_idx, "count": len(rows)},
+        "quote": entry.get("quote") or "",
+        "decision": decision, "decision_note": decision_note,
+        "card_path": rel_card,
+        # 预览给 560px JPEG（700 宽 PNG 的 base64 有 1~2MB，过 postMessage 太慢）；
+        # 「看原图」走 openViewer → /image/data 取真 PNG。
+        "preview": _thumb_data_url(card_path, 560),
+        "note": "调试卡：不写抽签记录、不生图、不消耗换老婆次数；"
+                f"文件在 {_CARD_DEBUG_DIR}/，只保留最近 {_CARD_DEBUG_KEEP} 张",
+    }
+
+
+async def h_card_debug(plugin) -> dict:
+    """卡片调试：网页里模拟抽卡 / 指定角色 → 直接渲染一张卡（不写库、不生图）。"""
+    if not plugin._store or not plugin._data_dir:
+        return err("插件未初始化完成")
+    body = await _body()
+    data = await asyncio.to_thread(_card_debug_core, plugin, body)
+    if data.get("ok"):
+        try:
+            await asyncio.to_thread(
+                plugin._store.debug_log, "card_debug", str(data.get("user_id") or ""),
+                f"{data.get('date')} {data['char']['char_name']} → {data['portrait']['file']}")
+        except Exception:  # 只写调试日志，失败不影响出卡
+            logger.warning(f"[{PLUGIN_NAME}] 调试日志写入失败（忽略）\n{traceback.format_exc()}")
+    return ok(data)
 
 
 # ---------- 印象语 LLM 补写（v0.9.5） ----------
@@ -5436,6 +5651,7 @@ def register(plugin) -> None:
         ("/debug/history", h_debug_history, ["GET", "POST"]),
         ("/debug/simulate", h_debug_simulate, ["POST"]),
         ("/debug/rerender", h_debug_rerender, ["POST"]),
+        ("/debug/card", h_card_debug, ["POST"]),
         ("/debug/clear_draws", h_debug_clear_draws, ["POST"]),
         ("/debug/force_reroll", h_debug_force_reroll, ["POST"]),
         ("/debug/reset_char_day", h_debug_reset_char_day, ["POST"]),
