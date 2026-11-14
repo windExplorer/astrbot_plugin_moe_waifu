@@ -1,9 +1,9 @@
 {
-  "_readme": "《异环》(Neverness to Everness) 全角色资料样例（20 位：此前已导入的 5 位 + 新增 15 位）。用于「角色库 → 导入资料」一次性导入：勾「未匹配的角色新建条目」即可把库里没有的角色建出来；已有角色按「跳过（只补空）」不会动你已改过的内容。资料 2026-11-15 检索整理自萌娘百科 / 官方公告 / 攻略站，可能与游戏内最新文本有出入；印象语为整理 + 仿写的角色口吻台词（非官方原文逐字引用），仅供导入测试。零的生日由玩家自选，故留空。男性角色（白藏 / 阿德勒 / 卡厄斯 / 翳 / 埃德嘉）未收录——本插件出图按女性角色写提示词。",
+  "_readme": "《异环》(Neverness to Everness) 全角色资料样例（20 位，与插件自带种子库 seed_pool.json 的异环条目一一对应）。id 全部沿用种子库的 id（薄荷 mint_nte / 零(女) rover_f_nte / 达芙蒂尔 daphtier …），这样导入时按 id 直配，不会因为显示名不同（例如俗称的「零」在线上叫「零(女)」）而匹配失败、也不会重复建条目。导入建议：冲突策略选「跳过（只补空）」，「未匹配的角色新建条目」可开可不开（20 位种子库都有，正常应为 0 条新建）。资料 2026-11-15 检索整理自萌娘百科 / 官方公告 / 攻略站，可能与游戏内最新文本有出入；印象语为整理 + 仿写的角色口吻台词（非官方原文逐字引用），仅供导入测试。零的生日由玩家自选，故留空。男性角色（白藏 / 阿德勒 / 卡厄斯 / 翳 / 埃德嘉）未收录——本插件出图按女性角色写提示词。",
   "series": "异环",
   "entries": [
     {
-      "id": "yihuan_mint",
+      "id": "mint_nte",
       "name": "薄荷",
       "series": "异环",
       "category": "game",
@@ -34,7 +34,7 @@
       ]
     },
     {
-      "id": "yihuan_nanally",
+      "id": "nanally_nte",
       "name": "娜娜莉",
       "series": "异环",
       "category": "game",
@@ -65,7 +65,7 @@
       ]
     },
     {
-      "id": "yihuan_sakiri",
+      "id": "sakiri_nte",
       "name": "早雾",
       "series": "异环",
       "category": "game",
@@ -96,7 +96,7 @@
       ]
     },
     {
-      "id": "yihuan_hotori",
+      "id": "xun",
       "name": "浔",
       "series": "异环",
       "category": "game",
@@ -127,7 +127,7 @@
       ]
     },
     {
-      "id": "yihuan_hathor",
+      "id": "hathor",
       "name": "哈索尔",
       "series": "异环",
       "category": "game",
@@ -158,7 +158,7 @@
       ]
     },
     {
-      "id": "yihuan_zero",
+      "id": "rover_f_nte",
       "name": "零",
       "series": "异环",
       "category": "game",
@@ -189,7 +189,7 @@
       ]
     },
     {
-      "id": "yihuan_daffodill",
+      "id": "daphtier",
       "name": "达芙蒂尔",
       "series": "异环",
       "category": "game",
@@ -220,7 +220,7 @@
       ]
     },
     {
-      "id": "yihuan_fadia",
+      "id": "fadia",
       "name": "法帝娅",
       "series": "异环",
       "category": "game",
@@ -251,7 +251,7 @@
       ]
     },
     {
-      "id": "yihuan_lacrimosa",
+      "id": "lacrimosa_nte",
       "name": "安魂曲",
       "series": "异环",
       "category": "game",
@@ -282,7 +282,7 @@
       ]
     },
     {
-      "id": "yihuan_jiuyuan",
+      "id": "jiuyuan",
       "name": "九原",
       "series": "异环",
       "category": "game",
@@ -313,7 +313,7 @@
       ]
     },
     {
-      "id": "yihuan_chiz",
+      "id": "chiz",
       "name": "小吱",
       "series": "异环",
       "category": "game",
@@ -344,7 +344,7 @@
       ]
     },
     {
-      "id": "yihuan_haniel",
+      "id": "haniel",
       "name": "哈尼娅",
       "series": "异环",
       "category": "game",
@@ -375,7 +375,7 @@
       ]
     },
     {
-      "id": "yihuan_aurelia",
+      "id": "aurelia",
       "name": "海月",
       "series": "异环",
       "category": "game",
@@ -406,7 +406,7 @@
       ]
     },
     {
-      "id": "yihuan_blackbird",
+      "id": "blackbird",
       "name": "黑羽",
       "series": "异环",
       "category": "game",
@@ -437,7 +437,7 @@
       ]
     },
     {
-      "id": "yihuan_akane_rin",
+      "id": "akane_rin",
       "name": "明音凛",
       "series": "异环",
       "category": "game",
@@ -468,7 +468,7 @@
       ]
     },
     {
-      "id": "yihuan_zankou",
+      "id": "canhong",
       "name": "残虹",
       "series": "异环",
       "category": "game",
@@ -499,7 +499,7 @@
       ]
     },
     {
-      "id": "yihuan_shinku",
+      "id": "zhenhong",
       "name": "真红",
       "series": "异环",
       "category": "game",
@@ -530,7 +530,7 @@
       ]
     },
     {
-      "id": "yihuan_oneiroi",
+      "id": "iloy",
       "name": "伊洛伊",
       "series": "异环",
       "category": "game",
@@ -561,7 +561,7 @@
       ]
     },
     {
-      "id": "yihuan_elyms",
+      "id": "elyms",
       "name": "曳尔沐",
       "series": "异环",
       "category": "game",
@@ -592,7 +592,7 @@
       ]
     },
     {
-      "id": "yihuan_linko",
+      "id": "lingke",
       "name": "灵可",
       "series": "异环",
       "category": "game",
