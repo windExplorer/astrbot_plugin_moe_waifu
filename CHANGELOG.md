@@ -2,6 +2,22 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.43.1 (2026-11-15)
+
+- **自动选源选了 #1 号立绘，而不是主参考图 / 出卡图**（用户实报）。
+  - **现象**：角色明明设了主参考或出卡图生图源，切到「图生图重绘」时生成源却默认选中了立绘 #1。
+  - **根因（加载竞态，两层叠加）**：
+    ① 角色详情是 `Promise.all([loadGalItems(cid), loadGalRefs(cid)])` **并行**加载的。立绘索引走 SQLite 查询，通常比参考图（读卷 JSON + 读图片文件 + 生成缩略图 data URL）先返回；`watch([galItems, galRefs])` 第一次触发时 `galRefs` 还是空数组、`galMainRef` 还是空串，`genSources` 里只有立绘 → 自动选源只能落到第一条立绘。
+    ② 参考图后到、`watch` 第二次触发时，`ensureDefaultGenSource` 开头是 `if (galRefsSel.value.length) return` —— 把**自动填进去的值**当成了「用户的选择」，从此永不纠正。
+  - **次要因素**：匹配用的是 `paths.indexOf(prefer)` 严格相等，而卷里 `strategy.refs` 混存绝对路径（上传）与相对路径（`refs/xxx.png`，立绘转参考图）—— 即使参考图已在列表里，格式不同也匹配不上。
+  - **修复**：
+    ① 新增 `galSrcAutoPicked` 记录「当前值是自动填的哪一张」；`ensureDefaultGenSource` 只在「还没选」或「当前值就是上次自动填的那张」时才动手，找到更优候选（出卡源 → 主参考 → 第一张）就替换；`selectGenSource` 用户一动手立刻清标记，之后数据再变也不覆盖。
+    ② 新增 `_samePath(a, b)` 归一比较：反斜杠统一、大小写不敏感、绝对 vs 相对按后缀匹配，且**要求短的一方至少带目录**（否则 `main.png` 会和 `portraits/c1/main.png` 误判同图）。
+    ③ `watch(galRefsLoading)` 在参考图加载完成后再补一次自动选源（不再依赖 `galRefs` 与 `galItems` 谁先到）。
+    ④ `_defaultGenSource()` 拆成纯计算并返回 `{path, label}`，生成源条上新增一行「已自动选中：**主参考图**（手动点其它图即可覆盖）」，用户不用再猜为什么选的是这张。
+    ⑤ 头像生成弹窗的 `pickDefaultAvatarSrc` / `avatarGenSrcLabel` 同步改用 `_samePath`（同一类绝对/相对混存问题）。
+  - **验证**：`test_ui_v042` 新增 6 条守卫（可纠正、用户优先、loading 补选、归一比较、UI 说明、优先级顺序），并把页面里的 `_samePath` **原样抠出来交给 node 真跑 8 个用例**（绝对 vs 相对、反斜杠、大小写、空值、仅 basename 相同、同名不同目录）。28 个脚本式自检全过。
+
 ## v0.43.0 (2026-11-15)
 
 - **新增「素材库」页签：主题 / 模板 / 场景 / 维度词表可视化增删改**（用户：「找个地方可以配置主题，模板，场景那些，专门搞个页面做这些事情，增删改」）。

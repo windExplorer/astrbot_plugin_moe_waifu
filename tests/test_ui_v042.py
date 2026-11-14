@@ -243,10 +243,60 @@ check("进调试页 / 首屏 / 查完状态都会拉历史",
       "Vue.watch(menu, function (k)" in PAGE and PAGE.count("loadDebugHistory()") >= 4)
 
 # ---------- ⑥ 图生图默认源 ----------
-check("ensureDefaultGenSource 优先指定图源再回落第一张",
-      "function ensureDefaultGenSource()" in PAGE
-      and "galDrawRefAbs.value, galDrawRef.value, galMainRef.value" in PAGE
-      and "galRefsSel.value = [pick || paths[0]]" in PAGE)
+check("自动选源优先级：出卡源 → 主参考 → 第一张",
+      "function _defaultGenSource()" in PAGE
+      and '{ path: galDrawRefAbs.value, label: "出卡图生图源" }' in PAGE
+      and '{ path: galMainRef.value, label: "主参考图" }' in PAGE
+      and 'return { path: src[0].path, label: "第一张可用图" };' in PAGE)
+# v0.43.1 真机事故：立绘索引与参考图并行加载，立绘先到 → 自动选了 #1 立绘；
+# 参考图到齐后因为「已有值就 return」永不纠正。四条守卫钉住修复。
+check("自动选的源可被更优候选纠正（不被加载竞态锁死）",
+      "galSrcAutoPicked" in PAGE
+      and "var isAuto = cur.length === 1 && !!galSrcAutoPicked" in PAGE
+      and "if (cur.length && !isAuto) { return; }" in PAGE)
+check("用户手动选源后不再自动改写",
+      'galSrcAutoPicked = "";\n        var arr = galRefsSel.value.slice();' in PAGE)
+check("参考图加载完成后补一次自动选源",
+      "Vue.watch(galRefsLoading, function (busy)" in PAGE)
+check("路径按末尾归一比较（绝对/相对混存）",
+      "function _samePath(a, b)" in PAGE
+      and 'x.slice(-(y.length + 1)) === "/" + y' in PAGE)
+check("生成源区显示自动选中依据",
+      'v-if="galSrcHint"' in PAGE and "已自动选中：" in PAGE)
+# v0.43.1：路径归一函数真跑（绝对/相对/反斜杠混存是这次的另一个坑）
+import subprocess as _sp  # noqa: E402
+
+_a = PAGE.index("function _samePath(a, b) {")
+_b = PAGE.index("\n      }", _a) + len("\n      }")
+_tmp_js = ROOT / "_tmp_samepath.js"
+_tmp_js.write_text(PAGE[_a:_b] + r"""
+var bad = 0;
+function ck(name, cond) {
+  console.log((cond ? "ok: " : "FAIL: ") + name);
+  if (!cond) { bad++; }
+}
+var BS = String.fromCharCode(92);
+ck("绝对 vs 相对同图", _samePath("X:/data/refs/a.png", "refs/a.png"));
+ck("反斜杠归一",
+   _samePath("x:" + BS + "data" + BS + "refs" + BS + "a.png", "refs/a.png"));
+ck("大小写不敏感", _samePath("X:/Data/REFS/A.PNG", "refs/a.png"));
+ck("完全相同", _samePath("refs/a.png", "refs/a.png"));
+ck("不同图不误判", !_samePath("refs/a.png", "refs/b.png"));
+ck("空值安全", !_samePath("", "refs/a.png") && !_samePath("refs/a.png", ""));
+ck("仅 basename 相同不误判",
+   !_samePath("X:/data/portraits/c1/main.png", "main.png"));
+ck("同名不同目录不误判",
+   !_samePath("X:/data/refs/a/x.png", "refs/b/x.png"));
+process.exit(bad ? 1 : 0);
+""", encoding="utf-8")
+try:
+    _r = _sp.run(["node", str(_tmp_js)], capture_output=True, text=True,
+                 encoding="utf-8")
+    _out = ((_r.stdout or "") + (_r.stderr or "")).strip()
+    check("_samePath 真跑全过（node）", _r.returncode == 0, _out[-600:])
+    print(_out)
+finally:
+    _tmp_js.unlink(missing_ok=True)
 check("默认源在切模式 / 数据到位 / 开面板 / 提交四处兜底",
       PAGE.count("ensureDefaultGenSource();") >= 4)
 check("openPromptModal 会先补默认源", "ensureDefaultGenSource();\n        galPromptOpen.value = true;" in PAGE)

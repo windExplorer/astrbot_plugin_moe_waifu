@@ -1341,6 +1341,10 @@
                   <div class="bind-tip gen-sel-tip" style="margin-top: 0;">
                     生成源（点击图片看大图；点图片<b>下方文字</b>选中/取消，顺序即「图1/图2/图3」）{{ galRefsSel.length > 0 ? " · 已选 " + galRefsSel.length + " 张" : "" }}
                   </div>
+                  <!-- v0.43.1：说明这张是系统自动填的、依据是什么，避免「为什么选的是 #1 立绘」 -->
+                  <div v-if="galSrcHint" class="bind-tip gen-sel-tip" style="margin-top: 2px;">
+                    已自动选中：<b>{{ galSrcHint }}</b>（手动点其它图即可覆盖）
+                  </div>
                   <div class="gen-strip" v-if="genSources.length > 0">
                     <div v-for="g in genSources" :key="g.kind + ':' + g.path"
                          class="gal-item" :class="{ 'ref-selected': galRefsSel.indexOf(g.path) >= 0 }"
@@ -5317,6 +5321,7 @@
       function clearGalRefsState() {
         galRefs.value = []; galMainRef.value = "";
         galDrawRef.value = ""; galDrawRefAbs.value = "";
+        galSrcAutoPicked = "";   // 换角色/清空后重新交给自动选源
       }
 
       var galCharOpts = Vue.computed(function () {
@@ -5552,6 +5557,12 @@
       var galRefs = Vue.ref([]);
       var galRefsLoading = Vue.ref(false);
       var galMainRef = Vue.ref("");
+      // v0.43.1：记录「当前生成源是自动填的哪一张」。立绘列表与参考图是并行
+      // 加载的（loadGallery 里 Promise.all），立绘索引通常先返回，自动选源会
+      // 先塞一张立绘进去；若把「已有值」当成用户选择，参考图到齐后永远不纠正
+      // —— 用户实报「有主参考/出卡源，却默认选了 #1 号立绘」。有了这个标记，
+      // 自动填的值允许被更优候选覆盖，用户手动点过的则绝不覆盖。
+      var galSrcAutoPicked = "";
       async function loadGalRefs(cid, token) {
         var target = cid === undefined ? galCharId.value : cid;
         var seq = token === undefined ? galLoadSeq : token;
@@ -5720,30 +5731,77 @@
       function selectGenSource(g) {
         // v0.11.0：多选——点一次加入、再点移出，顺序即「图1/图2/图3」
         if (!g || !g.path) { message.error("该图缺可用路径（可能文件丢失）"); return; }
+        // v0.43.1：用户一动手就交还控制权，后续数据加载不再自动改写选择
+        galSrcAutoPicked = "";
         var arr = galRefsSel.value.slice();
         var i = arr.indexOf(g.path);
         if (i >= 0) { arr.splice(i, 1); } else { arr.push(g.path); }
         galRefsSel.value = arr;
       }
-      // v0.42.0：图生图「默认选中指定图源或第一张图」。
-      // 优先级：出卡源（galDrawRefAbs / galDrawRef）→ 主参考（galMainRef）→
-      // genSources 第一张（参考图在前、启用立绘在后）。只在切模式 / 数据到位 /
-      // 打开面板 / 提交这些入口补，用户主动清空后不会被立刻强行补回。
+      // v0.43.1：路径可能是绝对（上传/立绘 it.abs）也可能是相对（卷里存的
+      // refs/xxx.png），严格相等会漏匹配。按「末尾路径相同」归一比较。
+      function _samePath(a, b) {
+        var x = String(a || "").replace(/\\/g, "/").toLowerCase();
+        var y = String(b || "").replace(/\\/g, "/").toLowerCase();
+        if (!x || !y) { return false; }
+        if (x === y) { return true; }
+        // 后缀匹配要求「短的一方至少带目录」，否则 refs/main.png 会和
+        // portraits/c1/main.png 因 basename 相同而误判成同一张。
+        return (y.indexOf("/") >= 0 && x.slice(-(y.length + 1)) === "/" + y)
+            || (x.indexOf("/") >= 0 && y.slice(-(x.length + 1)) === "/" + x);
+      }
+      // v0.42.0：图生图默认源优先级 出卡源 → 主参考 → 第一张可用图。
+      // v0.43.1：拆出纯粹的「最优候选」计算，便于 UI 说明与重复调用。
+      function _defaultGenSource() {
+        var src = genSources.value || [];
+        if (!src.length) { return null; }
+        var prefer = [
+          { path: galDrawRefAbs.value, label: "出卡图生图源" },
+          { path: galDrawRef.value, label: "出卡图生图源" },
+          { path: galMainRef.value, label: "主参考图" }
+        ];
+        for (var i = 0; i < prefer.length; i++) {
+          if (!prefer[i].path) { continue; }
+          for (var j = 0; j < src.length; j++) {
+            if (_samePath(src[j].path, prefer[i].path)) {
+              return { path: src[j].path, label: prefer[i].label };
+            }
+          }
+        }
+        return { path: src[0].path, label: "第一张可用图" };
+      }
+      // 自动选源：只在「还没选」或「当前值是上次自动填的」时才动手；
+      // 用户手动选过（多选 / 选的是别张）就完全不动。
       function ensureDefaultGenSource() {
         if (galMode.value !== "img2img") { return; }
-        if (galRefsSel.value && galRefsSel.value.length) { return; }
-        var src = genSources.value || [];
-        if (!src.length) { return; }
-        var paths = src.map(function (g) { return g.path; });
-        var prefer = [galDrawRefAbs.value, galDrawRef.value, galMainRef.value];
-        var pick = "";
-        for (var i = 0; i < prefer.length; i++) {
-          if (prefer[i] && paths.indexOf(prefer[i]) >= 0) { pick = prefer[i]; break; }
+        var cur = galRefsSel.value || [];
+        var isAuto = cur.length === 1 && !!galSrcAutoPicked
+                     && _samePath(cur[0], galSrcAutoPicked);
+        if (cur.length && !isAuto) { return; }
+        var pick = _defaultGenSource();
+        if (!pick) { return; }
+        if (cur.length === 1 && _samePath(cur[0], pick.path)) {
+          galSrcAutoPicked = cur[0];   // 已经是同一张，只补标记
+          return;
         }
-        galRefsSel.value = [pick || paths[0]];
+        galRefsSel.value = [pick.path];
+        galSrcAutoPicked = pick.path;
       }
+      // 生成源条上的一行说明：让用户知道这张是系统自动选的、依据是什么
+      var galSrcHint = Vue.computed(function () {
+        var cur = galRefsSel.value || [];
+        if (cur.length !== 1 || !galSrcAutoPicked) { return ""; }
+        if (!_samePath(cur[0], galSrcAutoPicked)) { return ""; }
+        var pick = _defaultGenSource();
+        return pick && _samePath(pick.path, cur[0]) ? pick.label : "";
+      });
       Vue.watch(galMode, function (m) {
         if (m === "img2img") { ensureDefaultGenSource(); }
+      });
+      // 参考图加载完（loading 归 false）再补一次：立绘索引通常先到，
+      // 那一刻还没有主参考 / 出卡源可比，必须等参考图到齐才能纠正。
+      Vue.watch(galRefsLoading, function (busy) {
+        if (!busy) { ensureDefaultGenSource(); }
       });
       // v0.13.2：删除 useAsSource 死代码——模板自 v0.7.0 起只用 selectGenSource，
       // 它一直只是暴露在 return 里没人引用
@@ -6753,18 +6811,13 @@
         var s = String(avatarGenSrc.value || "");
         if (!s) { return "（暂无可用图源）"; }
         var designated = [galDrawRefAbs.value, galDrawRef.value, galMainRef.value];
-        return designated.indexOf(s) >= 0 ? "指定图源（主参考 / 出卡源）" : "第一张可用图";
+        return designated.some(function (p) { return _samePath(p, s); })
+          ? "指定图源（主参考 / 出卡源）" : "第一张可用图";
       });
       function pickDefaultAvatarSrc() {
-        var src = genSources.value || [];
-        if (!src.length) { avatarGenSrc.value = ""; return; }
-        var paths = src.map(function (g) { return g.path; });
-        var prefer = [galDrawRefAbs.value, galDrawRef.value, galMainRef.value];
-        var pick = "";
-        for (var i = 0; i < prefer.length; i++) {
-          if (prefer[i] && paths.indexOf(prefer[i]) >= 0) { pick = prefer[i]; break; }
-        }
-        avatarGenSrc.value = pick || paths[0];
+        // v0.43.1：与生成源同一套归一比较（绝对/相对混存也能命中）
+        var pick = _defaultGenSource();
+        avatarGenSrc.value = pick ? pick.path : "";
       }
       function openAvatarGen() {
         if (!galCharId.value || galAvatarBusy.value) { return; }
@@ -8797,6 +8850,7 @@
         galWidth: galWidth, galHeight: galHeight, galAsRef: galAsRef,
         galWfAny: galWfAny, wfAllOpts: wfAllOpts,
         genSources: genSources, selectGenSource: selectGenSource,
+        galSrcHint: galSrcHint,
         doDetailGenerate: doDetailGenerate,
         galTheme: galTheme, galThemeResolved: galThemeResolved,
         galTab: galTab, galTabs: galTabs, switchGalTab: switchGalTab,
