@@ -526,6 +526,40 @@
   .preset-kw-grid .lab { font-size: 12px; opacity: .7; margin-bottom: 3px; }
   /* v0.43.3：固定短语一行 = 维度 + 中文 + 英文 + 删（替代原来的 JSON 文本框） */
   .preset-fix-row { display: flex; gap: 6px; align-items: center; }
+
+  /* ==================== v0.44.0 帮助页 / 角色资料导入 ==================== */
+  /* 帮助页：每篇文档一张卡，字段表 + 代码块 + 注意条目，避免所有内容挤成一段 */
+  .help-sec { scroll-margin-top: 96px; }
+  .help-fields { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .help-fields th, .help-fields td { text-align: left; padding: 6px 8px;
+    border-bottom: 1px dashed var(--wf-line); vertical-align: top; }
+  .help-fields th { font-weight: 600; font-size: 12px; opacity: .7; }
+  .help-fields td code { background: rgba(214,51,132,.08); padding: 1px 5px;
+    border-radius: 4px; font-size: 12px; }
+  .help-code { margin: 0; padding: 12px 14px; border-radius: 10px;
+    background: rgba(128,128,128,.10); border: 1px solid var(--wf-line);
+    font-size: 12px; line-height: 1.7; overflow-x: auto; white-space: pre;
+    font-family: ui-monospace, Consolas, "Courier New", monospace; }
+  .help-note { font-size: 12.5px; line-height: 1.8; opacity: .82; }
+
+  /* 资料导入弹窗：维度开关两列网格 + 逐条概览行 */
+  .pi-dims { display: grid; gap: 6px 18px;
+    grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pi-dim { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .pi-dim .cnt { font-size: 11px; opacity: .6; margin-left: auto; }
+  .pi-row { border: 1px solid var(--wf-line); border-radius: 10px;
+    padding: 8px 10px; font-size: 12.5px; }
+  .pi-row + .pi-row { margin-top: 8px; }
+  .pi-row .hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pi-tag { font-size: 11px; padding: 1px 7px; border-radius: 999px;
+    border: 1px solid var(--wf-line); white-space: nowrap; }
+  .pi-tag.write { color: #0f7b4f; border-color: rgba(15,123,79,.45);
+    background: rgba(15,123,79,.08); }
+  .pi-tag.over { color: #b45309; border-color: rgba(180,83,9,.45);
+    background: rgba(180,83,9,.08); }
+  .pi-tag.keep { opacity: .6; }
+  .pi-tag.off { opacity: .32; text-decoration: line-through; }
+  .pi-list { max-height: 300px; overflow-y: auto; padding-right: 4px; }
 </style>
 </head>
 <body>
@@ -728,6 +762,8 @@
               </n-radio-group>
               <n-button type="primary" size="small" @click="openNew">新增角色</n-button>
               <n-button size="small" @click="openImport">导入角色</n-button>
+              <!-- v0.44.0：只补资料（简介/生日/声优/印象语…），与「导入角色」分开 -->
+              <n-button size="small" @click="openProfileImport()">导入资料</n-button>
               <n-button size="small" @click="openDedupe">重复角色</n-button>
               <!-- v0.25.6：后台补图进度跟到按钮上（关掉弹窗也能看见在跑） -->
               <n-button size="small" :type="batchRunning ? 'primary' : 'default'"
@@ -1229,7 +1265,7 @@
                                :placeholder="f.ph"></n-input>
                     </template>
                   </div>
-                  <div class="bind-tip">评级与资料一起随「保存资料」写库；「AI 获取」只把建议填进表单，检查后再保存，绝不自动覆盖。</div>
+                  <div class="bind-tip">评级与资料一起随「保存资料」写库；「AI 获取」只把建议填进表单，检查后再保存，绝不自动覆盖。手上有整理好的档案时，用「从 JSON 导入资料」一次灌进来（连带印象语 / 评级）。</div>
                   <n-space align="center" :wrap="true" size="small">
                     <n-button size="small" type="primary" :loading="galProfileSaving"
                               @click="saveGalProfile">保存资料</n-button>
@@ -1237,6 +1273,7 @@
                               @click="genGalProfile(true)">AI 获取资料（联网）</n-button>
                     <n-button size="small" :loading="galProfileBusy"
                               @click="genGalProfile(false)">仅模型补全</n-button>
+                    <n-button size="small" @click="openProfileImport(galCharId)">从 JSON 导入资料</n-button>
                   </n-space>
                   <n-alert v-if="galProfileMsg" :type="galProfileMsgType" :show-icon="false">{{ galProfileMsg }}</n-alert>
                 </div>
@@ -2799,6 +2836,57 @@
             </n-modal>
           </div>
 
+          <!-- ============ 帮助（v0.44.0：导入格式等文档，逐篇一卡，可续加） ============ -->
+          <div v-if="menu === 'help'" class="stack">
+            <div class="sticky-head">
+              <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <span style="font-weight:600; font-size:15px;">帮助 · 格式速查</span>
+                <span class="bind-tip" style="margin-top:0;">
+                  导入用的 JSON 长什么样、每个字段什么意思、哪些会被覆盖——先看「通用约定」再看具体入口
+                </span>
+              </div>
+              <div class="cfg-anchor">
+                <span v-for="d in helpDocs" :key="'hda:' + d.key"
+                      @click="scrollToHelp(d.key)">{{ d.title }}</span>
+              </div>
+            </div>
+            <div v-for="d in helpDocs" :key="'hdoc:' + d.key"
+                 :id="'help-sec-' + d.key" class="help-sec">
+              <n-card size="small" :bordered="true" :title="d.title">
+                <div class="stack">
+                  <div v-if="d.intro" class="help-note">{{ d.intro }}</div>
+                  <div v-if="d.where" class="bind-tip" style="margin-top:0;">{{ d.where }}</div>
+                  <div v-if="d.fields && d.fields.length">
+                    <div class="lib-head">字段说明</div>
+                    <table class="help-fields">
+                      <thead>
+                        <tr><th style="width:170px;">字段</th><th style="width:96px;">类型</th>
+                          <th style="width:52px;">必填</th><th>说明</th></tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="f in d.fields" :key="'hf:' + d.key + ':' + f.name">
+                          <td><code>{{ f.name }}</code></td>
+                          <td>{{ f.type }}</td>
+                          <td>{{ f.required ? "是" : "—" }}</td>
+                          <td>{{ f.desc }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div v-if="d.example">
+                    <div class="lib-head">示例<span class="cnt">{{ d.exampleNote || "" }}</span></div>
+                    <pre class="help-code">{{ d.example }}</pre>
+                  </div>
+                  <div v-if="d.notes && d.notes.length">
+                    <div class="lib-head">注意</div>
+                    <div v-for="(n, i) in d.notes" :key="'hn:' + d.key + ':' + i"
+                         class="help-note">· {{ n }}</div>
+                  </div>
+                </div>
+              </n-card>
+            </div>
+          </div>
+
           <!-- ============ 配置 ============ -->
           <div v-if="menu === 'config'">
             <!-- v0.42.0：顶部固定工具条 + 分区锚点；保存按钮移到右下角悬浮条，
@@ -3565,6 +3653,9 @@
           粘贴角色 JSON（支持「角色数组」<code>[...]</code> 或「整卷对象」<code>{"pack","entries"}</code>），或选 .json 文件。
           每条需含 <b>id / name / tags_en</b>。导入即写入 <b>pools/&lt;卷名&gt;.json</b>，
           更新插件不会被覆盖；<b>全库按 id 去重</b>，已存在的角色默认不导入。
+          <div>只补简介 / 生日 / 声优 / 印象语这些资料请用「导入资料」；字段与示例见
+            <a style="cursor:pointer; color: var(--wf-brand);"
+               @click="gotoHelp('import_char')">帮助 → 角色导入</a></div>
         </n-alert>
         <!-- v0.29.0：作品页批量导入时预填，导入的条目统一归到这个作品 -->
         <n-input v-model:value="importSeries"
@@ -3590,6 +3681,103 @@
       <template #action>
         <n-button @click="importOpen=false">关闭</n-button>
         <n-button type="primary" :loading="importing" @click="doImport">导入</n-button>
+      </template>
+    </n-modal>
+
+    <!-- ============ 角色资料导入弹窗（v0.44.0：离线灌档案） ============
+         两步走：先「解析预览」拿到匹配结果与各维度命中数，再在本弹窗内勾维度 /
+         选冲突策略 / 逐条勾选。落库只写选中的维度，参考图 / 封面 / 画法一概不碰。 -->
+    <n-modal v-model:show="piOpen" preset="dialog" :title="piTitle" style="width: 880px;">
+      <div class="stack">
+        <div class="bind-tip" style="margin-top:0;">
+          插件联网检索拿不到资料时，可以把整理好的档案贴进来导入：<b>单角色</b>填一个对象、
+          <b>多角色</b>填数组（或 <code>{"entries": [...]}</code>）。只补资料（简介 / 生日 / 身高 /
+          声优 / 身份 / 性格 / 萌点 / 备注 / 印象语 / 评级），参考图、封面、画法、头像都不会动。
+          <a style="cursor:pointer; color: var(--wf-brand);" @click="gotoHelp('import_profile')">看格式说明 →</a>
+        </div>
+        <div class="av-mode-row">
+          <n-radio-group v-model:value="piMode" size="small">
+            <n-radio-button value="single">单角色</n-radio-button>
+            <n-radio-button value="multi">多角色</n-radio-button>
+          </n-radio-group>
+          <n-button size="small" @click="piFillSample">填入示例</n-button>
+          <label style="padding:5px 14px;border:1px solid #d0d5dd;border-radius:6px;cursor:pointer;font-size:13px;">
+            选择 .json 文件
+            <input type="file" accept=".json,application/json" style="display:none;" @change="piOnFile">
+          </label>
+          <n-button size="small" type="primary" :loading="piParsing" @click="piParse">解析预览</n-button>
+        </div>
+        <n-input v-model:value="piText" type="textarea" :rows="7"
+                 :placeholder="piPlaceholder"></n-input>
+        <div v-if="piFocus.id || piFocus.name" class="bind-tip" style="margin-top:0;">
+          当前角色：<b>{{ piFocus.name || piFocus.id }}</b>
+          <n-checkbox v-model:checked="piOnlyFocus" style="margin-left:10px;font-size:12px;">
+            只处理这个角色
+          </n-checkbox>
+        </div>
+        <div v-if="piPreview" class="stack">
+          <n-alert type="info" :show-icon="false">{{ piSummaryText }}</n-alert>
+          <div v-if="piPreview.bad && piPreview.bad.length" class="bind-tip" style="margin-top:0;">
+            有 {{ piPreview.bad.length }} 条无法解析，已忽略：{{ piBadText }}
+          </div>
+          <div>
+            <div class="lib-head">导入维度<span class="cnt">关掉的整维不写库</span></div>
+            <div class="pi-dims">
+              <div v-for="d in piDimList" :key="'pid:' + d.key" class="pi-dim">
+                <n-switch size="small" v-model:value="piDims[d.key]"></n-switch>
+                <span>{{ d.label }}</span>
+                <span class="cnt">{{ d.count }} 条有值</span>
+              </div>
+            </div>
+            <div class="av-mode-row" style="margin-top:8px;">
+              <n-button size="tiny" @click="piDimsAll(true)">维度全开</n-button>
+              <n-button size="tiny" @click="piDimsAll(false)">维度全关</n-button>
+            </div>
+          </div>
+          <div class="av-mode-row">
+            <span style="font-size:13px;">已有内容时</span>
+            <n-radio-group v-model:value="piConflict" size="small">
+              <n-radio-button value="skip">跳过（只补空）</n-radio-button>
+              <n-radio-button value="overwrite">覆盖</n-radio-button>
+            </n-radio-group>
+            <n-checkbox v-model:checked="piCreate" style="font-size:13px;">
+              未匹配的角色新建条目
+            </n-checkbox>
+          </div>
+          <n-input v-if="piCreate" v-model:value="piPack" size="small"
+                   placeholder="新建条目放进哪个卷（留空 = imported）"
+                   style="max-width: 340px;"></n-input>
+          <div class="av-mode-row">
+            <span style="font-size:13px;">勾选导入</span>
+            <n-button size="tiny" @click="piSelAll(true)">全选</n-button>
+            <n-button size="tiny" @click="piSelAll(false)">全不选</n-button>
+            <span class="bind-tip" style="margin-top:0;">{{ piPlanText }}</span>
+          </div>
+          <div class="pi-list">
+            <div v-for="r in piRows" :key="'pir:' + r.key" class="pi-row">
+              <div class="hd">
+                <n-checkbox v-model:checked="piSel[r.key]"></n-checkbox>
+                <b>{{ r.name || "（未命名）" }}</b>
+                <span style="opacity:.6;">{{ r.id || "—" }}</span>
+                <span v-if="r.matched" class="pi-tag">库里已有 · {{ r.pack }}</span>
+                <span v-else-if="r.can_create" class="pi-tag">将新建</span>
+                <span v-else class="pi-tag">无法新建（缺 tags_en）</span>
+                <span v-if="r.match_by" class="pi-tag keep">按{{ r.match_by }}匹配</span>
+              </div>
+              <div style="display:flex; flex-wrap:wrap; gap:5px; margin-top:6px;">
+                <span v-for="d in r.dims" :key="'pd:' + r.key + ':' + d.key"
+                      class="pi-tag" :class="d.act" :title="d.tip">{{ d.label }} · {{ d.text }}</span>
+              </div>
+            </div>
+            <div v-if="!piRows.length" class="lib-empty">没有可导入的条目</div>
+          </div>
+          <n-alert v-if="piResult" type="success" :show-icon="false">{{ piResultText }}</n-alert>
+        </div>
+      </div>
+      <template #action>
+        <n-button @click="piOpen = false">关闭</n-button>
+        <n-button type="primary" :loading="piBusy" :disabled="!piPreview || !piSelCount"
+                  @click="piDoImport">导入 {{ piSelCount }} 条</n-button>
       </template>
     </n-modal>
 
@@ -4228,6 +4416,7 @@
         { label: "调试工具", key: "debug" },
         { label: "分群绑定", key: "bind" },
         { label: "素材库", key: "presets" },
+        { label: "帮助", key: "help" },
         { label: "配置", key: "config" }
       ];
       // ---- 页签路由记忆（v0.5.12）：刷新停在上次的页签 ----
@@ -6877,6 +7066,448 @@
         } catch (e) { /* 已提示 */ }
         finally { galProfileBusy.value = false; }
       }
+
+      // ==================== v0.44.0 帮助页文档 ====================
+      // 数据驱动：新增一篇文档只要往 helpDocs 加一条（模板按 intro / fields /
+      // example / notes 通用渲染），不用改模板——后续补「工作流格式」「配置项说明」
+      // 之类直接往数组里加，别再往一坨文字里塞。
+      var HELP_EXAMPLE_CHAR = [
+        "[",
+        "  {",
+        '    "id": "yihuan_mint",',
+        '    "name": "薄荷",',
+        '    "series": "异环",',
+        '    "tags_en": "1girl, solo, mint hair, pink eyes, cat ears, cat tail, hair bow, thick eyebrows, cross-shaped pupils, white thighhighs, short boots",',
+        '    "category": "game",',
+        '    "tier": "A",',
+        '    "color": "#8FE3D8",',
+        '    "quotes": ["呀嚯！是收容二组的薄荷！有什么需要帮忙的尽管找我，可可！"],',
+        '    "strategy": { "type": "base" }',
+        "  }",
+        "]"
+      ].join("\n");
+
+      var HELP_EXAMPLE_PROFILE = [
+        "{",
+        '  "series": "异环",',
+        '  "entries": [',
+        "    {",
+        '      "name": "薄荷",',
+        '      "profile": {',
+        '        "bio": "异象管理局收容二组预备骨干，海特洛市平价美食活地图。",',
+        '        "birthday": "6月1日",',
+        '        "height": "152cm",',
+        '        "cv": "陈雨（中）／鬼头明里（日）",',
+        '        "title": "异象管理局收容二组 · 预备骨干",',
+        '        "personality": "元气、话痨、自来熟、笨蛋",',
+        '        "traits": "猫耳、猫尾、青发粉瞳、粗眉、十字瞳孔",',
+        '        "memo": "梦想是成为收容组骨干。"',
+        "      },",
+        '      "quotes": [',
+        '        "呀嚯！是收容二组的薄荷！",',
+        '        "收容安全考试的成绩通告……那个不算，别提。"',
+        "      ],",
+        '      "tier": "A"',
+        "    },",
+        "    {",
+        '      "id": "yihuan_nanally",',
+        '      "profile": { "cv": "宋媛媛（中）／竹达彩奈（日）", "生日": "8月20日" },',
+        '      "tier": "S"',
+        "    }",
+        "  ]",
+        "}"
+      ].join("\n");
+
+      // 单角色形态：弹窗「填入示例」用（多角色用的就是上面那份 entries 版）
+      var HELP_EXAMPLE_PROFILE_SINGLE = [
+        "{",
+        '  "name": "薄荷",',
+        '  "series": "异环",',
+        '  "profile": {',
+        '    "bio": "异象管理局收容二组预备骨干，海特洛市平价美食活地图。",',
+        '    "birthday": "6月1日",',
+        '    "cv": "陈雨（中）／鬼头明里（日）",',
+        '    "title": "异象管理局收容二组 · 预备骨干",',
+        '    "personality": "元气、话痨、自来熟、笨蛋",',
+        '    "traits": "猫耳、猫尾、青发粉瞳、粗眉、十字瞳孔",',
+        '    "memo": "梦想是成为收容组骨干。"',
+        "  },",
+        '  "quotes": [',
+        '    "呀嚯！是收容二组的薄荷！",',
+        '    "收容安全考试的成绩通告……那个不算，别提。"',
+        "  ],",
+        '  "tier": "A"',
+        "}"
+      ].join("\n");
+
+      var helpDocs = [
+        {
+          key: "general",
+          title: "通用约定",
+          intro: "两套导入都吃「粘贴 JSON」或「选 .json 文件」，编码一律 UTF-8。字段没填就等于不导入——不会把库里已有的内容清空。",
+          fields: [
+            { name: "顶层形态", type: "对象 / 数组", required: false,
+              desc: "一个对象 = 单条；数组 = 多条；{\"entries\": [...]}（可带 pack / series 给整批用）也认。" },
+            { name: "未知字段", type: "—", required: false,
+              desc: "不认识的键直接忽略，不会报错；多贴几个字段不影响导入。" },
+            { name: "上限", type: "—", required: false,
+              desc: "一次最多 500 条；解析不了的条目会被跳过并在预览里列出原因，不会中断整批。" }
+          ],
+          notes: [
+            "文件请用 UTF-8 保存。Windows 记事本按「ANSI」另存会变成 GBK，中文进后台就是乱码。",
+            "两套导入分工不同：JSON 带 tags_en 的走「导入角色」（**建角色**），只补档案的走「导入资料」（**补资料**）。",
+            "两套都支持中文键名（简介 / 生日 / 身高 / 声优 / 身份 / 性格 / 萌点 / 备注 / 印象语 / 评级），手写时不必记英文键。",
+            "「导入角色」与「导入资料」都会先给预览、由你确认后才写库；预览阶段不会改动任何数据。"
+          ]
+        },
+        {
+          key: "import_char",
+          title: "角色导入（建角色）",
+          intro: "把一个角色从零建进角色库：id / 名字 / 出图标签是硬门槛，其余可留空后到工坊慢慢补。",
+          where: "入口：角色库 →「导入角色」；作品库 →「批量导入角色」（作品名已预填，导入的条目统一归该作品）。",
+          fields: [
+            { name: "id", type: "字符串", required: true,
+              desc: "角色唯一标识，全库唯一（不同卷之间也不能重名）。建议 ASCII 小写 + 下划线。" },
+            { name: "name", type: "字符串", required: true, desc: "展示名，卡片与列表都显示它。" },
+            { name: "tags_en", type: "字符串", required: true,
+              desc: "英文 danbooru 风格标签，逗号分隔——出图靠它，写得越准画得越像。" },
+            { name: "series", type: "字符串", required: false,
+              desc: "作品名；作品库按它归类，留空则算「未填作品」。" },
+            { name: "category", type: "枚举", required: false,
+              desc: "anime / gal / game / other（动漫 / galgame / 游戏 / 其他），默认 other。" },
+            { name: "tier", type: "枚举", required: false, desc: "评级 S / A / B / C / D，卡片角标显示。" },
+            { name: "quotes", type: "字符串数组", required: false,
+              desc: "印象语，卡片按抽签种子随机显示其中一句；也接受单句 quote 字段。" },
+            { name: "color", type: "字符串", required: false, desc: "卡片主色，如 #E8B4C8。" },
+            { name: "strategy", type: "对象", required: false,
+              desc: "画法：{type: base|lora|img2img, loras, ref, denoise}。一般不用写，默认 base。" },
+            { name: "verified", type: "布尔", required: false,
+              desc: "是否启用。导入的条目一律按未验证入库，人工确认画得对再打开开关。" }
+          ],
+          example: HELP_EXAMPLE_CHAR,
+          exampleNote: "最小可用：id + name + tags_en",
+          notes: [
+            "全库按 id 去重，同时也拦「同名同作品但 id 不同」——避免同一个人在界面上出现两份。",
+            "勾「覆盖已有角色」时只改基础字段（名字 / 作品 / 标签 / 评级 / 印象语 / 颜色），参考图、封面、验证状态原样保留。",
+            "重复条目要合并请用「重复角色」工具：它会保留资产最全的那条，立绘与参考图自动并过去。"
+          ]
+        },
+        {
+          key: "import_profile",
+          title: "角色资料导入（补档案）",
+          intro: "插件联网检索拿不到资料时的兜底通道：把手上的角色档案（简介 / 生日 / 声优 / 印象语…）灌进已有角色；JSON 里带 tags_en 且勾了新建时，也能顺手把库里没有的角色建出来。",
+          where: "入口：角色库 →「导入资料」；角色详情 → 资料页签 →「从 JSON 导入资料」（会带上当前角色，可勾「只处理这个角色」）。",
+          fields: [
+            { name: "id", type: "字符串", required: false,
+              desc: "按 id 定位已有角色。给了 id 就不用写名字，匹配最准。" },
+            { name: "name", type: "字符串", required: false,
+              desc: "角色名。id 与 name 至少给一个。" },
+            { name: "series", type: "字符串", required: false,
+              desc: "作品名。和 name 一起用可精确定位，避免同名角色串台；顶层写一次即对整批生效。" },
+            { name: "profile.bio", type: "字符串", required: false, desc: "一句话简介（资料页「简介」）。" },
+            { name: "profile.birthday", type: "字符串", required: false, desc: "生日，如「6月1日」。" },
+            { name: "profile.height", type: "字符串", required: false, desc: "身高，带单位，如「152cm」。" },
+            { name: "profile.cv", type: "字符串", required: false, desc: "声优 / 配音，中配日配可都写上。" },
+            { name: "profile.title", type: "字符串", required: false, desc: "作品内身份 / 称号。" },
+            { name: "profile.personality", type: "字符串", required: false, desc: "性格关键词。" },
+            { name: "profile.traits", type: "字符串", required: false, desc: "萌点 / 标志性特征，顿号分隔。" },
+            { name: "profile.memo", type: "字符串", required: false, desc: "其他想展示的备注。" },
+            { name: "quotes", type: "数组 / 按行文本", required: false,
+              desc: "印象语，每行（每个元素）一句；卡片按种子随机取一句。" },
+            { name: "tier", type: "枚举", required: false, desc: "评级 S / A / B / C / D。" },
+            { name: "tags_en", type: "字符串", required: false,
+              desc: "仅「未匹配 + 勾了新建」时用：没有它建不出角色，只能跳过。" }
+          ],
+          example: HELP_EXAMPLE_PROFILE,
+          exampleNote: "第一条按名字匹配，第二条按 id 匹配",
+          notes: [
+            "匹配顺序：id → 名字+作品 → 全库唯一的名字。三档都没匹到才算未匹配（才会走新建 / 跳过）。",
+            "冲突策略二选一：**跳过**（只补空，已有内容的字段一个字都不改）／**覆盖**（用 JSON 的值替换）。",
+            "维度开关是整维生效：只想补印象语，就把其它维度全关，其他内容绝不会被动。",
+            "「已有内容」的判定：资料字段非空串、印象语非空数组、评级非空。空值才叫空缺。",
+            "只写资料：strategy（参考图 / 画法）、cover、avatar、verified、added_at 一概不碰。",
+            "预览里的「写入 / 覆盖 / 跳过」是按当前开关实时算的，改开关立刻变；改完不用重新解析。"
+          ]
+        }
+      ];
+
+      function scrollToHelp(key) {
+        var el = document.getElementById("help-sec-" + key);
+        if (el && el.scrollIntoView) {
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
+      function gotoHelp(key) {
+        piOpen.value = false;
+        setMenu("help");
+        // 切页后 DOM 才挂上，等一帧再滚
+        setTimeout(function () { scrollToHelp(key); }, 80);
+      }
+
+      // ==================== v0.44.0 角色资料导入 ====================
+      // 两步：先 /pools/profile_import/preview 只读解析（匹配结果 + 当前值 + 各维度
+      // 命中条数），前端本地算「写入 / 覆盖 / 跳过」；改开关与策略不再往返后端。
+      // /pools/profile_import 才落库，且只写「勾选的条目 × 启用的维度」。
+      var piOpen = Vue.ref(false);
+      var piMode = Vue.ref("multi");
+      var piText = Vue.ref("");
+      var piParsing = Vue.ref(false);
+      var piBusy = Vue.ref(false);
+      var piPreview = Vue.ref(null);
+      var piResult = Vue.ref(null);
+      var piConflict = Vue.ref("skip");
+      var piCreate = Vue.ref(false);
+      var piPack = Vue.ref("");
+      var piDims = Vue.ref({});
+      var piSel = Vue.ref({});
+      var piOnlyFocus = Vue.ref(false);
+      var piFocus = Vue.ref({ id: "", name: "" });
+
+      // 维度清单 = 资料 8 个字段 + 印象语 + 评级；顺序与资料页表单一致
+      var PI_EXTRA_DIMS = [
+        { key: "quotes", label: "印象语" },
+        { key: "tier", label: "评级" }
+      ];
+      var piDimList = Vue.computed(function () {
+        var counts = {};
+        ((piPreview.value && piPreview.value.fields) || []).forEach(function (f) {
+          counts[f.key] = f.count;
+        });
+        var out = profileFields.map(function (f) {
+          return { key: f.key, label: f.label, count: counts[f.key] || 0 };
+        });
+        PI_EXTRA_DIMS.forEach(function (d) {
+          out.push({ key: d.key, label: d.label, count: counts[d.key] || 0 });
+        });
+        return out;
+      });
+      var piTitle = Vue.computed(function () {
+        return piMode.value === "single" ? "导入角色资料 · 单角色" : "导入角色资料 · 多角色";
+      });
+      var piPlaceholder = Vue.computed(function () {
+        if (piMode.value === "single") {
+          return '{\n  "name": "薄荷",\n  "series": "异环",\n  "profile": { "bio": "一句话简介", "birthday": "6月1日" },\n  "quotes": ["呀嚯！"],\n  "tier": "A"\n}';
+        }
+        return '[\n  { "name": "薄荷", "profile": { "bio": "…" }, "quotes": ["…"] },\n  { "name": "娜娜莉", "profile": { "bio": "…" } }\n]';
+      });
+      var piSummaryText = Vue.computed(function () {
+        var p = piPreview.value;
+        if (!p) { return ""; }
+        var s = "共 " + p.total + " 条：库里已有 " + p.matched + " 条";
+        if (p.unmatched) {
+          s += "、未匹配 " + p.unmatched + " 条（其中 " + p.create_ready + " 条可新建）";
+        }
+        return s + "。";
+      });
+      var piBadText = Vue.computed(function () {
+        var bad = (piPreview.value && piPreview.value.bad) || [];
+        var seg = bad.slice(0, 3).map(function (b) {
+          return "第 " + (b.index + 1) + " 条" + (b.name ? "「" + b.name + "」" : "")
+            + "：" + b.reason;
+        }).join("；");
+        return seg + (bad.length > 3 ? "…" : "");
+      });
+      var piResultText = Vue.computed(function () {
+        var r = piResult.value;
+        if (!r) { return ""; }
+        return "已写入 " + r.written + " 项、新建 " + r.created + " 个角色、更新 "
+          + r.updated + " 个角色；跳过 " + r.skipped_items + " 条、未选中 "
+          + r.unselected + " 条。";
+      });
+      // 逐条计划：每条 × 每维度算出「写入 / 覆盖 / 跳过 / 不导入」
+      var piRows = Vue.computed(function () {
+        var p = piPreview.value;
+        if (!p) { return []; }
+        var list = (p.items || []);
+        if (piOnlyFocus.value && (piFocus.value.id || piFocus.value.name)) {
+          var fid = String(piFocus.value.id || "").toLowerCase();
+          var fnm = String(piFocus.value.name || "").toLowerCase();
+          list = list.filter(function (r) {
+            return (!!fid && String(r.id || "").toLowerCase() === fid)
+              || (!!fnm && String(r.name || "").toLowerCase() === fnm);
+          });
+        }
+        var dims = piDimList.value;
+        var createOn = !!piCreate.value;   // 让本 computed 依赖「未匹配新建」开关
+        return list.map(function (r) {
+          var row = {
+            key: r.key, id: r.id, name: r.name, matched: !!r.matched,
+            match_by: r.match_by || "", pack: r.pack || "",
+            can_create: !!r.can_create, dims: []
+          };
+          // 未匹配又不会新建的条目，整条都不会落库——逐维度直接标「不导入」，
+          // 免得概览里一排「写入」让人以为它会写进去
+          var dropped = !row.matched && !(row.can_create && createOn);
+          dims.forEach(function (d) {
+            var cur = (r.current || {})[d.key];
+            var inc = (r.incoming || {})[d.key];
+            var hasCur = (d.key === "quotes") ? !!(cur && cur.length) : !!cur;
+            var hasInc = (d.key === "quotes") ? !!(inc && inc.length) : !!inc;
+            var act = "off", text = "空", tip = "本次 JSON 里没有这个维度";
+            if (dropped) {
+              act = "off"; text = "不导入"; tip = "该条目不会导入（未匹配且未勾新建）";
+            } else if (!piDims.value[d.key]) {
+              act = "off"; text = "不导入"; tip = "该维度已关闭，不会写库";
+            } else if (hasInc) {
+              if (!hasCur) {
+                act = "write"; text = "写入"; tip = "库里为空，将写入";
+              } else if (piConflict.value === "overwrite") {
+                act = "over"; text = "覆盖"; tip = "已有内容，将用导入值替换";
+              } else {
+                act = "keep"; text = "跳过"; tip = "已有内容，保持原样（只补空）";
+              }
+            }
+            row.dims.push({ key: d.key, label: d.label, act: act, text: text, tip: tip });
+          });
+          return row;
+        });
+      });
+      var piSelCount = Vue.computed(function () {
+        var n = 0, sel = piSel.value || {};
+        (piRows.value || []).forEach(function (r) { if (sel[r.key]) { n += 1; } });
+        return n;
+      });
+      var piPlanText = Vue.computed(function () {
+        var w = 0, o = 0, k = 0, c = 0, bad = 0;
+        var sel = piSel.value || {};
+        (piRows.value || []).forEach(function (r) {
+          if (!sel[r.key]) { return; }
+          if (!r.matched) {
+            if (r.can_create && piCreate.value) { c += 1; } else { bad += 1; }
+          }
+          r.dims.forEach(function (d) {
+            if (d.act === "write") { w += 1; }
+            else if (d.act === "over") { o += 1; }
+            else if (d.act === "keep") { k += 1; }
+          });
+        });
+        return "将写入 " + w + " 项 · 覆盖 " + o + " 项 · 跳过 " + k + " 项"
+          + (c ? " · 新建 " + c + " 个角色" : "")
+          + (bad ? " · " + bad + " 条无法处理" : "");
+      });
+      function piDefaultDims() {
+        var d = {};
+        piDimList.value.forEach(function (x) { d[x.key] = true; });
+        return d;
+      }
+      function piDimsAll(on) {
+        var d = {};
+        piDimList.value.forEach(function (x) { d[x.key] = !!on; });
+        piDims.value = d;
+      }
+      function piSelAll(on) {
+        var sel = {};
+        (piRows.value || []).forEach(function (r) { sel[r.key] = !!on; });
+        piSel.value = sel;
+      }
+      function piFillSample() {
+        piText.value = piMode.value === "single"
+          ? HELP_EXAMPLE_PROFILE_SINGLE : HELP_EXAMPLE_PROFILE;
+      }
+      function piOnFile(evt) {
+        var f = evt && evt.target && evt.target.files && evt.target.files[0];
+        if (!f) { return; }
+        var r = new FileReader();
+        r.onload = function () { piText.value = String(r.result || ""); };
+        r.readAsText(f);
+        evt.target.value = "";
+      }
+      function openProfileImport(focusId) {
+        piOpen.value = true;
+        piResult.value = null;
+        piPreview.value = null;
+        piSel.value = {};
+        piDims.value = piDefaultDims();
+        piConflict.value = "skip";
+        piCreate.value = false;
+        piPack.value = "";
+        piOnlyFocus.value = false;
+        piFocus.value = { id: "", name: "" };
+        var fid = String(focusId || "").trim();
+        if (fid) {
+          var e = allEntries.value.find(function (x) { return x.id === fid; });
+          if (e) {
+            piFocus.value = { id: e.id, name: e.name };
+            piOnlyFocus.value = true;   // 从详情页进来默认只处理当前角色
+          }
+        }
+      }
+      async function piParse() {
+        var text = String(piText.value || "").trim();
+        if (!text) { message.error("请先粘贴或上传 JSON"); return; }
+        piParsing.value = true;
+        piResult.value = null;
+        try {
+          var res = await apiPost("pools/profile_import/preview", { text: text });
+          piPreview.value = res || null;
+          if (res && res.pack_hint && !String(piPack.value || "").trim()) {
+            piPack.value = String(res.pack_hint);
+          }
+          var sel = {};
+          (piRows.value || []).forEach(function (r) { sel[r.key] = true; });
+          piSel.value = sel;
+          if (res && res.total) {
+            message.success("解析完成：共 " + res.total + " 条");
+          }
+          // 从角色详情进来默认「只处理当前角色」，但贴进来的 JSON 可能压根没有这
+          // 个角色——空列表会让人以为解析失败，这里自动放开筛选并说明。
+          if (piOnlyFocus.value && !(piRows.value || []).length) {
+            piOnlyFocus.value = false;
+            var sel2 = {};
+            (piRows.value || []).forEach(function (r) { sel2[r.key] = true; });
+            piSel.value = sel2;
+            message.warning("JSON 里没有当前角色的条目，已改为显示全部");
+          }
+        } catch (e) {
+          piPreview.value = null;
+        } finally {
+          piParsing.value = false;
+        }
+      }
+      async function piDoImport() {
+        var text = String(piText.value || "").trim();
+        if (!text || !piPreview.value) { message.error("请先点「解析预览」"); return; }
+        var sel = piSel.value || {};
+        var only = (piRows.value || []).filter(function (r) { return !!sel[r.key]; })
+          .map(function (r) { return r.key; });
+        if (!only.length) { message.warning("请至少勾选一条"); return; }
+        var fields = piDimList.value.filter(function (d) {
+          return !!piDims.value[d.key];
+        }).map(function (d) { return d.key; });
+        if (!fields.length) { message.warning("至少启用一个导入维度"); return; }
+        piBusy.value = true;
+        piResult.value = null;
+        try {
+          var res = await apiPost("pools/profile_import", {
+            text: text,
+            fields: fields,
+            conflict: piConflict.value,
+            create_missing: !!piCreate.value,
+            only: only,
+            pack: String(piPack.value || "").trim()
+          });
+          piResult.value = res || null;
+          message.success("导入完成：写入 " + ((res && res.written) || 0) + " 项");
+          await refreshAll();
+          // 重新解析一次，让「当前值」与维度计数反映刚落库的结果；
+          // 这里刻意直走 bridge（失败不弹 toast），因为它只是刷新概览。
+          try {
+            var pv = await bridge.apiPost("pools/profile_import/preview",
+                                          plain({ text: text }, {}));
+            if (pv && pv.items) {
+              piPreview.value = pv;
+              var sel2 = {};
+              piRows.value.forEach(function (r) { sel2[r.key] = true; });
+              piSel.value = sel2;
+            }
+          } catch (e2) { /* 概览没刷新不影响已落库的结果 */ }
+        } catch (e) {
+          /* apiPost 已提示 */
+        } finally {
+          piBusy.value = false;
+        }
+      }
+
       // 头像（v0.31.0）：上传 / 从已有图裁取 / AI 生成 / 批量（批量入口在角色库工具栏）
       var galAvatarThumb = Vue.ref("");
       var galAvatarBusy = Vue.ref(false);
@@ -8925,6 +9556,19 @@
         importOverwrite: importOverwrite,
         openImport: openImport, openImportForWork: openImportForWork,
         onImportFile: onImportFile, doImport: doImport,
+        // v0.44.0：角色资料导入（离线灌档案）+ 帮助页
+        piOpen: piOpen, piMode: piMode, piText: piText, piParsing: piParsing,
+        piBusy: piBusy, piPreview: piPreview, piResult: piResult,
+        piConflict: piConflict, piCreate: piCreate, piPack: piPack,
+        piDims: piDims, piSel: piSel, piOnlyFocus: piOnlyFocus, piFocus: piFocus,
+        piDimList: piDimList, piTitle: piTitle, piPlaceholder: piPlaceholder,
+        piRows: piRows, piSelCount: piSelCount, piPlanText: piPlanText,
+        piSummaryText: piSummaryText, piBadText: piBadText,
+        piResultText: piResultText,
+        openProfileImport: openProfileImport, piParse: piParse,
+        piDoImport: piDoImport, piOnFile: piOnFile, piFillSample: piFillSample,
+        piDimsAll: piDimsAll, piSelAll: piSelAll,
+        helpDocs: helpDocs, scrollToHelp: scrollToHelp, gotoHelp: gotoHelp,
         dedupeOpen: dedupeOpen, dedupeGroups: dedupeGroups,
         dedupeSelected: dedupeSelected, dedupeBusy: dedupeBusy,
         dedupeResult: dedupeResult, dedupeSelectedCount: dedupeSelectedCount,

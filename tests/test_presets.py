@@ -39,7 +39,8 @@ def check(name, cond, detail=""):
 
 # ---------- 1. 静态：全链路接线 ----------
 check("menuOpts 含素材库页签", '{ label: "素材库", key: "presets" }' in PAGE)
-check("后端页签白名单含 presets", '"bind", "presets", "config"' in API)
+check("后端页签白名单含 presets",
+      '"bind", "presets", "help", "config"' in API)
 check("register 挂了 provider", "prompt_gen.set_custom_presets(lambda: _PRESETS_CACHE)" in API)
 check("routes 注册 /presets 读写两条",
       API.count('("/presets", h_presets_') == 2)

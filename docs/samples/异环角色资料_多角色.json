@@ -1,0 +1,121 @@
+{
+  "_readme": "《异环》(Neverness to Everness) 5 位角色资料样例，用于「角色库 → 导入资料」多角色导入测试。资料整理自萌娘百科/百度百科等公开资料（2026-11 检索），可能与游戏内最新文本有出入。带 tags_en 是为了同一份文件也能走「导入角色」建角色；只补档案时 tags_en 会被忽略。",
+  "series": "异环",
+  "entries": [
+    {
+      "id": "yihuan_mint",
+      "name": "薄荷",
+      "series": "异环",
+      "category": "game",
+      "tier": "A",
+      "color": "#8FE3D8",
+      "tags_en": "1girl, solo, mint hair, pink eyes, cat ears, cat tail, hairband, thick eyebrows, cross-shaped pupils, bell, gloves, high-waist shorts, thigh ring, white thighhighs, short boots, waist bag",
+      "profile": {
+        "bio": "异象管理局收容二组预备骨干，同事街坊的人名词典，海特洛市平价美食活地图。",
+        "birthday": "6月1日",
+        "cv": "陈雨（中）／鬼头明里（日）",
+        "title": "异象管理局收容二组 · 预备骨干",
+        "personality": "元气话痨、自来熟、嗅觉灵敏、考试苦手",
+        "traits": "猫耳猫尾、青发粉瞳、粗眉、十字瞳孔、铃铛",
+        "memo": "异能「猫力喷嚏」，灵属性近战输出。梦想是成为异象管理局收容组骨干，最怕收容安全考试的成绩通告。"
+      },
+      "quotes": [
+        "呀嚯！是收容二组的薄荷！有什么需要帮忙的尽管找我，可可！",
+        "收容安全考试的成绩通告……那个不算，别提那个。",
+        "大热天出外勤也能偷吃一支碎雪冰淇淋，这可是我的小确幸！"
+      ]
+    },
+    {
+      "id": "yihuan_nanally",
+      "name": "娜娜莉",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#E86A6A",
+      "tags_en": "1girl, solo, red hair, red eyes, animal ears, ahoge, hair intakes, x hair ornament, glasses, collar, necktie, pleated skirt, white thighhighs, high heels, tail",
+      "profile": {
+        "bio": "古董店「伊波恩」一号台柱，桥间地最有名望的家族「柯林斯家族」一代目，自称未来全海特洛最伟大的家族老大。",
+        "birthday": "8月20日",
+        "cv": "宋媛媛（中）／竹达彩奈（日）",
+        "title": "伊波恩古董店 · 一号台柱／柯林斯家族一代目",
+        "personality": "张扬爽朗、大大咧咧、中二、爱幻想、极看重同伴",
+        "traits": "红发赤瞳、兽耳、呆毛、眼镜、X 形发饰、百褶裙",
+        "memo": "S 级灵属性主 C，异能操控重力，反重力跑墙；长文档看两行就走神。全名娜娜莉·柯林斯（Nanally Coluccis）。"
+      },
+      "quotes": [
+        "在下——不对，咳咳，鄙人……我！娜娜莉·柯林斯，是未来全海特洛最伟大的家族——「柯林斯家族」的一代目！",
+        "重振家族荣光，就从今天开始！你，要不要加入我的家族？",
+        "那种又长又绕的卷宗……看两行就走神，别指望我。"
+      ]
+    },
+    {
+      "id": "yihuan_sakiri",
+      "name": "早雾",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#7FA8C9",
+      "tags_en": "1girl, solo, grey-blue hair, short hair, blue eyes, single horn, beret, hair clip, sweater, necktie, sailor collar, pleated skirt, bandaid, loose socks, loafers, child, fang",
+      "profile": {
+        "bio": "古董店「伊波恩」店员，冰箱便利贴规则的制定者，自称伊波恩最厉害的「小霸王」。",
+        "birthday": "11月7日",
+        "cv": "蔡书瑾（中）／伊藤美来（日）",
+        "title": "伊波恩古董店 · 冰箱规则制定者",
+        "personality": "古灵精怪、嚣张毒舌、对规则较真、重情义",
+        "traits": "幼儿体型、额前小尖角、贝雷帽、虎牙、黑白水手服、巨锤鬼郎丸",
+        "memo": "S 级咒属性控场辅助，异能「捉鬼游戏」可召唤饕餮鬼郎丸（平时化作异象巨锤）。从小被店长零收养。"
+      },
+      "quotes": [
+        "第一，不准给鬼郎丸乱喂东西！第二，不准低头看人！第三，不准打开冰箱冷藏室第三格！",
+        "本大爷就是伊波恩最厉害的早雾！",
+        "什么东西被吞了，或者被咬了屁股，伊波恩古董店概不赔付。"
+      ]
+    },
+    {
+      "id": "yihuan_hotori",
+      "name": "浔",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#B0484B",
+      "tags_en": "1girl, solo, black hair, long hair, red eyes, kimono, japanese clothes, off-shoulder, wide sleeves, eyeshadow, earrings, paper umbrella, katana, geta, tall",
+      "profile": {
+        "bio": "伊波恩古董店的店长，掌管时间流速的「时间魔女」，每天酩酊大醉却总在关键处稳住局面的成年人。",
+        "birthday": "12月20日",
+        "cv": "龟娘（中）／伊藤静（日）",
+        "title": "伊波恩古董店 · 店长",
+        "personality": "散漫慵懒、精打细算的财迷、城府深、默默庇护店内所有人",
+        "traits": "黑发赤瞳、黑红和服、赤红油纸伞、太刀、木屐、酒豪但酒品差",
+        "memo": "S 级光属性输出，异能「杜伊诺哀歌」操控时间流速。全名月退浔（Tsukinoki Hotori），娜娜莉崇拜的大姐头。"
+      },
+      "quotes": [
+        "「现在」，兴许是最值得纪念的时候……也说不定呢？",
+        "成交！……唔，这宝贝好像亏了。算了，先喝一杯。",
+        "古董店的门槛，可不是谁都能踩进来的。"
+      ]
+    },
+    {
+      "id": "yihuan_hathor",
+      "name": "哈索尔",
+      "series": "异环",
+      "category": "game",
+      "tier": "S",
+      "color": "#C9CFD8",
+      "tags_en": "1girl, solo, silver hair, long hair, grey eyes, single wing, white wings, ahoge, hair intakes, hair streaks, gloves, high-waist shorts, thigh ring, knee boots, motorcycle, delivery uniform",
+      "profile": {
+        "bio": "斯特利速递的王牌快递员，派件极快、永不迟到，暴风雨里也能精准抵达没有门牌的地址。",
+        "birthday": "8月29日",
+        "cv": "洪海天（中）／市之濑加那（日）",
+        "title": "斯特利速递 · 精英快递员",
+        "personality": "冷静寡言、极度自律、时间观念极强、外冷内热、重诺守信",
+        "traits": "银白长发、灰瞳、单侧白羽翼、呆毛、机车制服、过膝靴",
+        "memo": "S 级相属性高机动近战爆发，异能「役徊生」。异能曾严重失控，被「老师」担保并训练后学会控制，仍有失控风险。"
+      },
+      "quotes": [
+        "遵照委托，请您核对快递，并于「签收凭证」上签署姓名；确定签收后，委托费用即刻扣除。",
+        "路线再远、楼层再高，都不是迟到的理由。",
+        "……请不要靠太近。我的异能，还没有完全听话。"
+      ]
+    }
+  ]
+}

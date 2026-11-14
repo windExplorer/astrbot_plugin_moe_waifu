@@ -3129,8 +3129,9 @@ async def h_config_set(plugin) -> dict:
 # 旧键 records 保留（老记忆值仍落在抽签记录页，不会跳回角色库）。
 # v0.10.0：新增「总览」并放到第一栏，同时成为无记忆时的默认页签。
 # v0.43.0：新增「素材库」页签（主题 / 模板 / 场景 / 维度词表增删改）
+# v0.44.0：新增「帮助」页签（导入格式等文档；放在「配置」之前）
 _UI_MENUS = ("overview", "chars", "works", "try", "records", "stats",
-             "users", "debug", "bind", "presets", "config")
+             "users", "debug", "bind", "presets", "help", "config")
 
 
 def _ui_state_path(plugin) -> Path:
@@ -4585,6 +4586,466 @@ async def h_profile_gen(plugin) -> dict:
                "web_reason": web_reason})
 
 
+# ---------- 角色资料导入（v0.44.0） ----------
+# 背景：插件侧联网检索经常拿不到资料（无搜索提供商 / 模型没联网 / 站方反爬），
+# 用户手上往往已经有整理好的角色档案。这里提供一条「离线灌资料」的通道：
+# 粘贴或上传 JSON → 预览（逐条匹配结果 + 逐维度将写/将跳过）→ 勾维度与策略后落库。
+# 与 /pools/import 的分工：那个是**建角色**（id/name/tags_en + 画法），
+# 这个是**补资料**（profile / 印象语 / 评级），两者互不替代。
+
+# 可导入的「维度」：8 个百科字段 + 印象语 + 评级。
+# 与 _PROFILE_KEYS 的差别只在 quotes / tier 不在 profile dict 里。
+PROFILE_IMPORT_FIELDS = tuple(_PROFILE_KEYS) + ("quotes", "tier")
+
+# 手写 JSON 常见的中文键别名（键名大小写、空格不敏感）。
+# 用户多半是照着角色页手抄或让别家 AI 生成，不该强迫他们记住英文键名。
+_PROFILE_KEY_ALIASES = {
+    "简介": "bio", "介绍": "bio", "角色简介": "bio", "角色介绍": "bio", "bio": "bio",
+    "生日": "birthday", "出生日期": "birthday", "birthday": "birthday",
+    "身高": "height", "height": "height",
+    "声优": "cv", "配音": "cv", "声优/配音": "cv", "cv": "cv",
+    "身份": "title", "称号": "title", "职业": "title", "title": "title",
+    "性格": "personality", "personality": "personality",
+    "萌点": "traits", "特征": "traits", "萌点/特征": "traits", "traits": "traits",
+    "备注": "memo", "memo": "memo",
+    "印象语": "quotes", "台词": "quotes", "语录": "quotes", "口头禅": "quotes",
+    "quotes": "quotes", "quote": "quotes",
+    "评级": "tier", "稀有度": "tier", "tier": "tier",
+}
+
+# 冲突策略：skip = 只补空（已有内容的字段一律不动）；overwrite = 用导入内容覆盖。
+PROFILE_IMPORT_CONFLICTS = ("skip", "overwrite")
+
+
+def _imp_str(value, limit: int = 500) -> str:
+    """导入值统一成去空白、限长的字符串（None / 数字 / 布尔都能吃）。"""
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        value = "、".join(str(x).strip() for x in value if str(x).strip())
+    return str(value).strip()[:limit]
+
+
+def _imp_field_key(key) -> str:
+    """任意键名 → 维度 key；不认识返回空串。"""
+    k = str(key or "").strip()
+    if not k:
+        return ""
+    low = k.lower().replace(" ", "").replace("_", "")
+    return _PROFILE_KEY_ALIASES.get(low) or _PROFILE_KEY_ALIASES.get(k) or ""
+
+
+def _imp_field_value(key: str, value):
+    """维度取值清洗：quotes 去重成列表、tier 限定评级、其余转字符串。"""
+    if key == "quotes":
+        return _clean_quote_lines(value)
+    if key == "tier":
+        t = _imp_str(value, 2).upper()
+        return t if t in ("S", "A", "B", "C", "D") else ""
+    return _imp_str(value, 500)
+
+
+def _profile_import_item(raw) -> tuple:
+    """单条归一化 → (item, reason)；reason 非空表示这条不可用。"""
+    if not isinstance(raw, dict):
+        return None, "条目不是 JSON 对象"
+    name = _imp_str(raw.get("name") or raw.get("名字") or raw.get("角色名")
+                    or raw.get("角色"), 60)
+    cid = _imp_str(raw.get("id") or raw.get("char_id") or raw.get("角色id"), 80)
+    series = _imp_str(raw.get("series") or raw.get("作品") or raw.get("作品名")
+                      or raw.get("所属作品"), 60)
+    if not name and not cid:
+        return None, "缺少 name / id，无法识别是哪个角色"
+    incoming: dict = {}
+    # 先读 profile 子对象、再读平铺键：同名字段以 profile 块为准（更明确）
+    for src in (raw.get("profile") or raw.get("资料") or {}, raw):
+        if not isinstance(src, dict):
+            continue
+        for k, v in src.items():
+            key = _imp_field_key(k)
+            if not key or key in incoming:
+                continue
+            val = _imp_field_value(key, v)
+            if val:
+                incoming[key] = val
+    if not incoming:
+        return None, "没有任何可导入的资料字段"
+    return {
+        "id": cid,
+        "name": name,
+        "series": series,
+        "tags_en": _imp_str(raw.get("tags_en") or raw.get("tags") or "", 400),
+        "category": _imp_str(raw.get("category") or raw.get("分类") or "", 20).lower(),
+        "color": _imp_str(raw.get("color") or raw.get("颜色") or "", 20),
+        "incoming": incoming,
+    }, ""
+
+
+def _profile_import_parse(text: str) -> tuple:
+    """解析导入文本 → (items, pack_hint, series_hint, bad)。解析失败抛 ValueError。
+
+    接受三种顶层形态（与 /pools/import 口径一致，降低用户心智负担）：
+      单个角色对象 {"name": ...} / 角色数组 [...] / 卷对象 {"pack":..., "entries":[...]}。
+    """
+    try:
+        obj = json.loads(text)
+    except Exception as exc:
+        raise ValueError("JSON 解析失败：" + str(exc)[:160])
+    pack_hint = series_hint = ""
+    if isinstance(obj, dict):
+        arr = None
+        for key in ("entries", "characters", "items", "roles", "characters_list"):
+            if isinstance(obj.get(key), list):
+                arr = obj[key]
+                break
+        if arr is None:
+            arr = [obj]
+        pack_hint = _imp_str(obj.get("pack") or obj.get("卷名"), 60)
+        series_hint = _imp_str(obj.get("series") or obj.get("作品"), 60)
+    elif isinstance(obj, list):
+        arr = obj
+    else:
+        raise ValueError('JSON 顶层需为「角色对象」「角色数组」或 {"entries": [...]}')
+    if not arr:
+        raise ValueError("没有解析到任何角色条目")
+    if len(arr) > 500:
+        raise ValueError("一次最多导入 500 条（当前 %d 条）" % len(arr))
+    items, bad = [], []
+    for idx, raw in enumerate(arr):
+        item, reason = _profile_import_item(raw)
+        if item is None:
+            bad.append({"index": idx, "reason": reason,
+                        "name": _imp_str((raw or {}).get("name")
+                                         if isinstance(raw, dict) else "", 40)})
+            continue
+        item["index"] = idx
+        items.append(item)
+    if not items:
+        raise ValueError("没有可用条目：" + (bad[0]["reason"] if bad else "内容为空"))
+    return items, pack_hint, series_hint, bad
+
+
+def _profile_import_index(plugin) -> dict:
+    """全库索引 + 卷数据缓存。
+
+    by_id / by_ns（名字+作品）/ by_name（同名可能多条，只有唯一命中才算匹配）——
+    匹配顺序就是这三档，与用户直觉一致：先按 id，再按「作品 + 名字」，最后
+    只剩名字且全库唯一才认。
+    """
+    idx = {"by_id": {}, "by_ns": {}, "by_name": {}, "packs": {}}
+    for pack in pool.load_packs(_pools_dir(plugin), logger):
+        loaded = _load_pack_file(plugin, pack["pack"])
+        if loaded is None:
+            continue
+        path, data = loaded
+        if not isinstance(data, dict) or not isinstance(data.get("entries"), list):
+            continue
+        idx["packs"][pack["pack"]] = (path, data)
+        for i, raw in enumerate(data["entries"]):
+            e = pool.normalize_entry(raw, pack["pack"])
+            if not e:
+                continue
+            idx["by_id"].setdefault(e["id"], (pack["pack"], i))
+            nm = str(e["name"]).strip().lower()
+            sr = str(e["series"] or "").strip().lower()
+            if nm:
+                idx["by_name"].setdefault(nm, []).append((pack["pack"], i))
+                if sr:
+                    idx["by_ns"].setdefault((nm, sr), (pack["pack"], i))
+    return idx
+
+
+def _profile_locate(idx: dict, item: dict) -> tuple:
+    """定位已有角色 → ((卷名, 下标), 匹配方式)；没匹到返回 (None, "")。"""
+    cid = item.get("id") or ""
+    if cid and cid in idx["by_id"]:
+        return idx["by_id"][cid], "id"
+    nm = str(item.get("name") or "").strip().lower()
+    sr = str(item.get("series") or "").strip().lower()
+    if nm and sr:
+        hit = idx["by_ns"].get((nm, sr))
+        if hit:
+            return hit, "名字+作品"
+    if nm:
+        hits = idx["by_name"].get(nm) or []
+        if len(hits) == 1:
+            return hits[0], "名字"
+    return None, ""
+
+
+def _entry_profile_now(raw) -> dict:
+    """条目当前值（只取可导入维度；空值不出现）——预览与冲突判定都用它。"""
+    e = raw if isinstance(raw, dict) else {}
+    prof = e.get("profile") if isinstance(e.get("profile"), dict) else {}
+    out = {}
+    for key in _PROFILE_KEYS:
+        val = _imp_str(prof.get(key), 500)
+        if val:
+            out[key] = val
+    quotes = []
+    if isinstance(e.get("quotes"), list):
+        quotes = [str(q).strip() for q in e["quotes"] if str(q).strip()]
+    single = _imp_str(e.get("quote"), 500)
+    if single and single not in quotes:
+        quotes.insert(0, single)
+    if quotes:
+        out["quotes"] = quotes[:20]
+    tier = _imp_str(e.get("tier"), 2).upper()
+    if tier:
+        out["tier"] = tier
+    return out
+
+
+def _apply_profile_fields(raw, incoming: dict, current: dict,
+                          fields: list, conflict: str) -> tuple:
+    """把一条导入写进原始条目（原地改）→ (已写维度, 跳过维度)。"""
+    if not isinstance(raw, dict):
+        return [], []
+    written, skipped = [], []
+    prof = raw.get("profile") if isinstance(raw.get("profile"), dict) else {}
+    prof_dirty = False
+    for key in fields:
+        val = incoming.get(key)
+        if not val:
+            continue
+        if key in _PROFILE_KEYS:
+            if current.get(key) and conflict == "skip":
+                skipped.append(key)
+                continue
+            prof[key] = val
+            prof_dirty = True
+        elif key == "quotes":
+            if current.get("quotes") and conflict == "skip":
+                skipped.append(key)
+                continue
+            raw["quotes"] = list(val)
+            raw["quote"] = val[0]
+        elif key == "tier":
+            if current.get("tier") and conflict == "skip":
+                skipped.append(key)
+                continue
+            raw["tier"] = val
+        else:
+            continue
+        written.append(key)
+    if prof_dirty:
+        # 只更新本次写入的键：条目原有、本次没导入的字段原样保留
+        raw["profile"] = prof
+    return written, skipped
+
+
+def _slug_char_id(name: str) -> str:
+    """中文名也能用的 id：能转 ASCII 就转，否则 imp_<短哈希>。"""
+    s = re.sub(r"[^0-9A-Za-z]+", "_", name or "").strip("_").lower()[:24]
+    tail = hashlib.sha1((name or "").encode("utf-8")).hexdigest()[:6]
+    return f"{s}_{tail}" if s else f"imp_{tail}"
+
+
+def _profile_import_new_entry(plugin, item: dict, pack_name: str,
+                              series_hint: str, idx: dict) -> dict | None:
+    """未匹配条目建成新角色（只有带 tags_en 才建：没画面提示的条目画不出来）。"""
+    if not item.get("name") or not item.get("tags_en"):
+        return None
+    cid = item.get("id") or _slug_char_id(item["name"])
+    while cid in idx["by_id"]:
+        cid = _slug_char_id(item["name"] + "_" + str(len(idx["by_id"])))
+    inc = item.get("incoming") or {}
+    prof = {k: v for k, v in inc.items() if k in _PROFILE_KEYS and v}
+    quotes = list(inc.get("quotes") or [])
+    entry = {
+        "id": cid,
+        "name": item["name"],
+        "series": item.get("series") or series_hint,
+        "pack": pack_name,
+        "category": item.get("category") or "other",
+        "tier": inc.get("tier") or "",
+        "strategy": {"type": "base"},
+        "tags_en": item["tags_en"],
+        "quote": quotes[0] if quotes else "",
+        "quotes": quotes,
+        "color": item.get("color") or "#E8B4C8",
+        "profile": prof,
+        "verified": False,
+    }
+    try:
+        entry["added_at"] = plugin._today()
+    except Exception:
+        entry["added_at"] = time.strftime("%Y-%m-%d")
+    return pool.normalize_entry(entry, pack_name)
+
+
+async def h_profile_import_preview(plugin) -> dict:
+    """角色资料导入 · 解析预览（只读，不写盘）。
+
+    返回逐条匹配结果 + 每条的「当前值 / 本次值」+ 各维度命中条数，
+    前端据此在本地算「将写入 / 将覆盖 / 将跳过」，改开关与策略不必再请求。
+    """
+    body = await _body()
+    text = str(body.get("text") or "").strip()
+    if not text:
+        return err("请粘贴或上传 JSON 文本")
+    try:
+        items, pack_hint, series_hint, bad = _profile_import_parse(text)
+    except ValueError as exc:
+        return err(str(exc))
+    idx = _profile_import_index(plugin)
+    rows = []
+    for it in items:
+        loc, how = _profile_locate(idx, it)
+        pack, current, raw = "", {}, None
+        if loc is not None:
+            pack, pos = loc
+            data = idx["packs"].get(pack)
+            if data and 0 <= pos < len(data[1]["entries"]):
+                raw = data[1]["entries"][pos]
+            current = _entry_profile_now(raw)
+        # 只给 id 不给名字的条目（单角色导入常见）用库里那条的名字补全，
+        # 否则预览列表里是一行空白，用户根本认不出勾了谁。
+        known = pool.normalize_entry(raw, pack) if raw is not None else None
+        rows.append({
+            "key": str(it["index"]),
+            "id": it["id"] or (known["id"] if known else ""),
+            "name": it["name"] or (known["name"] if known else ""),
+            "series": it["series"] or (known["series"] if known else "")
+                      or series_hint,
+            "matched": loc is not None,
+            "match_by": how,
+            "pack": pack,
+            "current": current,
+            "incoming": it["incoming"],
+            "can_create": bool(it["name"] and it["tags_en"]),
+            "tags_en": it["tags_en"],
+        })
+    fields = [{"key": k, "count": sum(1 for r in rows if r["incoming"].get(k))}
+              for k in PROFILE_IMPORT_FIELDS]
+    return ok({
+        "total": len(rows), "items": rows, "fields": fields, "bad": bad,
+        "pack_hint": pack_hint, "series_hint": series_hint,
+        "matched": sum(1 for r in rows if r["matched"]),
+        "unmatched": sum(1 for r in rows if not r["matched"]),
+        "create_ready": sum(1 for r in rows if not r["matched"] and r["can_create"]),
+    })
+
+
+async def h_profile_import(plugin) -> dict:
+    """角色资料导入 · 执行。
+
+    body：text（同预览）、fields（启用的维度，缺省全开）、
+    conflict（skip=只补空 / overwrite=覆盖）、create_missing（未匹配是否建新角色）、
+    only（勾选的条目 key 列表，缺省全部）、pack（新建角色的卷名）。
+    写的是卷文件原条目（只动本次维度），不动 strategy / 参考图 / 封面 / 头像。
+    """
+    body = await _body()
+    text = str(body.get("text") or "").strip()
+    if not text:
+        return err("请粘贴或上传 JSON 文本")
+    try:
+        items, pack_hint, series_hint, _bad = _profile_import_parse(text)
+    except ValueError as exc:
+        return err(str(exc))
+    raw_fields = body.get("fields")
+    fields = ([str(f) for f in raw_fields if str(f) in PROFILE_IMPORT_FIELDS]
+              if isinstance(raw_fields, list) else [])
+    if not fields:
+        fields = list(PROFILE_IMPORT_FIELDS)
+    conflict = str(body.get("conflict") or "").strip().lower()
+    if conflict not in PROFILE_IMPORT_CONFLICTS:
+        conflict = "skip"
+    create_missing = bool(body.get("create_missing", False))
+    only = body.get("only")
+    only_set = ({str(x) for x in only} if isinstance(only, list) else None)
+    pack_name = str(body.get("pack") or "").strip() or pack_hint or "imported"
+
+    idx = _profile_import_index(plugin)
+    results = []
+    created = updated = 0
+    written_total = skipped_total = 0
+    dirty: set = set()
+    for it in items:
+        key = str(it["index"])
+        loc, how = _profile_locate(idx, it)
+        head = {"key": key, "id": it["id"], "name": it["name"]}
+        if loc is not None:
+            # 只给 id 的条目用库里那条补全名字/作品，结果列表才看得懂
+            data = idx["packs"].get(loc[0])
+            rows_raw = data[1]["entries"] if data else []
+            if 0 <= loc[1] < len(rows_raw):
+                known = pool.normalize_entry(rows_raw[loc[1]], loc[0])
+                if known:
+                    head["name"] = head["name"] or known["name"]
+                    head["id"] = head["id"] or known["id"]
+        if only_set is not None and key not in only_set:
+            results.append({**head, "status": "unselected"})
+            continue
+        if loc is None:
+            new_entry = (_profile_import_new_entry(plugin, it, pack_name,
+                                                  series_hint, idx)
+                         if create_missing else None)
+            if new_entry is None:
+                reason = ("未匹配到角色" if not create_missing
+                          else "未匹配到角色，且缺少 tags_en 无法新建")
+                results.append({**head, "status": "skipped", "reason": reason,
+                                "written": [], "skipped": []})
+                continue
+            if pack_name not in idx["packs"]:
+                target = _pools_dir(plugin) / f"{pack_name}.json"
+                data = {"pack": pack_name, "title": pack_name,
+                        "enabled": True, "entries": []}
+                idx["packs"][pack_name] = (target, data)
+            data = idx["packs"][pack_name][1]
+            data["entries"].append(new_entry)
+            pos = len(data["entries"]) - 1
+            idx["by_id"][new_entry["id"]] = (pack_name, pos)
+            nm = str(new_entry["name"]).strip().lower()
+            idx["by_name"].setdefault(nm, []).append((pack_name, pos))
+            sr = str(new_entry["series"] or "").strip().lower()
+            if sr:
+                idx["by_ns"].setdefault((nm, sr), (pack_name, pos))
+            dirty.add(pack_name)
+            created += 1
+            written = sorted((new_entry.get("profile") or {}).keys())
+            if new_entry.get("quotes"):
+                written.append("quotes")
+            if new_entry.get("tier"):
+                written.append("tier")
+            written_total += len(written)
+            results.append({**head, "id": new_entry["id"], "status": "created",
+                            "pack": pack_name, "match_by": "",
+                            "written": written, "skipped": []})
+            continue
+        pack, pos = loc
+        entries = idx["packs"][pack][1]["entries"]
+        if not (0 <= pos < len(entries)):
+            results.append({**head, "status": "skipped", "reason": "索引错位，请刷新后重试",
+                            "written": [], "skipped": []})
+            continue
+        raw = entries[pos]
+        current = _entry_profile_now(raw)
+        written, skipped = _apply_profile_fields(raw, it["incoming"], current,
+                                                 fields, conflict)
+        if written:
+            dirty.add(pack)
+            updated += 1
+            written_total += len(written)
+        skipped_total += len(skipped)
+        results.append({**head, "status": "updated" if written else "unchanged",
+                        "pack": pack, "match_by": how,
+                        "written": written, "skipped": skipped})
+
+    if dirty:
+        for name in dirty:
+            path, data = idx["packs"][name]
+            _json_save(path, data)
+    return ok({
+        "created": created, "updated": updated,
+        "written": written_total, "skipped_fields": skipped_total,
+        "conflict": conflict, "fields": fields, "pack": pack_name,
+        "results": results,
+        "skipped_items": sum(1 for r in results if r["status"] == "skipped"),
+        "unselected": sum(1 for r in results if r["status"] == "unselected"),
+    })
+
+
 async def h_char_summary(plugin) -> dict:
     """角色速览：入库日期 / 首次与最近被抽 / 被抽次数 / 立绘数 / 平均生成耗时。
 
@@ -4904,6 +5365,9 @@ def register(plugin) -> None:
         # v0.31.0：角色资料 / 评级 / 首次日期 / 头像（详情页「资料」页签）
         ("/pools/profile_save", h_profile_save, ["POST"]),
         ("/pools/profile_gen", h_profile_gen, ["POST"]),
+        # v0.44.0：角色资料导入（离线灌档案：预览 + 执行，维度开关 / 覆盖或跳过）
+        ("/pools/profile_import/preview", h_profile_import_preview, ["POST"]),
+        ("/pools/profile_import", h_profile_import, ["POST"]),
         ("/char/summary", h_char_summary, ["GET", "POST"]),
         ("/pools/avatar_set", h_avatar_set, ["POST"]),
         ("/pools/avatar_clear", h_avatar_clear, ["POST"]),
