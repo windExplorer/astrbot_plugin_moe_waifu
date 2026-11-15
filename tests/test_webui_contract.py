@@ -67,6 +67,7 @@ galAvOverwrite setAvOverwrite
 avatarThumbs avatarThumbsLoading
 galFillBusy galFillLabel startGalFill stopGalFill
 galFillOpen galFillRows galFillHave galFillQuota galFillLoading
+galFillCount galFillNeed
 rerollFillRow rerollFillAll doFillStart
 galQueueTip galSubmitting
 queueTopCount queuePanelOpen queueRows queueTopBroken

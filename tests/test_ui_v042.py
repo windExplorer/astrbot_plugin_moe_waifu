@@ -516,10 +516,18 @@ check("出图队列改三列 grid（长文案不再把名字挤成竖排）",
 # ---------- ⑲ v0.54.12：撤掉会把纵向 n-space 压窄居中的兜底 ----------
 check("弹窗兜底规则已撤（不再给纵向 n-space 设 align-items:center）",
       ":has(.n-button)" not in PAGE)
-check("补齐配额预览清单占满弹窗宽度（620px 弹窗 + 三列 grid）",
+check("批量生成弹窗清单占满宽度（620px 弹窗 + 三列 grid）",
       ".fill-row { display: grid;" in PAGE
       and "grid-template-columns: 62px minmax(0, 1fr) auto;" in PAGE
-      and 'title="补齐配额 · 预览"' in PAGE)
+      and 'title="批量生成立绘"' in PAGE)
+
+# ---------- ⑳ v0.54.13：批量生成立绘（自定义张数，超配额多生） ----------
+check("批量生成支持自定义张数（前端张数输入 + 后端 count 口径）",
+      "galFillCount" in PAGE and "previewFillCount" in PAGE
+      and "_fill_need_with_count" in API and "_CHAR_BATCH_MAX" in API)
+check("张数改造不破坏预览=实出（char_start 仍按 themes 原样下发）",
+      "count: Number(galFillCount.value)" in PAGE
+      and "themes: ids" in PAGE)
 
 if FAILURES:
     print(f"test_ui_v042: {len(FAILURES)} FAILED")

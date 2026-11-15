@@ -348,6 +348,17 @@ def test_cores(tmp: Path):
           bound_sim["scope"]["group_series"] == ["测试作品"] and bound_sim["candidates"] == 2)
     unbound_sim = api._debug_simulate_core(plugin, "u1", TODAY, 0, "test-salt", "999999")
     check("未列出的群回落全部启用卷", unbound_sim["scope"]["group_series"] is None)
+    # v0.54.13：批量生成的「张数」口径——count 优先、夹在 1..上限、非法值回落配额缺口
+    check("自定义张数：count 优先",
+          api._fill_need_with_count({"count": 8}, 3) == 8)
+    check("自定义张数：不传回落配额缺口",
+          api._fill_need_with_count({}, 3) == 3
+          and api._fill_need_with_count({"count": None}, 4) == 4)
+    check("自定义张数：上限夹紧",
+          api._fill_need_with_count({"count": 999}, 3) == api._CHAR_BATCH_MAX)
+    check("自定义张数：非法/负数回落缺口",
+          api._fill_need_with_count({"count": -5}, 4) == 4
+          and api._fill_need_with_count({"count": "x"}, 2) == 2)
     st.close()
 
 

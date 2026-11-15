@@ -489,6 +489,9 @@
     min-width: 0; word-break: break-word;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     overflow: hidden; }
+  /* 批量生成弹窗的「张数」行 */
+  .fill-count-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .fill-count-lab { font-size: 13px; font-weight: 600; }
   /* 补齐配额预览的行（长主题名不再把按钮挤走） */
   .fill-row { display: grid; gap: 8px; align-items: center;
     grid-template-columns: 62px minmax(0, 1fr) auto; }
@@ -1699,12 +1702,14 @@
                           :type="galBulk ? 'default' : 'primary'"
                           :secondary="!galBulk"
                           @click="toggleGalBulk">{{ galBulk ? "退出批量" : "批量停用 / 启用" }}</n-button>
-                <!-- v0.32.1：补齐配额——专注当前角色的批量补图（主题序列走同一个
-                     theme_plan：内容:画风 3:2、避开已用主题；队列与列表页批量共用，
-                     互斥运行）。缺几张补几张，满配额时提示无需补齐。 -->
+                <!-- v0.32.1 补齐配额 → v0.54.13 升级为「批量生成」：默认补齐到配额，
+                     也可自定义张数（超过配额多生）；主题序列仍走同一个 theme_plan
+                     （每 batch_art_every 张掺 1 张纯画风、避开已用主题），队列与
+                     列表页批量共用、互斥运行。 -->
                 <n-button size="small" style="margin-left: 8px;"
                           :loading="galFillBusy"
                           :disabled="!galCharId || (batchRunning && !galFillBusy)"
+                          title="批量生成立绘：可补齐配额，也可自定义生成 N 张"
                           @click="startGalFill">{{ galFillLabel }}</n-button>
                 <n-button v-if="galFillBusy" size="small" quaternary type="warning"
                           @click="stopGalFill">停止</n-button>
@@ -3941,12 +3946,24 @@
     <!-- ============ 角色详情 · 补齐配额预览弹窗（v0.32.2）：逐张主题序列，
          可单张换一个 / 整体重随机；确认后的序列原样下发实跑（预览 = 实出）。
          preset 须 dialog（modal slot 纪律）；行内不做方法调用插值 ============ -->
-    <n-modal v-model:show="galFillOpen" preset="dialog" title="补齐配额 · 预览"
+    <n-modal v-model:show="galFillOpen" preset="dialog" title="批量生成立绘"
              style="width: 620px;">
       <n-space vertical size="medium">
+        <!-- v0.54.13：自定义张数——不填按配额缺口补齐，填大即超配额多生 -->
+        <div class="fill-count-row">
+          <span class="fill-count-lab">生成张数</span>
+          <n-input-number v-model:value="galFillCount" size="small"
+                          :min="1" :max="40" style="width: 110px;"></n-input-number>
+          <span class="bind-tip" style="margin: 0;">
+            已有 {{ galFillHave }}/{{ galFillQuota }}，配额缺口 {{ galFillNeed }} 张；
+            填得比缺口大就会超过配额多存几张（上限 40）
+          </span>
+          <n-button size="tiny" secondary :disabled="batchRunning || galFillNeed <= 0"
+                    @click="galFillCount = Math.max(1, galFillNeed)">按配额缺口</n-button>
+        </div>
         <div class="bind-tip" style="margin-top: 0;">
-          将为本角色补 {{ galFillRows.length }} 张立绘（已有 {{ galFillHave }}/{{ galFillQuota }}）。
-          每张套一个主题自动轮换，可单张「换一个」或整体重随机——实跑按下面确认的序列出图。
+          本次将生成 {{ galFillRows.length }} 张立绘。每张套一个主题自动轮换，
+          可单张「换一个」或整体重随机——实跑按下面确认的序列出图。
         </div>
         <div class="stack" v-if="galFillRows.length > 0"
              style="max-height: 260px; overflow-y: auto;">
@@ -3956,13 +3973,13 @@
             <n-button size="tiny" secondary @click="rerollFillRow(i)">换一个</n-button>
           </div>
         </div>
-        <div class="bind-tip" v-else>没有需要补的立绘。</div>
+        <div class="bind-tip" v-else>张数填好后会自动生成逐张预览。</div>
       </n-space>
       <!-- v0.54.11：操作行搬到弹窗页脚（右下角、带上分隔线） -->
       <template #action>
         <!-- v0.39.1：画师模式按次勾选——LLM 整体创作，题材序列降级为灵感 -->
         <n-checkbox v-model:checked="galFillArtist" :disabled="batchRunning"
-                    title="本次补齐由 LLM 画师整体创作提示词（不经预设维度池）；主题序列只作灵感参考，单张失败自动回落池子链路">🎨 画师出词</n-checkbox>
+                    title="本次生成由 LLM 画师整体创作提示词（不经预设维度池）；主题序列只作灵感参考，单张失败自动回落池子链路">🎨 画师出词</n-checkbox>
         <span class="bind-tip" style="margin: 0 auto 0 0;"
               v-if="batchRunning">批量队列运行中，请等待完成</span>
         <n-button size="small" :disabled="batchRunning || galFillRows.length === 0"
@@ -3970,7 +3987,7 @@
         <n-button size="small" @click="galFillOpen = false">取消</n-button>
         <n-button size="small" type="primary" :loading="galFillLoading"
                   :disabled="batchRunning || galFillRows.length === 0"
-                  @click="doFillStart">开始补图</n-button>
+                  @click="doFillStart">开始生成</n-button>
       </template>
     </n-modal>
 
@@ -8715,9 +8732,13 @@
       var galFillHave = Vue.ref(0);
       var galFillQuota = Vue.ref(0);
       var galFillLoading = Vue.ref(false);
+      // v0.54.13：自定义张数（默认 = 配额缺口；可填更大做「超配额多生」）
+      var galFillCount = Vue.ref(1);
+      var galFillNeed = Vue.ref(0);      // 配额缺口（只作默认值/提示用）
+      var galFillCountTimer = null;
       var galFillLabel = Vue.computed(function () {
         if (!galFillBusy.value) {
-          return batchRunning.value ? "批量队列运行中" : "补齐配额";
+          return batchRunning.value ? "批量队列运行中" : "批量生成";
         }
         var d = (batchProg.value && batchProg.value.done) || 0;
         return "补图中 " + d + "/" + galFillTotal.value;
@@ -8748,25 +8769,59 @@
       // v0.54.9：重随机改用后端（nonce 派生盐）——主题比例由 batch_art_every
       // 统一控制；此前前端在整个主题池里等权乱抽，画风主题多所以满屏画风。
       var galFillNonce = Vue.ref(0);
+      // v0.54.13：按指定张数重新预览（不传张数 = 补齐到配额，由 startGalFill 处理）
+      async function previewFillCount(n) {
+        var cnt = Math.max(1, Math.min(40, Number(n) || 1));
+        galFillLoading.value = true;
+        try {
+          var res = await apiPost("batch/char_preview",
+                                  { id: galCharId.value, nonce: galFillNonce.value,
+                                    count: cnt });
+          var rows = (res && res.themes) || [];
+          if (res) {
+            galFillHave.value = res.have || 0;
+            galFillQuota.value = res.quota || 0;
+            if (res.quota) { galFillNeed.value = Math.max(0, res.quota - (res.have || 0)); }
+          }
+          if (rows.length) { galFillRows.value = rows; }
+        } catch (e) { /* 已提示，保留当前序列 */ }
+        finally { galFillLoading.value = false; }
+      }
       async function startGalFill() {
         if (galFillBusy.value || !galCharId.value) return;
         galFillLoading.value = true;
         galFillNonce.value = 0;
         try {
+          // 先按「补齐到配额」预览：拿缺口作为默认张数，也让「已满配额」时能开到 1 张
           var res = await apiPost("batch/char_preview",
                                   { id: galCharId.value, nonce: 0 });
-          var rows = (res && res.themes) || [];
-          if (!(res && res.queued)) {
-            message.info((res && res.note) || "立绘已满配额，无需补齐");
-            return;
+          if (!res) { return; }
+          galFillHave.value = res.have || 0;
+          galFillQuota.value = res.quota || 0;
+          var need = Number(res.need || 0) || Math.max(0, (res.quota || 0) - (res.have || 0));
+          galFillNeed.value = need;
+          var rows = res.themes || [];
+          if (rows.length) {
+            galFillRows.value = rows;
+            galFillCount.value = rows.length;
+          } else {
+            // 已满配额：默认 1 张，用户可自行改大（超配额多生）
+            galFillRows.value = [];
+            galFillCount.value = 1;
           }
-          galFillRows.value = rows;
-          galFillHave.value = (res && res.have) || 0;
-          galFillQuota.value = (res && res.quota) || 0;
           galFillOpen.value = true;
+          if (!rows.length) { await previewFillCount(1); }
         } catch (e) { /* 已提示 */ }
         finally { galFillLoading.value = false; }
       }
+      // 张数改动后自动重算预览（防抖 350ms；序列前缀不变，不会把已看的顺序洗乱）
+      Vue.watch(galFillCount, function (n) {
+        if (!galFillOpen.value || galFillLoading.value) { return; }
+        if (galFillCountTimer) { clearTimeout(galFillCountTimer); }
+        galFillCountTimer = setTimeout(function () {
+          previewFillCount(n);
+        }, 350);
+      });
       function rerollFillRow(i) {
         var rows = galFillRows.value;
         if (!rows || i < 0 || i >= rows.length) return;
@@ -8795,7 +8850,8 @@
         galFillNonce.value = (galFillNonce.value || 0) + 1;
         try {
           var res = await apiPost("batch/char_preview",
-                                  { id: galCharId.value, nonce: galFillNonce.value });
+                                  { id: galCharId.value, nonce: galFillNonce.value,
+                                    count: Number(galFillCount.value) || need });
           var rows = (res && res.themes) || [];
           if (rows.length) { galFillRows.value = rows; }
         } catch (e) { /* 已提示，保留当前序列 */ }
@@ -8809,10 +8865,11 @@
         try {
           var res = await apiPost("batch/char_start",
                                   { id: galCharId.value, themes: ids,
+                                    count: Number(galFillCount.value) || ids.length,
                                     artist: !!galFillArtist.value });
           var queued = (res && res.queued) || 0;
           if (!queued) {
-            message.info((res && res.note) || "立绘已满配额，无需补齐");
+            message.info((res && res.note) || "没有可生成的内容，请调整张数后重试");
             galFillOpen.value = false;
             return;
           }
@@ -10687,6 +10744,7 @@
         galFillBusy: galFillBusy, galFillLabel: galFillLabel,
         galFillOpen: galFillOpen, galFillRows: galFillRows,
         galFillHave: galFillHave, galFillQuota: galFillQuota,
+        galFillCount: galFillCount, galFillNeed: galFillNeed,
         galFillLoading: galFillLoading,
         galFillArtist: galFillArtist,
         rerollFillRow: rerollFillRow, rerollFillAll: rerollFillAll,

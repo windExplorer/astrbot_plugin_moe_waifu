@@ -2888,6 +2888,26 @@ def _char_fill_ctx(plugin, cid: str) -> tuple:
     return entry, have, quota, need, used
 
 
+# v0.54.13：单角色自定义批量（不止补齐配额）的单次上限——防手滑填 999 把队列塞爆
+_CHAR_BATCH_MAX = 40
+
+
+def _fill_need_with_count(body: dict, need: int) -> int:
+    """「本次生成几张」口径（v0.54.13）：`body.count` 优先，缺省=配额缺口。
+
+    详情页「批量生成立绘」是「补齐配额」的进化版：既能补齐到配额（不传 count），
+    也能自定义 N 张、允许超过配额（用户口径：想多存几张好看的）。上限
+    `_CHAR_BATCH_MAX`，非法值一律回落配额缺口。
+    """
+    try:
+        want = int((body or {}).get("count") or 0)
+    except (TypeError, ValueError):
+        want = 0
+    if want <= 0:
+        return int(need)
+    return min(max(1, want), _CHAR_BATCH_MAX)
+
+
 def _char_fill_ref_guard(plugin, entry) -> str:
     """batch_require_ref 开启时的图生图源校验（与列表页批量同口径）。"""
     if bool(plugin._cfg("batch_require_ref", True)) \
@@ -2913,8 +2933,11 @@ async def h_batch_char_preview(plugin) -> dict:
     entry, have, quota, need, used = _char_fill_ctx(plugin, cid)
     if entry is None:
         return err(f"角色库里找不到「{cid}」")
+    # v0.54.13：显式张数优先（可超过配额）；不传即「补齐到配额」
+    need = _fill_need_with_count(body, need)
     if need <= 0:
         return ok({"queued": 0, "have": have, "quota": quota, "themes": [],
+                   "need": 0,
                    "note": f"立绘已满配额（{have}/{quota}），无需补齐"})
     guard = _char_fill_ref_guard(plugin, entry)
     if guard:
@@ -2930,7 +2953,7 @@ async def h_batch_char_preview(plugin) -> dict:
     labels = {str(t.get("id") or ""): str(t.get("label") or "")
               for t in prompt_gen.all_themes()}
     return ok({
-        "queued": len(themes), "have": have, "quota": quota,
+        "queued": len(themes), "have": have, "quota": quota, "need": need,
         "themes": [{"index": i, "theme_id": tid,
                     "label": labels.get(tid, tid)}
                    for i, tid in enumerate(themes)],
@@ -2938,12 +2961,15 @@ async def h_batch_char_preview(plugin) -> dict:
 
 
 async def h_batch_char_start(plugin) -> dict:
-    """单角色补齐配额（v0.32.1 起预览制）：详情页立绘页签「补齐配额」。
+    """单角色批量生成（v0.32.1 起预览制；v0.54.13 支持自定义张数）。
+
+    详情页立绘页签「批量生成」= 「补齐配额」的进化版：不传 `count` 就补齐到配额，
+    传了就按该张数生成（允许超过配额，上限 `_CHAR_BATCH_MAX`）。
 
     与列表页批量补图共用同一套机制：BatchRunner 队列（互斥运行）、
     effective_batch_entry 照常把挂了图生图源的角色纠正为 img2img 出图。
     v0.32.2：body 可带 `themes`（预览弹窗确认过的显式主题序列）——带则按
-    该序列出图（校验合法 + 张数与配额差一致），不带则回落 theme_plan 自动
+    该序列出图（校验合法 + 张数与本次张数一致），不带则回落 theme_plan 自动
     轮换。batch_require_ref 开启时同样要求可用图生图源（与列表页批量同
     口径），报错文案给出替代路径。
     """
@@ -2956,6 +2982,7 @@ async def h_batch_char_start(plugin) -> dict:
     entry, have, quota, need, used = _char_fill_ctx(plugin, cid)
     if entry is None:
         return err(f"角色库里找不到「{cid}」")
+    need = _fill_need_with_count(body, need)
     if need <= 0:
         return ok({"queued": 0, "have": have, "quota": quota,
                    "note": f"立绘已满配额（{have}/{quota}），无需补齐"})
