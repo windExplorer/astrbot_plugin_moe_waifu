@@ -472,9 +472,10 @@
     display: flex; justify-content: flex-end; align-items: center; gap: 8px;
     padding-top: 12px; margin-top: 14px;
     border-top: 1px solid var(--wf-line); }
-  /* 兜底：content 里最后一排（含按钮的 n-space）靠右，视觉上等同页脚 */
-  .n-dialog__content > .n-space:last-child:has(.n-button) {
-    width: 100%; justify-content: flex-end; align-items: center; }
+  /* ⚠️ 别再用「content 里最后一个含按钮的 n-space 靠右」这种兜底：纵向 n-space
+     是列方向 flex，一旦给它 align-items:center，里面所有块都会被压成 shrink-to-fit
+     并居中——补齐配额预览的清单就缩成中间一条小列（v0.54.11 实锤，v0.54.12 撤掉）。
+     操作行一律显式搬进 #action 插槽。 */
 
   /* v0.54.11：出图队列的「表格」——长错误文案曾把角色名列挤成竖排单字，
      改成三列 grid：标签固定宽 / 名字单行省略 / 状态最多两行截断。 */
@@ -3941,9 +3942,9 @@
          可单张换一个 / 整体重随机；确认后的序列原样下发实跑（预览 = 实出）。
          preset 须 dialog（modal slot 纪律）；行内不做方法调用插值 ============ -->
     <n-modal v-model:show="galFillOpen" preset="dialog" title="补齐配额 · 预览"
-             style="width: 560px;">
+             style="width: 620px;">
       <n-space vertical size="medium">
-        <div class="bind-tip">
+        <div class="bind-tip" style="margin-top: 0;">
           将为本角色补 {{ galFillRows.length }} 张立绘（已有 {{ galFillHave }}/{{ galFillQuota }}）。
           每张套一个主题自动轮换，可单张「换一个」或整体重随机——实跑按下面确认的序列出图。
         </div>

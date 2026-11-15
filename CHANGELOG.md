@@ -2,6 +2,22 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.54.12 (2026-11-16)
+
+- **修「补齐配额预览的清单缩在中间一条小列」**——是我 v0.54.11 引入的回归：
+  那条兜底规则 `.n-dialog__content > .n-space:last-child:has(.n-button)
+  { width:100%; justify-content:flex-end; align-items:center }` 会命中文档根节点
+  这层**纵向** `n-space`（清单里有「换一个」按钮，所以 `:has(.n-button)` 成立）。
+  列方向 flex 一旦 `align-items: center`，所有子块都变成 shrink-to-fit 并水平居中
+  ——于是 9 行主题挤成 ~270px 的窄条，滚动条跑到列中间。
+  - 撤掉该兜底规则（并在注释里写明为什么不能再这么干）；操作行一律显式搬进
+    `#action` 插槽，不再用 CSS 猜。
+  - 补齐配额弹窗加宽 560 → 620px；清单三列 grid（62px 序号 / 主题名 1fr 省略 /
+    按钮 auto）现在占满弹窗内容宽度。
+- 测试：`test_ui_v042.py` 加 2 条守卫（`:has(.n-button)` 必须不存在、
+  `.fill-row` 三列 grid 与 620px 弹窗在位）。
+- 版本 v0.54.11 -> v0.54.12。
+
 ## v0.54.11 (2026-11-16)
 
 - **全局弹窗版式统一**（用户：头 / 内容 / 脚要分明，按钮放右下角）：

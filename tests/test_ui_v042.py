@@ -513,6 +513,14 @@ check("出图队列改三列 grid（长文案不再把名字挤成竖排）",
       ".queue-row {" in PAGE and 'class="queue-row"' in PAGE
       and "text-overflow: ellipsis;" in PAGE and "-webkit-line-clamp: 2" in PAGE)
 
+# ---------- ⑲ v0.54.12：撤掉会把纵向 n-space 压窄居中的兜底 ----------
+check("弹窗兜底规则已撤（不再给纵向 n-space 设 align-items:center）",
+      ":has(.n-button)" not in PAGE)
+check("补齐配额预览清单占满弹窗宽度（620px 弹窗 + 三列 grid）",
+      ".fill-row { display: grid;" in PAGE
+      and "grid-template-columns: 62px minmax(0, 1fr) auto;" in PAGE
+      and 'title="补齐配额 · 预览"' in PAGE)
+
 if FAILURES:
     print(f"test_ui_v042: {len(FAILURES)} FAILED")
     sys.exit(1)
