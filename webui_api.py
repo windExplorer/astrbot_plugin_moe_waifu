@@ -2919,8 +2919,12 @@ async def h_batch_char_preview(plugin) -> dict:
     guard = _char_fill_ref_guard(plugin, entry)
     if guard:
         return err(guard)
+    # v0.54.9：弹窗「全部重随机」也走后端（nonce 派生盐）——之前是前端在
+    # 「内容 + 画风」的整个主题池里等权乱抽，26 个画风 vs 11 个内容主题，
+    # 于是重随机后满屏画风，绕过了 batch_art_every。
+    nonce = int(body.get("nonce") or 0)
     themes = batch_fill.theme_plan(
-        cid, batch_fill.char_salt(str(plugin._cfg("salt", "moe-waifu")), cid),
+        cid, batch_fill.char_salt(str(plugin._cfg("salt", "moe-waifu")), cid, nonce),
         need, have=have, date=plugin._today(), used=used,
         art_every=_batch_art_every(plugin))
     labels = {str(t.get("id") or ""): str(t.get("label") or "")

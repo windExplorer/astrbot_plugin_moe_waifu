@@ -69,6 +69,13 @@ def main():
     p10_dense = bf.theme_plan("c1", "salt", 10, date="2026-11-13", art_every=2)
     check("art_every=2 时画风主题明显变多",
           sum(1 for t in p10_dense if str(t).startswith("art_")) >= 2, str(p10_dense))
+    # v0.54.9：补齐配额「全部重随机」走后端 nonce 派生盐，10 张里画风仍 ≤ 2
+    pa = bf.theme_plan("c1", bf.char_salt("salt", "c1", 1), 10, date="2026-11-13")
+    pb = bf.theme_plan("c1", bf.char_salt("salt", "c1", 2), 10, date="2026-11-13")
+    check("换 nonce 能换一批主题", pa != pb, (pa, pb))
+    check("重随机后画风仍受 5:1 约束（10 张 ≤ 2）",
+          sum(1 for t in pa if str(t).startswith("art_")) <= 2
+          and sum(1 for t in pb if str(t).startswith("art_")) <= 2, (pa, pb))
     check("一轮内主题不重复", len(set(p5)) == 5, str(p5))
     check("跨角色 5 张序列不同",
           bf.theme_plan("c2", "salt", 5, date="2026-11-13") != p5)

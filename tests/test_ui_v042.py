@@ -489,6 +489,13 @@ check("头饰固装默认开启（外套/鞋袜仍默认关）",
 check("补图画风主题掺入间隔可配（batch_art_every）",
       '"batch_art_every"' in _SCHEMA and "_batch_art_every" in API
       and "art_every" in _BF and "art_every=art_every" in _BF)
+# v0.54.9：补齐配额「全部重随机」过去是前端在整个主题池里等权乱抽（画风占多数），
+# 现在必须走服务端 nonce 派生盐（受 batch_art_every 约束）
+check("补齐配额「全部重随机」走服务端主题计划",
+      "galFillNonce" in PAGE and "async function rerollFillAll" in PAGE
+      and "while (out.length < need && k < need * 4)" not in PAGE
+      and "cid, nonce)" in API)
+check("单张「换一个」优先内容主题（画风只兜底）", "contentOnly" in PAGE)
 
 if FAILURES:
     print(f"test_ui_v042: {len(FAILURES)} FAILED")

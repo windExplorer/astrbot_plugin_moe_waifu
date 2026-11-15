@@ -8695,11 +8695,16 @@
           })
           .map(function (o) { return { id: String(o.value), label: o.label }; });
       });
+      // v0.54.9：重随机改用后端（nonce 派生盐）——主题比例由 batch_art_every
+      // 统一控制；此前前端在整个主题池里等权乱抽，画风主题多所以满屏画风。
+      var galFillNonce = Vue.ref(0);
       async function startGalFill() {
         if (galFillBusy.value || !galCharId.value) return;
         galFillLoading.value = true;
+        galFillNonce.value = 0;
         try {
-          var res = await apiPost("batch/char_preview", { id: galCharId.value });
+          var res = await apiPost("batch/char_preview",
+                                  { id: galCharId.value, nonce: 0 });
           var rows = (res && res.themes) || [];
           if (!(res && res.queued)) {
             message.info((res && res.note) || "立绘已满配额，无需补齐");
@@ -8726,30 +8731,25 @@
           cands = pool.filter(function (o) { return o.id !== rows[i].theme_id; });
         }
         if (!cands.length) return;
+        // 单张换更偏向内容主题（套装/场景）：画风只在内容候选不够时才补
+        var contentOnly = cands.filter(function (o) { return o.id.indexOf("art_") !== 0; });
+        if (contentOnly.length) { cands = contentOnly; }
         var pick = cands[Math.floor(Math.random() * cands.length)];
         rows[i].theme_id = pick.id;
         rows[i].label = pick.label;
       }
-      function rerollFillAll() {
-        var pool = (fillThemePool.value || []).slice();
-        var need = galFillRows.value.length;
-        if (!pool.length || need <= 0) return;
-        // 洗牌后取前 need 个；池子不够时循环补齐并避开相邻重复
-        for (var i = pool.length - 1; i > 0; i--) {
-          var j = Math.floor(Math.random() * (i + 1));
-          var tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
-        }
-        var out = [];
-        var k = 0, prev = "";
-        while (out.length < need && k < need * 4) {
-          var c = pool[k % pool.length];
-          if (c.id !== prev) { out.push(c); prev = c.id; }
-          k += 1;
-        }
-        while (out.length < need) { out.push(pool[out.length % pool.length]); }
-        galFillRows.value = out.map(function (c, idx) {
-          return { index: idx, theme_id: c.id, label: c.label };
-        });
+      async function rerollFillAll() {
+        var need = (galFillRows.value || []).length;
+        if (need <= 0 || galFillLoading.value) return;
+        galFillLoading.value = true;
+        galFillNonce.value = (galFillNonce.value || 0) + 1;
+        try {
+          var res = await apiPost("batch/char_preview",
+                                  { id: galCharId.value, nonce: galFillNonce.value });
+          var rows = (res && res.themes) || [];
+          if (rows.length) { galFillRows.value = rows; }
+        } catch (e) { /* 已提示，保留当前序列 */ }
+        finally { galFillLoading.value = false; }
       }
       async function doFillStart() {
         if (galFillBusy.value || batchRunning.value) return;
