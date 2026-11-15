@@ -418,13 +418,18 @@
     background: var(--wf-bg);
     box-shadow: 0 10px 14px -14px rgba(80,40,70,.9); }
   .sticky-head { position: sticky; top: 0; z-index: 20;
-    margin: -16px -22px 20px; padding: 14px 22px 16px;
+    margin: -16px -22px 24px; padding: 14px 22px 16px;
     border-bottom: 1px solid var(--wf-line); }
   .sticky-head > * + * { margin-top: 10px; }
   .sticky-head .gal-tabs, .sticky-head .dbg-tabs,
   .sticky-head .sec-title { margin-bottom: 0; }
   /* 页签这一行自身再补 2px 下沿，避免下划线裁到固定区边框上 */
   .sticky-head .gal-tabs, .sticky-head .dbg-tabs { padding-bottom: 2px; }
+  /* v0.54.10（用户）：带页签的固定头（角色详情 / 调试）——页签自带的那条下边线
+     就是视觉基线，固定条自己再画一条会在下面多出一条 16px 外的灰线+阴影带，
+     正文看着像被「夹」在两条线中间。这里去掉重复边线，正文与页签之间统一留 30px
+     （原来是 20px，页签下划线像贴在正文上）。 */
+  .sticky-head.has-tabs { border-bottom: 0; padding-bottom: 2px; margin-bottom: 30px; }
   .sticky-sec { position: sticky; top: 0; z-index: 15;
     margin: -16px -22px 18px; padding: 14px 22px 14px;
     border-bottom: 1px solid var(--wf-line); }
@@ -1357,7 +1362,7 @@
           <!-- ============ 角色详情（v0.6.0：原「立绘库」升级——立绘 + 参考图 + 生成立绘） ============ -->
           <div v-if="menu === 'gallery'" class="stack">
             <!-- v0.42.0：角色信息 + 页签一起固定——滚立绘墙时名字与切换入口不跑掉 -->
-            <div class="sticky-head">
+            <div class="sticky-head has-tabs">
             <!-- 头部：返回 + 角色切换/信息 + 直达操作
                  （用普通 flex div 而非 n-space：n-space 的默认插槽里放 template v-if 会双渲染） -->
             <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
@@ -2424,7 +2429,7 @@
                  naive 的 Space 给槽子元素包固定 key，v-if 切 tab 会撞 key
                  导致内容串页。 -->
             <!-- v0.42.0：调试页页签也固定（状态与修签内容很长） -->
-            <div class="sticky-head">
+            <div class="sticky-head has-tabs">
             <div class="dbg-tabs">
               <div v-for="t in dbgTabs" :key="t.key" class="dbg-tab"
                    :class="{ on: dbgTab === t.key }"

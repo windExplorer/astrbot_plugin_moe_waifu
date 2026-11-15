@@ -497,6 +497,12 @@ check("补齐配额「全部重随机」走服务端主题计划",
       and "cid, nonce)" in API)
 check("单张「换一个」优先内容主题（画风只兜底）", "contentOnly" in PAGE)
 
+# ---------- ⑰ v0.54.10：带页签的固定头与正文拉开间距 ----------
+check("带页签的固定头独享更大下沿间距（30px，不再两条灰线夹正文）",
+      ".sticky-head.has-tabs {" in PAGE
+      and "margin-bottom: 30px; }" in PAGE
+      and PAGE.count('class="sticky-head has-tabs"') >= 2)
+
 if FAILURES:
     print(f"test_ui_v042: {len(FAILURES)} FAILED")
     sys.exit(1)
