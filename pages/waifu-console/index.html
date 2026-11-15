@@ -3174,9 +3174,9 @@
           <div v-if="menu === 'help'" class="stack">
             <div class="sticky-head">
               <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                <span style="font-weight:600; font-size:15px;">帮助 · 格式速查</span>
+                <span style="font-weight:600; font-size:15px;">帮助 · 玩法与格式速查</span>
                 <span class="bind-tip" style="margin-top:0;">
-                  导入用的 JSON 长什么样、每个字段什么意思、哪些会被覆盖——先看「通用约定」再看具体入口
+                  聊天指令、导入用的 JSON 长什么样、每个字段什么意思、哪些会被覆盖——先看「指令与玩法」「通用约定」再看具体入口
                 </span>
               </div>
               <div class="cfg-anchor">
@@ -3191,7 +3191,7 @@
                   <div v-if="d.intro" class="help-note">{{ d.intro }}</div>
                   <div v-if="d.where" class="bind-tip" style="margin-top:0;">{{ d.where }}</div>
                   <div v-if="d.fields && d.fields.length">
-                    <div class="lib-head">字段说明</div>
+                    <div class="lib-head">{{ d.fieldsLabel || "字段说明" }}</div>
                     <table class="help-fields">
                       <thead>
                         <tr><th style="width:170px;">字段</th><th style="width:96px;">类型</th>
@@ -7689,6 +7689,7 @@
           key: "commands",
           title: "指令与玩法",
           intro: "聊天里只有下面这三条指令；角色库、试画台、立绘维护、记录统计都在这套工坊页面里做（仅管理员可见）。",
+          fieldsLabel: "指令 / 口径",
           where: "群里 @机器人 或私聊发指令都可以；「分群绑定」里被停用的群会直接拒绝抽卡。",
           fields: [
             { name: "/今日老婆", type: "指令", required: true,
