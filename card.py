@@ -647,7 +647,8 @@ _HELP_W = 700
 def render_help(version: str = "", data_dir=None, out_path=None) -> str:
     """渲染帮助图，返回输出路径。纯 Pillow，不读立绘库（无图也可用）。"""
     W, pad = _HELP_W, 46
-    # 内容驱动高度：指令 3 条 + 玩法 5 条 + 尾注
+    # 内容驱动高度：指令 3 条 + 玩法 3 条 + 结尾祝语（v0.53.2 文案瘦身：
+    # 立绘配额/补图队列/工坊/后台入口等内部机制不再对终端用户暴露）
     H = 1092
     brand = (214, 51, 132)          # 品牌粉（与工坊一致）
     ink = (74, 52, 64)              # 正文墨色
@@ -693,8 +694,8 @@ def render_help(version: str = "", data_dir=None, out_path=None) -> str:
 
     # 指令卡（白底圆角 + 粉描边）
     cmds = [
-        ("/今日老婆", "抽取今天的角色，别名 /老婆 · /jrlp"),
-        ("/换老婆", "重新抽一位，受「每日换老婆次数」限制"),
+        ("/今日老婆", "抽取今天缘定的那位（别名 /老婆 · /jrlp）"),
+        ("/换老婆", "重新抽一位（每日有次数限制）"),
         ("/老婆帮助", "查看本帮助（别名 /waifu帮助）"),
     ]
     card_h = len(cmds) * 62 + 26
@@ -715,11 +716,9 @@ def render_help(version: str = "", data_dir=None, out_path=None) -> str:
                          radius=2, fill=(*brand, 215))
     y += head_f.size + 26
     tips = [
-        "一人一天一位：同一角色同一天人人同款，次日换新",
-        "立绘库沉淀：抽到过的角色会积累立绘，满配额后秒出图",
-        "卡图印象语与档位徽章随角色变化，换老婆解锁不同画法",
-        "主题立绘：工坊可为角色按泳装 / 和风 / 职场等主题补立绘",
-        "立绘不足时后台批量补图队列会自动生成（管理员配置）",
+        "一人一天一位，第二天会遇见新的她",
+        "每张卡图都有专属印象语与评级徽章",
+        "每位角色都有专属立绘，而且会不断丰富",
     ]
     for tip in tips:
         dot_y = y + body_s.size // 2
@@ -732,12 +731,10 @@ def render_help(version: str = "", data_dir=None, out_path=None) -> str:
         y += 12
     y += 8
 
-    # 尾注：分隔线 + 管理提示
+    # 结尾：分隔线 + 一句祝语（不再列举管理功能与后台入口）
     ld.rounded_rectangle((pad, y, pad + 76, y + 3), radius=2, fill=(*brand, 150))
     y += 26
-    _dark_text((pad, y), "角色库 / 试画 / 立绘维护 / 批量补图等管理功能", body_s, sub)
-    y += body_s.size + 6
-    _dark_text((pad, y), "在 AstrBot 后台的插件页（WebUI 工坊）里，仅管理员可见", body_s, sub)
+    _dark_text((pad, y), "祝今天也遇见心动的那位", body_s, sub)
 
     img.alpha_composite(layer)
     # 内容驱动高度：按实际内容底部裁掉多余空白（布局常数变化时自动适配）
