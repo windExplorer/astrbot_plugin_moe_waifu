@@ -262,7 +262,7 @@ class MoeWaifuPlugin(Star):
 
     # ---------- 指令 ----------
 
-    @filter.command("今日老婆", alias={"老婆", "jrlp"})
+    @filter.command("今日老婆", alias={"jrlp"})
     async def waifu_cmd(self, event: AstrMessageEvent):
         """抽今日老婆：一人一天一位，种子决定，萌绘立绘卡片。"""
         if self._store is None or self._data_dir is None:
@@ -431,7 +431,7 @@ class MoeWaifuPlugin(Star):
                          exc_info=True)
         yield event.plain_result(
             "萌萌今日老婆\n"
-            "/今日老婆（别名 /老婆）：抽取今天缘定的那位，一人一天一位\n"
+            "/今日老婆（别名 /jrlp）：抽取今天缘定的那位，一人一天一位\n"
             "/换老婆：重新抽一位（每日有次数限制）\n\n"
             "每张卡图都有专属印象语与评级徽章，每位角色都有专属立绘。\n"
             "祝今天也遇见心动的那位。"
