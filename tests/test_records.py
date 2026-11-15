@@ -351,6 +351,28 @@ def test_cores(tmp: Path):
     st.close()
 
 
+def test_first_char_in_records(tmp: Path):
+    """v0.54.4：换老婆后记录列表要能看到首抽（draws 覆盖，首抽只在流水里）。"""
+    st, plugin = fresh(tmp)
+    st.upsert_draw("u1", TODAY, "a_char", 0, False, "阿明", "g1", "一群",
+                   "aiocqhttp", char_name="小明")
+    st.upsert_draw("u1", TODAY, "b_char", 1, True, "阿明", "g1", "一群",
+                   "aiocqhttp", char_name="小红")
+    rec = api._records_core(plugin, {"page": "1", "size": "20"})
+    row = rec["rows"][0]
+    check("换签后记录行带首抽角色",
+          row["first_char_id"] == "a_char" and row["first_char_name"] == "小明",
+          (row.get("first_char_id"), row.get("first_char_name")))
+    check("首抽与实际首条流水一致",
+          st.first_event("u1", TODAY)["char_id"] == "a_char")
+    # 没换过的签不该带首抽字段（前端显示「—」，也不多发查询）
+    st.upsert_draw("u2", TODAY, "a_char", 0, False, "小美", "g1", "一群",
+                   "aiocqhttp", char_name="小明")
+    rows = {r["user_id"]: r for r in api._records_core(plugin, {"page": "1", "size": "20"})["rows"]}
+    check("未换签的行没有首抽字段", "first_char_id" not in rows["u2"])
+    st.close()
+
+
 def test_discover_add_core(tmp: Path):
     """v0.18.0：作品发现入库 core——草稿 unverified、跨卷查重、坏条目丢弃。"""
     st, plugin = fresh(tmp)
@@ -465,7 +487,8 @@ def main():
                      ("stats", test_stats),
                      ("debug_history", test_debug_history),
                      ("portraits_seq_meta", test_portraits_seq_and_meta),
-                     ("discover_add", test_discover_add_core),
+                     ("first_char_in_records", test_first_char_in_records),
+                    ("discover_add", test_discover_add_core),
                      ("trash_files", test_trash_files),
                      ("ref_meta", test_ref_meta_and_dims),
                      ("soft_delete", test_soft_delete),

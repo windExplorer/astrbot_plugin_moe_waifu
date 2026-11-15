@@ -3222,6 +3222,15 @@ async def h_overview(plugin) -> dict:
                     and not has_draw and not draw.explicit_ref(st, plugin._data_dir):
                 no_source.append({"id": e["id"], "name": e["name"]})
 
+        # v0.54.4（用户）：「没设置主出卡源 / 主参考图」的启用角色也要在总览列出。
+        # 两者都没有 = 抽卡只能走路子（文生图或立绘库），是最该补配置的一批。
+        no_assets = []
+        for e in enabled:
+            st = e.get("strategy") if isinstance(e.get("strategy"), dict) else {}
+            if not draw.draw_source(e, plugin._data_dir) \
+                    and not draw.explicit_ref(st, plugin._data_dir):
+                no_assets.append({"id": e["id"], "name": e["name"]})
+
         today = plugin._today()
         today_recent, today_draws, total_draws, today_draw_times = [], 0, 0, 0
         if plugin._store:
@@ -3258,6 +3267,7 @@ async def h_overview(plugin) -> dict:
             "draw_sources": draw_sources,
             "draw_sources_enabled": draw_sources_enabled,
             "no_source": no_source[:6],
+            "no_assets": no_assets,
             # v0.54.0：补全清单（点击进角色详情）
             "quota_short": quota_short, "no_avatar": no_avatar, "no_quote": no_quote,
             "today": today, "today_draws": today_draws, "total_draws": total_draws,
@@ -3781,7 +3791,21 @@ def _records_core(plugin, p: dict) -> dict:
         group_id=str(p.get("group_id") or ""), platform=str(p.get("platform") or ""),
         rerolled=str(p.get("rerolled") or ""),
     )
-    _enrich_char_rows(data["rows"], _name_color_map(plugin))
+    name_of = _name_color_map(plugin)
+    _enrich_char_rows(data["rows"], name_of)
+    # v0.54.4：换过老婆的行补上「首抽」——draws 被覆盖了，首抽只能从流水里取
+    for row in data["rows"]:
+        if int(row.get("nonce") or 0) <= 0:
+            continue
+        try:
+            first = plugin._store.first_event(row["user_id"], row["date"])
+        except Exception:
+            first = None
+        if not first:
+            continue
+        row["first_char_id"] = str(first.get("char_id") or "")
+        row["first_char_name"] = str(first.get("char_name") or "")
+        row["first_created_at"] = str(first.get("created_at") or "")
     return data
 
 

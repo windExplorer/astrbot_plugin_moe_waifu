@@ -833,17 +833,30 @@
                           title="去角色详情补印象语" @click="gotoGallery(c.id)">{{ c.name }}</span>
                   </div>
                   <div v-else class="lib-empty" style="font-size:12px;">启用角色都有印象语</div>
-                  <div class="ov-sec">出卡源
-                    <span class="cnt">混合模式命中 {{ ov.img2img_prob }}%</span></div>
-                  <div style="font-size:12px; opacity:.72; line-height:1.7;">
-                    未指定出卡源时抽卡不会走图生图，也不会私自取参考图列表里的图。
-                  </div>
-                  <div v-if="ov.no_source.length" class="ov-miss" style="margin-top:6px;">
-                    <span v-for="c in ov.no_source" :key="'s' + c.id" class="ov-miss-chip"
-                          title="画法为图生图但没指定出卡源（将回退文生图）"
+                  <div class="ov-sec">出卡源 / 主参考图
+                    <span class="cnt">{{ ov.no_assets.length }} 位未指定 · 点击进详情</span></div>
+                  <!-- v0.54.4：主出卡源与主参考图都没设置的启用角色（最该补配置的一批） -->
+                  <div v-if="ov.no_assets.length" class="ov-miss">
+                    <span v-for="c in ov.no_assets" :key="'as' + c.id" class="ov-miss-chip"
+                          title="既没指定出卡图生图源，也没指定主参考图"
                           @click="gotoGallery(c.id)">{{ c.name }}</span>
                   </div>
-                  <div v-else style="font-size:12px; opacity:.6; margin-top:6px;">没有待补出卡源的角色</div>
+                  <div v-else class="lib-empty" style="font-size:12px;">
+                    启用角色都指定了出卡源或主参考图
+                  </div>
+                  <div style="font-size:12px; opacity:.72; line-height:1.7; margin-top:6px;">
+                    未指定出卡源时抽卡不会走图生图，也不会私自取参考图列表里的图；
+                    混合模式命中 {{ ov.img2img_prob }}%。
+                  </div>
+                  <div v-if="ov.no_source.length" style="margin-top:6px;">
+                    <div class="ov-sec" style="margin-top:4px;">画法是图生图却没指定出卡源
+                      <span class="cnt">{{ ov.no_source.length }} 位 · 会回退文生图</span></div>
+                    <div class="ov-miss">
+                      <span v-for="c in ov.no_source" :key="'s' + c.id" class="ov-miss-chip"
+                            title="画法为图生图但没指定出卡源（将回退文生图）"
+                            @click="gotoGallery(c.id)">{{ c.name }}</span>
+                    </div>
+                  </div>
                 </div>
               </n-gi>
               <n-gi>
@@ -1942,7 +1955,7 @@
                   </div>
                   <table class="rec-table" v-if="recRows.length">
                     <thead><tr>
-                      <th>日期</th><th>抽卡时间</th><th>用户</th><th>昵称</th><th>老婆</th><th>作品</th>
+                      <th>日期</th><th>抽卡时间</th><th>用户</th><th>昵称</th><th>老婆</th><th>首抽</th><th>作品</th>
                       <th>群聊</th><th>重抽</th><th>平台</th><th>立绘来源</th><th>卡片</th><th>操作</th>
                     </tr></thead>
                     <tbody>
@@ -1968,6 +1981,20 @@
                                           color: d.char_color || colorOf(d.char_id) }">{{ (d.char_name || d.char_id || '?').slice(0, 1) }}</span>
                           <span class="char-av-name">{{ d.char_name || d.char_id }}</span>
                         </span></td>
+                        <!-- v0.54.4：首抽（换过老婆才有值）——draws 被覆盖后首抽只剩流水里有 -->
+                        <td>
+                          <span v-if="d.first_char_id && d.first_char_id !== d.char_id"
+                                class="char-av-link" :title="'首抽（' + (d.first_char_name || d.first_char_id) + '），已被换掉'"
+                                @click="gotoGallery(d.first_char_id)">
+                            <img v-if="charAvatarOf(d.first_char_id)" class="char-av"
+                                 :src="charAvatarOf(d.first_char_id)" alt="">
+                            <span v-else class="char-av char-av-letter"
+                                  :style="{ background: colorOf(d.first_char_id) + '33',
+                                            color: colorOf(d.first_char_id) }">{{ (d.first_char_name || d.first_char_id || '?').slice(0, 1) }}</span>
+                            <span class="char-av-name">{{ d.first_char_name || d.first_char_id }}</span>
+                          </span>
+                          <span v-else style="opacity:.45;">—</span>
+                        </td>
                         <td>{{ d.series || "—" }}</td>
                         <!-- v0.54.0：群列改「头像 + 群名 + 群号」——此前 aiocqhttp 的
                              群消息事件不带给群名，整列都显示成「私聊」 -->
@@ -4882,7 +4909,8 @@
         img2img_prob: 50, packs: 0, chars: 0, verified: 0, portraits: 0,
         chars_full: 0, refs_bound: 0, orphans: 0, draw_sources: 0,
         draw_sources_enabled: 0,
-        no_source: [], today: "", today_draws: 0, total_draws: 0, today_draw_times: 0,
+        no_source: [], no_assets: [],
+        today: "", today_draws: 0, total_draws: 0, today_draw_times: 0,
         today_recent: [],
         // v0.54.0：总数 / 启用 / 停用 + 三个补全清单（只含启用角色）
         chars_enabled: 0, chars_disabled: 0,

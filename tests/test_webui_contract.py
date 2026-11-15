@@ -140,7 +140,7 @@ ROUTES = """
 STORE_METHODS = """
 _migrate upsert_draw update_draw_card list_records record_detail list_events
 list_groups list_platforms list_users user_profile stats_range count_events
-set_group_name user_char_count today_char_stats
+set_group_name user_char_count today_char_stats first_event
 debug_log debug_recent debug_audit debug_queries reset_char_day
 """.split()
 

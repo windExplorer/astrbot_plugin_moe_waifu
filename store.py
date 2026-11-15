@@ -1518,6 +1518,19 @@ class Store:
         ).fetchall()
         return [dict(r) for r in rows], total
 
+    def first_event(self, user_id: str, date: str) -> dict | None:
+        """该人当天第一条抽签流水（首抽）。
+
+        v0.54.4：`draws` 一人一天一行，换老婆会原地覆盖，于是记录列表里首抽
+        那位就"消失"了（只能去流水页翻）。记录列表要能直接显示首抽，这里按
+        (user_id, date) 走索引取最早一条事件。
+        """
+        row = self._conn.execute(
+            "SELECT char_id, char_name, series, nonce, portrait_file, created_at"
+            " FROM draw_events WHERE user_id=? AND date=? ORDER BY id ASC LIMIT 1",
+            (str(user_id), date)).fetchone()
+        return dict(row) if row else None
+
     def count_events(self, date: str = "") -> int:
         """抽签流水条数（含换签）。`date` 空 = 全部。
 

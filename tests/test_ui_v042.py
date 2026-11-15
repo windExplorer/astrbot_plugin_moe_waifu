@@ -454,6 +454,13 @@ check("群名可从适配器补全并写回库",
 check("抽卡时群名失败原因进日志（warning，不再 debug 吞掉）",
       "群名获取失败" in MAIN and "call_action(\"get_group_info\"" in MAIN)
 
+# ---------- ⑬ v0.54.4：总览列出「没设出卡源/主参考图」+ 记录页首抽列 ----------
+check("总览列出未指定出卡源或主参考图的启用角色",
+      '"no_assets"' in API and "ov.no_assets" in PAGE and "ov-miss-chip" in PAGE)
+check("记录页有首抽列（换签后首抽不丢）",
+      "<th>首抽</th>" in PAGE and "first_char_id" in PAGE
+      and "def first_event" in STORE)
+
 if FAILURES:
     print(f"test_ui_v042: {len(FAILURES)} FAILED")
     sys.exit(1)
