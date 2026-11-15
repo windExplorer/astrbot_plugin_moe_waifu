@@ -34,7 +34,17 @@ with tempfile.TemporaryDirectory() as td:
                            out_path=td / "card.png")
     with Image.open(out) as img:  # with 块内用完即关，否则 Windows 清不掉临时目录
         check("输出 700×1200", img.size == (card.CARD_W, card.CARD_H))
-    check("重抽标渲染不报错", True)
+
+    # v0.54.5（用户红线）：卡面绝不画「重抽 / 首抽」标——rerolled 传 True/False
+    # 必须输出完全相同的像素（参数只为兼容旧调用签名而保留）。
+    r_on = td / "reroll_on.png"
+    r_off = td / "reroll_off.png"
+    card.render_card(portrait, ENTRY, date_str="2026-11-11", same_count=3,
+                     total_count=12, rerolled=True, out_path=r_on)
+    card.render_card(portrait, ENTRY, date_str="2026-11-11", same_count=3,
+                     total_count=12, rerolled=False, out_path=r_off)
+    check("卡面不画重抽标（rerolled 不影响像素）",
+          r_on.read_bytes() == r_off.read_bytes())
 
     # v0.54.2：新增「今日第 N 个抽到她」——同一参数下给不给 today_rank 输出必然不同，
     # 且三段文字在窄卡上要和日期错开（缩字号兜底，不重叠）

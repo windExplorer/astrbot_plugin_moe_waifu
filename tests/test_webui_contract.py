@@ -107,7 +107,7 @@ piParse piPreview piSummaryText piBadText piDimList piDims piDimsAll
 piConflict piCreate piPack piSelAll piPlanText piRows piSel piSelCount
 piResult piResultText piDoImport piBusy piFocus piOnlyFocus
 cdMode cdCharId cdPortrait cdPortraitOpts cdUid cdDate cdNonce cdGroup cdEnsure
-cdTier cdTierOpts cdSame cdTotal cdRerolled cdTagline cdQuote cdHintText
+cdTier cdTierOpts cdSame cdTotal cdRank cdTagline cdQuote cdHintText
 cdBusy cdResult doCardDebug cdShuffle
 """.split()
 

@@ -2915,7 +2915,10 @@
                     <n-input-number v-model:value="cdTotal" size="small" :min="1" :max="999"
                                     style="width: 120px;"></n-input-number>
                     <span class="bind-tip" style="margin: 0;">总次数</span>
-                    <n-checkbox v-model:checked="cdRerolled">显示「重抽」标</n-checkbox>
+                    <!-- v0.54.5：卡面不再有「重抽」标，改为可调「今日第几个抽到她」 -->
+                    <n-input-number v-model:value="cdRank" size="small" :min="1" :max="999"
+                                    style="width: 120px;"></n-input-number>
+                    <span class="bind-tip" style="margin: 0;">今日第几个</span>
                   </div>
 
                   <n-input v-model:value="cdTagline" size="small" clearable
@@ -9606,7 +9609,7 @@
       var cdQuote = Vue.ref("");
       var cdSame = Vue.ref(1);
       var cdTotal = Vue.ref(1);
-      var cdRerolled = Vue.ref(false);
+      var cdRank = Vue.ref(1);
       var cdBusy = Vue.ref(false);
       var cdResult = Vue.ref(null);
       var cdTierOpts = [
@@ -9663,7 +9666,7 @@
             quote: cdQuote.value || "",
             same_count: Number(cdSame.value || 1),
             total_count: Number(cdTotal.value || 1),
-            rerolled: !!cdRerolled.value
+            today_rank: Number(cdRank.value || 1)
           });
           cdResult.value = res || null;
           if (res && res.ok) { message.success("已出卡：" + res.char.char_name); }
@@ -10561,7 +10564,7 @@
         cdMode: cdMode, cdCharId: cdCharId, cdPortrait: cdPortrait,
         cdPortraitOpts: cdPortraitOpts, cdTier: cdTier, cdTierOpts: cdTierOpts,
         cdUid: cdUid, cdDate: cdDate, cdNonce: cdNonce, cdGroup: cdGroup,
-        cdEnsure: cdEnsure, cdSame: cdSame, cdTotal: cdTotal, cdRerolled: cdRerolled,
+        cdEnsure: cdEnsure, cdSame: cdSame, cdTotal: cdTotal, cdRank: cdRank,
         cdTagline: cdTagline, cdQuote: cdQuote, cdHintText: cdHintText,
         cdBusy: cdBusy, cdResult: cdResult, doCardDebug: doCardDebug, cdShuffle: cdShuffle,
         dbgUid: dbgUid, dbgDate: dbgDate, dbgUid2: dbgUid2, dbgDate2: dbgDate2,

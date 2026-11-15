@@ -19,9 +19,10 @@
   漫画体缺字（生僻日文汉字，如「凪」「雫」）逐字回落等线，绝不出现豆腐块。
 
 版式 v5（v0.47.0，按用户第二轮反馈）：
-- **底部改成一整行页脚**：左 = 「今日同款 N 人 · 第 M 次抽到她」，右 = 日期
-  （漫画体、带字距、右对齐），重抽标贴在日期左侧。原来日期和统计各占一行、
-  还都在左边，像堆在一起的注释。
+- **底部改成一整行页脚**：左 = 「今日同款 N 人 · 今日第 K 个抽到她 · 第 M 次
+  抽到她」，右 = 日期（漫画体、带字距、右对齐）。原来日期和统计各占一行、还都
+  在左边，像堆在一起的注释。**卡面绝不出现「重抽 / 首抽」标**（v0.54.5 用户
+  红线）——抽签过程信息只留在工坊后台。
 - **眉标只留作品名**：不再拼「作品 · 游戏」这种类型后缀（用户：去掉「游戏」）。
 - **遮罩浓度可配**：`card_scrim`（百分比，100=默认），传入 `scrim=` 缩放
   黑色压暗 + 角色色染色的峰值；调小 = 立绘更透、白字更糊。
@@ -462,6 +463,9 @@ def render_card(portrait_path, entry: dict, *, date_str: str, same_count: int = 
 
     `today_rank`（v0.54.2）：今天第几个抽到她（1 起）。>0 才印「今日第 N 个抽到
     她」；0（老调用方 / 卡片调试）保持旧文案，版式不变。
+
+    `rerolled`（已废弃，v0.54.5）：卡面**不再**画「重抽」标（用户红线：卡面不能
+    暴露抽签过程信息）；参数保留只为兼容旧调用签名，传什么都不影响渲染。
     """
     src = Path(portrait_path)
     if not src.is_file():
@@ -495,7 +499,10 @@ def render_card(portrait_path, entry: dict, *, date_str: str, same_count: int = 
     # 页脚：统计与日期是**页脚**，不是正文最后一行——下沿只留 36px（v0.47.1）
     bottom = CARD_H - _FOOT_PAD
 
-    # ---- 页脚一整行：左 = 统计，右 = 日期（重抽标贴在日期左侧） ----
+    # ---- 页脚一整行：左 = 统计，右 = 日期 ----
+    # ⚠️ 卡面红线（v0.54.5，用户）：「重抽 / 首抽」这类抽签过程标记**绝不上卡面**。
+    # 卡是给抽到的人看的，不该暴露「他换过老婆」。`rerolled` 参数保留只为兼容
+    # 旧调用与测试签名，这里不再画任何标记；重抽信息只留在工坊记录页。
     # v0.54.2：加了「今日第 N 个抽到她」，三段文字在窄卡上会撞到日期，
     # 所以先量出可用宽度再逐档缩字号（最小 12px，再小就糊了）。
     if today_rank and today_rank > 0:
@@ -515,9 +522,8 @@ def render_card(portrait_path, entry: dict, *, date_str: str, same_count: int = 
     # 页脚贴底后右下角会撞上卡片圆角（半径 30）：右沿再多收 8px，
     # 避免日期最后一个字的底部被圆角裁掉一小块
     dx = CARD_W - _PAD_X - 8 - dw
-    rtw = draw.textlength("重抽", font=meta_f) if rerolled else 0
     stats_x = _PAD_X + dot_r * 2 + 10
-    avail = dx - stats_x - (rtw + 36 if rerolled else 0) - 16
+    avail = dx - stats_x - 16
     ssize = meta_f.size
     sfont = meta_f
     while ssize > 12 and text_width(stats, sfont) > avail:
@@ -526,15 +532,6 @@ def render_card(portrait_path, entry: dict, *, date_str: str, same_count: int = 
     _mixed(layer, (stats_x, bottom - sfont.size), stats, sfont,
            None, (255, 255, 255, 176))
 
-    if rerolled:
-        rt = "重抽"
-        bx1 = dx - 14
-        bx0 = bx1 - rtw - 22
-        draw.rounded_rectangle((bx0, bottom - meta_f.size - 5, bx1, bottom + 6),
-                               radius=12, fill=(255, 255, 255, 30),
-                               outline=(255, 255, 255, 112), width=1)
-        draw.text((bx0 + 11, bottom - meta_f.size), rt, font=meta_f,
-                  fill=(255, 255, 255, 228))
     _mixed(layer, (dx, bottom - date_f.size), dtext, date_f, date_fb,
            (255, 255, 255, 200), spacing=dspace)
     bottom -= max(date_f.size, meta_f.size) + 24

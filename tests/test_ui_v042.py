@@ -30,6 +30,7 @@ MAIN = (ROOT / "main.py").read_text(encoding="utf-8")
 AVATARS = (ROOT / "avatars.py").read_text(encoding="utf-8")
 API = (ROOT / "webui_api.py").read_text(encoding="utf-8")
 STORE = (ROOT / "store.py").read_text(encoding="utf-8")
+CARD = (ROOT / "card.py").read_text(encoding="utf-8")
 
 FAILURES = []
 
@@ -460,6 +461,13 @@ check("总览列出未指定出卡源或主参考图的启用角色",
 check("记录页有首抽列（换签后首抽不丢）",
       "<th>首抽</th>" in PAGE and "first_char_id" in PAGE
       and "def first_event" in STORE)
+
+# ---------- ⑭ v0.54.5：卡面绝不出现「重抽 / 首抽」标（用户红线） ----------
+check("卡面不再画重抽标（card.py 没有该绘制文案）",
+      '"重抽"' not in CARD and '"首抽"' not in CARD
+      and "rt = " not in CARD)
+check("卡片调试页去掉「重抽」开关，换成今日名次",
+      "cdRerolled" not in PAGE and "cdRank" in PAGE)
 
 if FAILURES:
     print(f"test_ui_v042: {len(FAILURES)} FAILED")

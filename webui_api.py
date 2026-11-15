@@ -4596,7 +4596,11 @@ def _card_debug_core(plugin, body: dict) -> dict:
         total = max(1, int(body.get("total_count") or 1))
     except (TypeError, ValueError):
         total = 1
-    rerolled = bool(body.get("rerolled"))
+    # v0.54.5：卡面不再有「重抽」标（用户红线），改为可调「今日第 N 个抽到她」
+    try:
+        rank = max(1, int(body.get("today_rank") or same))
+    except (TypeError, ValueError):
+        rank = same
 
     data_root = Path(plugin._data_dir)
     src = data_root / src_rel
@@ -4610,7 +4614,7 @@ def _card_debug_core(plugin, body: dict) -> dict:
         import card  # type: ignore
     card_path = card.render_card(
         src, entry, date_str=date, same_count=same, total_count=total,
-        rerolled=rerolled, out_path=str(out), data_dir=data_root,
+        today_rank=rank, out_path=str(out), data_dir=data_root,
         seal_pos=plugin._cfg("card_seal_pos", "name"),
         scrim=plugin._cfg("card_scrim", 100))
     _card_debug_prune(out_dir)
