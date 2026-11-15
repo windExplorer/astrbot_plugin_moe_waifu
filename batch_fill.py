@@ -56,21 +56,30 @@ def content_theme_ids() -> list:
 
 
 def theme_plan(char_id: str, salt: str, n: int, have: int = 0,
-               date: str = "", used: list | None = None) -> list:
-    """该角色本轮补图的主题序列（v0.22.4 重做）。
+               date: str = "", used: list | None = None,
+               art_every: int = 5) -> list:
+    """该角色本轮补图的主题序列（v0.22.4 重做；v0.54.8 调比例）。
 
     旧版三个毛病对应「一个角色这些主题、另一个角色也是这些」：
     ① 轮换池 32 个里 22 个是 art_* 纯画风主题，等权抽 → 每角色 5 张里
       平均 3~4 张都是「画风·X」，只换画风不换场景，观感高度同质；
     ② 只保证「相邻不重复」，一轮 5 张里仍有约 17% 出现隔位重复主题；
     ③ 种子只有 salt|batch|char_id → 二次补图永远重放开头两个主题。
-    现口径：内容:画风 = 3:2 交错，两池各自按种子洗牌（决定论）；优先排除
-    该角色已用过的主题，一轮内不重复；种子含 have/date，续补不重放。
+    v0.22.4 把比例改成内容:画风 = 3:2；v0.54.8 用户反馈「补图经常只随出画风、
+    套装主题太少」（5 张里 2 张是纯画风 = 40%），于是改成**每 `art_every` 张
+    掺 1 张纯画风**（默认 5 → 20%，配 0 = 完全不掺，只在内容主题不够时兜底）。
+
+    两池各自按种子洗牌（决定论）；优先排除该角色已用过的主题，一轮内不重复；
+    种子含 have/date，续补不重放。
     """
     n = max(0, int(n or 0))
     ids = content_theme_ids()
     if not ids or n <= 0:
         return []
+    try:
+        per = int(art_every)
+    except (TypeError, ValueError):
+        per = 5
     content = [t for t in ids if not str(t).startswith("art_")]
     art = [t for t in ids if str(t).startswith("art_")]
     # v0.25.7：画风主题按现代化程度加权入池（现代系 3~4、中性 2、复古工艺 1），
@@ -102,12 +111,13 @@ def theme_plan(char_id: str, salt: str, n: int, have: int = 0,
         merged: list = []
         ci = ai = 0
         while ci < len(cpool) or ai < len(apool):
-            for _ in range(3):
-                if ci < len(cpool):
-                    merged.append(cpool[ci]); ci += 1
-            for _ in range(2):
-                if ai < len(apool):
+            if ci < len(cpool):
+                merged.append(cpool[ci]); ci += 1
+                # 每 per 张内容主题掺 1 张纯画风（per<=0 = 不掺）
+                if per > 0 and len(merged) % per == 0 and ai < len(apool):
                     merged.append(apool[ai]); ai += 1
+            else:
+                merged.append(apool[ai]); ai += 1
         for t in merged:
             if t == prev or t in out:   # 一轮内不重复（顺带保证相邻不重复）
                 continue
@@ -116,11 +126,12 @@ def theme_plan(char_id: str, salt: str, n: int, have: int = 0,
             if len(out) >= n:
                 break
         round_no += 1
-    # 池子总量小于 n（配额 > 32）时按序复用补齐，仍避开相邻重复
+    # 池子总量小于 n（配额 > 主题数）时按序复用补齐，仍避开相邻重复。
+    # per<=0（不掺画风）时只有内容主题，art 仅在内容池整个为空时兜底。
     if len(out) < n:
-        fallback = content + art
+        fallback = (content + art) if per > 0 else (content or art)
         k = 0
-        while len(out) < n and k < n * 4:
+        while fallback and len(out) < n and k < n * 4:
             t = fallback[k % len(fallback)]
             if t != prev:
                 out.append(t)
@@ -176,7 +187,7 @@ def build_char_tasks(entry: dict, themes: list, have: int = 0) -> list:
 
 
 def build_tasks(cands: list, salt: str, date: str = "",
-                overrides: dict | None = None) -> list:
+                overrides: dict | None = None, art_every: int = 5) -> list:
     """候选 → 具体任务：每角色展开成逐张任务并附主题 id（theme_plan 决定）。
 
     v0.22.4：have / date / used_themes 一并交给 theme_plan；预览与实际启动
@@ -192,7 +203,7 @@ def build_tasks(cands: list, salt: str, date: str = "",
         themes = theme_plan(
             cid, char_salt(salt, cid, ov.get(cid, 0)), int(c.get("need") or 0),
             have=int(c.get("have") or 0), date=date,
-            used=c.get("used_themes") or [])
+            used=c.get("used_themes") or [], art_every=art_every)
         for i, theme_id in enumerate(themes):
             tasks.append({"char_id": entry.get("id") or "", "index": i,
                           "theme_id": theme_id,

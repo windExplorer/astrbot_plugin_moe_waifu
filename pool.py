@@ -454,8 +454,10 @@ def normalize_entry(entry: dict, pack_name: str) -> dict | None:
         "verified": bool(entry.get("verified", False)),
         # v0.35.0：人设固装——帽子/外套/鞋袜属于角色特色时整维沉默
         #（不产出「摘掉帽子」类指令、外观 tags 不剥离），见 prompt_gen.keep_dims_of。
+        # v0.54.8（用户口径）：**头饰默认开**——帽类外观（女巫帽 / 发带 / 贝雷帽）
+        # 基本都是角色特征，抽卡与补图默认不再摘换；显式存了 false 的条目仍按 false。
         "keep_footwear": bool(entry.get("keep_footwear", False)),
-        "keep_headwear": bool(entry.get("keep_headwear", False)),
+        "keep_headwear": bool(entry.get("keep_headwear", True)),
         "keep_outerwear": bool(entry.get("keep_outerwear", False)),
     }
     if out["category"] not in CATEGORY_LABELS:

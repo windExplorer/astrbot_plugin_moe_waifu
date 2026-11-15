@@ -479,6 +479,17 @@ check("名次按 draw_events.id 排（不按时间列，重发不会漂）",
 check("历史被污染的时间有回填修复",
       "_backfill_draw_times" in STORE)
 
+# ---------- ⑯ v0.54.8：头饰默认固定 + 补图画风比例可配 ----------
+_POOL = (ROOT / "pool.py").read_text(encoding="utf-8")
+_BF = (ROOT / "batch_fill.py").read_text(encoding="utf-8")
+check("头饰固装默认开启（外套/鞋袜仍默认关）",
+      '"keep_headwear": bool(entry.get("keep_headwear", True))' in _POOL
+      and '"keep_outerwear": bool(entry.get("keep_outerwear", False))' in _POOL
+      and "keep_headwear: true" in PAGE)
+check("补图画风主题掺入间隔可配（batch_art_every）",
+      '"batch_art_every"' in _SCHEMA and "_batch_art_every" in API
+      and "art_every" in _BF and "art_every=art_every" in _BF)
+
 if FAILURES:
     print(f"test_ui_v042: {len(FAILURES)} FAILED")
     sys.exit(1)

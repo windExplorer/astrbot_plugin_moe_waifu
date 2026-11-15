@@ -2754,6 +2754,14 @@ def _batch_candidates(plugin, body) -> tuple:
     return cands, skipped, quota, require_ref
 
 
+def _batch_art_every(plugin) -> int:
+    """补图主题里纯画风（art_*）的掺入间隔：每 N 张 1 张，0 = 不掺（v0.54.8）。"""
+    try:
+        return _int_clamp(plugin._cfg("batch_art_every", 5), 5, 0, 50)
+    except Exception:
+        return 5
+
+
 async def h_batch_preview(plugin) -> dict:
     """dry-run：返回将补图的角色清单（含每张将套用的主题序列）与跳过名单。"""
     body = await _body()
@@ -2761,12 +2769,14 @@ async def h_batch_preview(plugin) -> dict:
     salt = str(plugin._cfg("salt", "moe-waifu"))
     date = plugin._today()
     labels = {t["id"]: t["label"] for t in prompt_gen.all_themes()}
+    art_every = _batch_art_every(plugin)
     items = []
     for c in cands:
         e = c["entry"]
         themes = batch_fill.theme_plan(
             str(e.get("id") or ""), salt, c["need"],
-            have=c["have"], date=date, used=c.get("used_themes") or [])
+            have=c["have"], date=date, used=c.get("used_themes") or [],
+            art_every=art_every)
         labels_list = [labels.get(t, t) for t in themes]
         items.append({
             "char_id": e.get("id"), "name": e.get("name"),
@@ -2806,7 +2816,8 @@ async def h_batch_reroll(plugin) -> dict:
     themes = batch_fill.theme_plan(
         cid, batch_fill.char_salt(salt, cid, nonce),
         int(body.get("need") or 0), have=int(body.get("have") or 0),
-        date=plugin._today(), used=used)
+        date=plugin._today(), used=used,
+        art_every=_batch_art_every(plugin))
     labels = {t["id"]: t["label"] for t in prompt_gen.all_themes()}
     labels_list = [labels.get(t, t) for t in themes]
     return ok({"char_id": cid, "nonce": nonce, "themes": labels_list,
@@ -2825,7 +2836,8 @@ async def h_batch_start(plugin) -> dict:
     # v0.28.3：预览里「换一个」过的角色，启动时按同一个 nonce 派生盐
     overrides = body.get("overrides") if isinstance(body.get("overrides"), dict) else {}
     tasks = batch_fill.build_tasks(cands, salt, date=plugin._today(),
-                                   overrides=overrides)
+                                   overrides=overrides,
+                                   art_every=_batch_art_every(plugin))
     runner = _batch_runner(plugin)
     # v0.39.1：画师模式按次勾选（弹窗复选框）——LLM 整体创作，题材作灵感
     artist = bool(body.get("artist"))
@@ -2909,7 +2921,8 @@ async def h_batch_char_preview(plugin) -> dict:
         return err(guard)
     themes = batch_fill.theme_plan(
         cid, batch_fill.char_salt(str(plugin._cfg("salt", "moe-waifu")), cid),
-        need, have=have, date=plugin._today(), used=used)
+        need, have=have, date=plugin._today(), used=used,
+        art_every=_batch_art_every(plugin))
     labels = {str(t.get("id") or ""): str(t.get("label") or "")
               for t in prompt_gen.all_themes()}
     return ok({
@@ -2959,7 +2972,8 @@ async def h_batch_char_start(plugin) -> dict:
     else:
         themes = batch_fill.theme_plan(
             cid, batch_fill.char_salt(str(plugin._cfg("salt", "moe-waifu")), cid),
-            need, have=have, date=plugin._today(), used=used)
+            need, have=have, date=plugin._today(), used=used,
+            art_every=_batch_art_every(plugin))
     tasks = batch_fill.build_char_tasks(entry, themes, have=have)
     runner = _batch_runner(plugin)
     # v0.39.1：画师模式按次勾选（补齐配额弹窗复选框）

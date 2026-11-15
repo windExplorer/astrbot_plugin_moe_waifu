@@ -5237,7 +5237,8 @@
           strategy_loras: "", strategy_ref: "", strategy_img2img_workflow: null,
           strategy_denoise: null,
           tags_en: "", quote: "", color: "#E8B4C8", verified: false,
-          keep_footwear: false, keep_headwear: false, keep_outerwear: false
+          // v0.54.8：头饰默认固定（帽类外观多为角色特征，默认不摘换）
+          keep_footwear: false, keep_headwear: true, keep_outerwear: false
         };
       };
       var form = Vue.ref(emptyForm());
@@ -5294,7 +5295,10 @@
           tags_en: e.tags_en || "",
           quote: (Array.isArray(e.quotes) && e.quotes.length ? e.quotes.join("\n") : (e.quote || "")),
           color: e.color || "#E8B4C8", verified: !!e.verified,
-          keep_footwear: !!e.keep_footwear, keep_headwear: !!e.keep_headwear,
+          keep_footwear: !!e.keep_footwear,
+          // 老条目可能没这个字段（后端 normalize 默认 true），这里同样默认开
+          keep_headwear: (e.keep_headwear === undefined || e.keep_headwear === null)
+            ? true : !!e.keep_headwear,
           keep_outerwear: !!e.keep_outerwear
         };
       }
@@ -10149,7 +10153,7 @@
         { title: "萌绘生图", keys: ["gen_source_mode", "img2img_prob", "artist_draw_enabled", "draw_workflow", "img2img_workflow",
                                     "draw_width", "draw_height", "draw_timeout", "img2img_denoise",
                                     "draw_negative_enabled", "draw_negative_prompt", "announce_enabled",
-                                    "batch_require_ref", "avatar_batch_overwrite"] },
+                                    "batch_art_every", "batch_require_ref", "avatar_batch_overwrite"] },
         { title: "提示词与变化", keys: ["prompt_llm_enabled", "prompt_llm_provider",
                                         "prompt_llm_timeout", "variations_enabled"] }
       ];

@@ -92,8 +92,12 @@ gk = pool.normalize_entry({"id": "k", "name": "名", "tags_en": "t",
 check("固装开关布尔归一", gk["keep_headwear"] is True and gk["keep_outerwear"] is True
       and gk["keep_footwear"] is False)
 gk2 = pool.normalize_entry({"id": "k", "name": "名", "tags_en": "t"}, "p")
-check("旧条目无固装字段默认 False", not gk2["keep_headwear"]
+# v0.54.8（用户口径）：头饰默认开（帽类多是角色特征），外套/鞋袜仍需显式开启
+check("旧条目无固装字段：头饰默认 True、外套/鞋袜 False", gk2["keep_headwear"] is True
       and not gk2["keep_outerwear"] and not gk2["keep_footwear"])
+check("显式 false 的头饰仍按 false",
+      pool.normalize_entry({"id": "k", "name": "名", "tags_en": "t",
+                            "keep_headwear": False}, "p")["keep_headwear"] is False)
 # 编辑保存合并：表单提交的固装开关必须覆盖旧值（在 normalize 输出里，不在 keep_local 名单）
 gk3 = pool.merge_saved_entry(
     {"id": "k", "name": "名", "tags_en": "t", "keep_headwear": True},

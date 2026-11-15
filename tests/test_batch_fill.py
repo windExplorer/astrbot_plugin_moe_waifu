@@ -59,6 +59,16 @@ def main():
     p5 = bf.theme_plan("c1", "salt", 5, date="2026-11-13")
     content_n = sum(1 for t in p5 if not str(t).startswith("art_"))
     check("5 张里内容主题 >= 3（画风主题不再占多数）", content_n >= 3, str(p5))
+    # v0.54.8（用户）：纯画风主题默认每 5 张才掺 1 张（20%），配 0 = 完全不掺
+    art_n = sum(1 for t in p5 if str(t).startswith("art_"))
+    check("默认每 5 张至多 1 张纯画风", art_n <= 1, str(p5))
+    p5_no_art = bf.theme_plan("c1", "salt", 5, date="2026-11-13", art_every=0)
+    check("art_every=0 时一张画风主题都不掺",
+          p5_no_art and not any(str(t).startswith("art_") for t in p5_no_art),
+          str(p5_no_art))
+    p10_dense = bf.theme_plan("c1", "salt", 10, date="2026-11-13", art_every=2)
+    check("art_every=2 时画风主题明显变多",
+          sum(1 for t in p10_dense if str(t).startswith("art_")) >= 2, str(p10_dense))
     check("一轮内主题不重复", len(set(p5)) == 5, str(p5))
     check("跨角色 5 张序列不同",
           bf.theme_plan("c2", "salt", 5, date="2026-11-13") != p5)

@@ -57,5 +57,9 @@ _scope = schema.get("same_stat_scope", {})
 check("统计口径默认所有群共用", _scope.get("default") == "all")
 check("统计口径选项齐全", set(_scope.get("options") or []) == {"all", "group"})
 check("统计口径有中文标签", len(_scope.get("labels") or []) == len(_scope.get("options") or []))
+# v0.54.8：补图画风主题掺入间隔（默认 5 = 20%，0 = 不掺）
+check("补图画风间隔默认 5",
+      schema.get("batch_art_every", {}).get("default") == 5
+      and schema.get("batch_art_every", {}).get("type") == "int")
 
 print("test_schema: ALL OK")
