@@ -10257,6 +10257,10 @@
         // v0.54.2：same_stat_scope = 卡面统计口径（所有群共用 / 仅当前群）
         { title: "抽卡规则", keys: ["draw_recency", "prefer_unused_portrait",
                                     "same_stat_scope"] },
+        // v0.55.0：签到联动（一条「签到」串起今日老婆 + 星语，仅当日首签才发）
+        { title: "签到联动", keys: ["checkin_link_enabled", "checkin_link_only_first",
+                                    "checkin_link_include_star", "checkin_link_require_wake",
+                                    "checkin_link_delay"] },
         { title: "萌绘生图", keys: ["gen_source_mode", "img2img_prob", "artist_draw_enabled", "draw_workflow", "img2img_workflow",
                                     "draw_width", "draw_height", "draw_timeout", "img2img_denoise",
                                     "draw_negative_enabled", "draw_negative_prompt", "announce_enabled",

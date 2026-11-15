@@ -74,6 +74,8 @@ class MoeWaifuPlugin(Star):
         self._data_dir = None
         # 同一 (uid,date) 只允许一条召唤流程在飞：防连点触发重复生图/重复计数
         self._inflight: set = set()
+        # 签到联动后台任务（v0.55.0）：每条「签到」一个，terminate 时统一取消
+        self._link_tasks: set = set()
         # 生图串行队列（v0.9.6）：萌绘一张 20~120s，多召唤并发时逐张画防打爆后端；
         # _gen_queue 是正在排队/作画的任务数，用于「前面还有 N 位」友好提示
         self._gen_lock = asyncio.Lock()
@@ -143,6 +145,10 @@ class MoeWaifuPlugin(Star):
             raise
 
     async def terminate(self):
+        # 签到联动任务先取消：它们可能在等生图，留着会继续往旧实例上写库
+        for task in list(getattr(self, "_link_tasks", ())):
+            task.cancel()
+        self._link_tasks.clear()
         if self._store is not None:
             self._store.close()
             self._store = None
@@ -283,6 +289,116 @@ class MoeWaifuPlugin(Star):
         if queued > 0:
             return random.choice(_QUEUE_LINES).format(n=queued)
         return random.choice(_SUMMON_LINES)
+
+    # ---------- 签到联动（v0.55.0） ----------
+    #
+    # 用户只发一条「签到」（/签到 或裸词）就把三个插件串起来：
+    #   1) 本插件当编排者——当天还没抽老婆就先抽一位并发送；
+    #   2) 紧接着叫星语插件补一张（同样只在当天首签时发）；
+    #   3) get_px 的 /签到 完全不动：这里只 create_task、不 stop_event、不 yield，
+    #      两个入口都立即返回，那边照常渲染并发出自己的签到卡，两套出图并行。
+    #
+    # 当天已抽过的静默跳过（不重发旧卡）；用户手发 /今日老婆 仍走原来的重发逻辑。
+
+    CHECKIN_LINK_RE = r"^签到$"
+    CHECKIN_LINK_EXTRA = "_moe_checkin_link"
+    STAR_WHISPER_PLUGIN = "astrbot_plugin_moe_star_whisper"
+
+    def checkin_link_ready(self) -> bool:
+        """给别的插件看：本插件是否接管「签到」联动。"""
+        try:
+            return bool(self._cfg("checkin_link_enabled", False))
+        except Exception:
+            return False
+
+    @filter.regex(CHECKIN_LINK_RE, priority=20)
+    async def checkin_link_entry(self, event: AstrMessageEvent):
+        """「签到」联动入口：只建后台任务，立即返回（绝不阻塞签到卡）。"""
+        if not self.checkin_link_ready():
+            return
+        if self._store is None or self._data_dir is None:
+            return
+        if (
+            bool(self._cfg("checkin_link_require_wake", False))
+            and not event.is_at_or_wake_command
+        ):
+            return  # 只认 /签到 或 @机器人，不理群里随口说的「签到」
+        if event.get_extra(self.CHECKIN_LINK_EXTRA):
+            return  # 同一条消息已经被别处接管
+        event.set_extra(self.CHECKIN_LINK_EXTRA, True)
+        event.should_call_llm(False)
+        task = asyncio.create_task(self._run_checkin_link(event))
+        self._link_tasks.add(task)
+        task.add_done_callback(self._link_tasks.discard)
+
+    async def _run_checkin_link(self, event: AstrMessageEvent):
+        """严格串行：老婆出完再轮到星语；任一步失败都不影响另一步。"""
+        try:
+            delay = max(0, int(self._cfg("checkin_link_delay", 0) or 0))
+            if delay:
+                await asyncio.sleep(min(delay, 60))
+            await self._linked_waifu(event)
+            if bool(self._cfg("checkin_link_include_star", True)):
+                await self._linked_star(event)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.error(f"[{PLUGIN_NAME}] 签到联动失败\n{traceback.format_exc()}")
+
+    async def _linked_waifu(self, event: AstrMessageEvent) -> None:
+        uid = str(event.get_sender_id() or "").strip()
+        if not uid:
+            return
+        gid = "" if event.is_private_chat() else str(event.get_group_id() or "")
+        if gid and gid in self._disabled_groups():
+            return
+        if not gid and not self._allow_private():
+            return
+        date = self._today()
+        if bool(self._cfg("checkin_link_only_first", True)):
+            if self._store.get_draw(uid, date) is not None:
+                return  # 今天已经抽过：不重发、不重抽
+            if (uid, date) in self._inflight:
+                return  # 手发 /今日老婆 正在抽：让那次自己发
+        async for res in self.waifu_cmd(event):
+            await self._send_linked_result(event, res)
+
+    async def _linked_star(self, event: AstrMessageEvent) -> None:
+        try:
+            star = self.context.get_registered_star(self.STAR_WHISPER_PLUGIN)
+        except Exception:
+            return
+        if star is None or not getattr(star, "activated", False):
+            return
+        linked = getattr(getattr(star, "star_cls", None), "linked_fortune", None)
+        if linked is None:
+            logger.info(
+                f"[{PLUGIN_NAME}] 星语插件版本过旧，签到联动跳过（需 v1.13.0+）"
+            )
+            return
+        try:
+            async for res in linked(event):
+                await self._send_linked_result(event, res)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.error(
+                f"[{PLUGIN_NAME}] 签到联动星语失败\n{traceback.format_exc()}"
+            )
+
+    async def _send_linked_result(self, event: AstrMessageEvent, res) -> None:
+        """联动结果走 context 主动发送，避开与 get_px respond 共用 event 的路径。"""
+        chain = getattr(res, "chain", None)
+        if not chain:
+            return
+        try:
+            await self.context.send_message(
+                event.unified_msg_origin, MessageChain(chain=list(chain))
+            )
+        except Exception:
+            logger.error(
+                f"[{PLUGIN_NAME}] 签到联动发送失败\n{traceback.format_exc()}"
+            )
 
     # ---------- 指令 ----------
 

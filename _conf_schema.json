@@ -202,5 +202,35 @@
     "hint": "需要现抽一张新卡时先发一句简洁的抽卡提示（如「正在为你抽今日角色，请稍候」）；多人排队时会告知前面还有几个抽卡请求",
     "type": "bool",
     "default": true
+  },
+  "checkin_link_enabled": {
+    "description": "签到联动",
+    "hint": "开启后用户只发一条「签到」（/签到 或裸词）即可同时触发今日老婆与星语签，不必再逐条发指令。本插件负责串起整个流程：先抽今日老婆，抽完再叫星语补签；两者都在后台跑，不会拖慢签到卡片本身的出图",
+    "type": "bool",
+    "default": false
+  },
+  "checkin_link_only_first": {
+    "description": "签到联动仅当日首签",
+    "hint": "开启（默认）时，今日已经抽过的就不再重复发送（签到静默跳过抽卡，避免刷屏、也不重复消耗算力）；关闭则每次签到都重发当天已有的卡。手动发 /今日老婆 不受此开关影响",
+    "type": "bool",
+    "default": true
+  },
+  "checkin_link_include_star": {
+    "description": "签到顺带触发星语",
+    "hint": "开启（默认）时，抽完今日老婆会继续叫「萌萌星语」补一张当日星语签；关闭则签到只抽老婆。星语需 v1.13.0 及以上、且它自己开启了签到联动",
+    "type": "bool",
+    "default": true
+  },
+  "checkin_link_require_wake": {
+    "description": "签到需唤醒前缀",
+    "hint": "开启时只认 /签到（或 @机器人 后说签到），群里其他人随口说「签到」不触发；关闭（默认）与签到插件的裸词触发行为保持一致",
+    "type": "bool",
+    "default": false
+  },
+  "checkin_link_delay": {
+    "description": "签到联动延迟（秒）",
+    "hint": "收到签到后等多少秒再开始抽卡，0 = 立即开始（默认）。想给自己插件的签到卡留出更多渲染余量时可调大，最大 60 秒",
+    "type": "int",
+    "default": 0
   }
 }

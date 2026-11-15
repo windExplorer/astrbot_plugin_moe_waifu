@@ -2,6 +2,39 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.55.0 (2026-11-16)
+
+**新增「签到联动」：一条 `签到` 串起今日老婆 + 星语签，不用再逐条发三条指令。**
+
+- 用户只发一条「签到」（`/签到` 或裸词「签到」），本插件当编排者：
+  1. 当天还没抽老婆 → 先抽一位并发卡；
+  2. 抽完再叫「萌萌星语」补一张当日星语签（同样只在当天首签时发）；
+  3. `astrbot_plugin_get_px` 的签到卡完全不动——入口只 `create_task` 后立即返回，
+     **不 stop_event、不 yield**，那边照常渲染出卡，两套出图并行。
+- **为什么必须抢在 get_px 前面**：它的 `/签到` 第一行就 `event.stop_event()`，
+  排在它后面的同名指令永远不会执行（它自己的 `checkin_omnidraw` 桥接注释里也
+  写明了这点）。所以入口用 `@filter.regex(r"^签到$", priority=20)`，高于它的默认 0。
+  裸词也要能触发，所以用 regex 而不是 `@filter.command`（wake 前缀在唤醒阶段
+  已被剥离，`/签到` 的 message_str 同样是「签到」）。
+- **只做当日首签**：`checkin_link_only_first`（默认开）下，今天已经抽过老婆的
+  签到静默跳过（不重发、不重抽）；正在抽（`_inflight`）时也跳过，让那次请求
+  自己发结果。手动发 `/今日老婆` 不受影响，仍走原来的重发逻辑。
+- 顺序与并行：老婆 → 星语**串行**（老婆出完才轮到星语）；签到卡与这条链并行，
+  不会被拖慢。
+- 新配置（控制台「签到联动」分区）：`checkin_link_enabled`（默认关）、
+  `checkin_link_only_first`、`checkin_link_include_star`、`checkin_link_require_wake`、
+  `checkin_link_delay`。
+- 跨插件调用：`context.get_registered_star("astrbot_plugin_moe_star_whisper")`
+  → `star_cls.linked_fortune(event)`；没装 / 未启用 / 版本旧（无该方法）时静默降级
+  并记一条日志，绝不炸主流程。联动结果统一走 `context.send_message()`，不跟
+  get_px 的 respond 抢同一个 event 的发送路径。
+- 生命周期：后台任务登记在 `_link_tasks`，`terminate()` 统一取消（否则插件重载后
+  旧任务还会往旧实例上写）。
+- 测试：新增 `tests/test_checkin_link.py`（配置键 / 优先级 / 不吞事件 / 编排顺序 /
+  首签判定 / 降级 / 生命周期）；`test_webui_contract.py` 的配置页归属守卫要求
+  新键必须进 `CONFIG_SECTIONS`。
+- 版本 v0.54.13 -> v0.55.0。
+
 ## v0.54.13 (2026-11-16)
 
 - **角色详情 → 立绘 新增「批量生成」**（用户：补齐配额的进化版，不只能补齐，还能
