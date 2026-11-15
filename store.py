@@ -16,6 +16,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import re
 import sqlite3
 import threading
 from datetime import date as _date, datetime, timedelta, timezone
@@ -247,6 +248,28 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# v0.54.0：平台名归一。老写入路径把 `event.platform`（AstrBot 的
+# PlatformMetadata dataclass）整个 str() 进了库，记录页「平台」列显示的是
+# `PlatformMetadata(name='aiocqhttp', description='适用于 OneBot 标准的…')`
+# 这一长串。正确取值是 `event.get_platform_name()`，新写入已改；这里负责把
+# 历史行洗回来（幂等，见 Store._normalize_platforms）。
+_PLATFORM_REPR_RE = re.compile(
+    r"name\s*=\s*['\"]([^'\"]+)['\"]")
+
+
+def normalize_platform(value) -> str:
+    """把 PlatformMetadata 的 repr / str 归一成平台短名（如 aiocqhttp）。"""
+    s = str(value or "").strip()
+    if not s:
+        return ""
+    if "PlatformMetadata(" in s:
+        m = _PLATFORM_REPR_RE.search(s)
+        if m:
+            return m.group(1).strip()
+        return ""
+    return s
+
+
 def _streak_stats(dates, today: str = "") -> tuple[int, int]:
     """(当前连签, 最长连签)，输入为 YYYY-MM-DD 字符串的可迭代对象（纯函数，可直测）。
 
@@ -313,6 +336,7 @@ class Store:
         # 工坊补图并发时会拿到同一个 seq（唯一序列 ≠ 连续展示编号）。
         self._seq_lock = threading.RLock()
         self._migrate()
+        self._normalize_platforms()
         self._conn.commit()
 
     def _migrate(self) -> None:
@@ -372,6 +396,27 @@ class Store:
             "  WHERE j2.char_id = portraits.char_id"
             "    AND j2.seed = portraits.seed"
             "    AND j2.status = 'ok' AND j2.duration_ms > 0)")
+
+    def _normalize_platforms(self) -> None:
+        """清洗历史脏平台名（幂等；只有命中脏值才写库）。
+
+        v0.54.0：老写入路径把 `event.platform`（PlatformMetadata dataclass）
+        整个 str() 进了库，记录页「平台」列显示成长长一串 repr。这里按
+        `normalize_platform` 逐值改写回短名；新写入已改走
+        `event.get_platform_name()`，所以正常情况下这里一次都不会命中。
+        """
+        for table in ("draws", "draw_events"):
+            try:
+                rows = self._conn.execute(
+                    f"SELECT DISTINCT platform FROM {table}"
+                    " WHERE platform LIKE '%PlatformMetadata%'").fetchall()
+            except sqlite3.DatabaseError:
+                continue   # 极老库没有 platform 列：跳过，不影响启动
+            for r in rows:
+                old = r["platform"]
+                self._conn.execute(
+                    f"UPDATE {table} SET platform=? WHERE platform=?",
+                    (normalize_platform(old), old))
 
     def close(self):
         try:
@@ -1406,6 +1451,20 @@ class Store:
             (*args, max(1, int(limit)), max(0, int(offset))),
         ).fetchall()
         return [dict(r) for r in rows], total
+
+    def count_events(self, date: str = "") -> int:
+        """抽签流水条数（含换签）。`date` 空 = 全部。
+
+        v0.54.0：总览「今日抽签」要区分「多少人」与「抽了多少次」——
+        draws 一人一天一行只算人数，换签次数得从只追加的流水来。
+        """
+        if date:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM draw_events WHERE date=?", (date,)
+            ).fetchone()
+        else:
+            row = self._conn.execute("SELECT COUNT(*) AS n FROM draw_events").fetchone()
+        return int(row["n"]) if row else 0
 
     def list_groups(self) -> list:
         """记录里出现过的群（含私聊伪群 `__private__`），群名取最近一次非空快照。"""

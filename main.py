@@ -493,6 +493,57 @@ class MoeWaifuPlugin(Star):
 
     # ---------- 核心产出 ----------
 
+    @staticmethod
+    def _platform_name(event: AstrMessageEvent) -> str:
+        """平台短名（aiocqhttp / telegram …）。
+
+        v0.54.0：老版本写的是 `str(event.platform)`——那是 PlatformMetadata
+        整个 dataclass 的 repr，记录页「平台」列显示成
+        `PlatformMetadata(name='aiocqhttp', description='适用于 OneBot …')`
+        一大串无关描述。官方取值接口是 `event.get_platform_name()`，取不到再
+        退回 `platform_meta.name`，最后兜底解析旧 repr。
+        """
+        name = ""
+        try:
+            name = str(event.get_platform_name() or "")
+        except Exception:
+            name = ""
+        if not name:
+            try:
+                name = str(event.platform_meta.name or "")
+            except Exception:
+                name = ""
+        if not name:
+            name = str(getattr(event, "platform", "") or "")
+        return store.normalize_platform(name)
+
+    async def _group_name_of(self, event: AstrMessageEvent, gid: str) -> str:
+        """群名兜底：aiocqhttp 的群消息事件里 group_name 恒为空。
+
+        OneBot V11 的群消息事件只带 group_id（不带群名），AstrBot 适配器把它
+        直接塞进 `message_obj.group.group_name`，于是老记录页整列都显示「私聊」。
+        这里按需向适配器要一次 get_group_info；失败 / 超时一律返回空串——
+        抽卡不能因为查群名失败而中断。
+        """
+        if not gid:
+            return ""
+        bot = getattr(event, "bot", None)
+        if bot is None:
+            return ""
+        params = {"group_id": int(gid) if str(gid).isdigit() else gid}
+        self_id = str(getattr(getattr(event, "message_obj", None), "self_id", "") or "")
+        if self_id:
+            params["self_id"] = self_id
+        try:
+            info = await asyncio.wait_for(
+                bot.call_action("get_group_info", **params), timeout=5)
+        except Exception:
+            logger.debug(f"[{PLUGIN_NAME}] 群名查询失败（gid={gid}）\n{traceback.format_exc()}")
+            return ""
+        if isinstance(info, dict):
+            return str(info.get("group_name") or "").strip()
+        return ""
+
     async def _produce(self, event: AstrMessageEvent, entry: dict, uid: str, date: str,
                        nonce: int, rerolled: bool) -> str | None:
         """立绘库决策 → 出图/取图 → 计数落库 → 渲染出卡。失败返回 None（已发错误提示）。"""
@@ -502,12 +553,16 @@ class MoeWaifuPlugin(Star):
             gname = str(event.get_group_name() or "") if gid else ""
         except Exception:
             pass
+        # v0.54.0：aiocqhttp 群消息不带群名 → 主动问一次适配器（顺便修好
+        # 「记录页群列全显示私聊」）；查不到就留空，前端回落显示群号。
+        if gid and not gname:
+            gname = await self._group_name_of(event, gid)
         nickname = ""
         try:
             nickname = str(event.get_sender_name() or "")
         except Exception:
             pass
-        platform = str(getattr(event, "platform", "") or "")
+        platform = self._platform_name(event)
 
         char_id = entry["id"]
         salt = str(self._cfg("salt", "moe-waifu"))

@@ -391,6 +391,40 @@ check("卡面一句话简介字段（tagline）在资料表单里",
 check("印象语给到 10 句量级（rows 6 + 实时句数）",
       "galQuoteCount" in PAGE and ':rows="6"' in PAGE)
 
+# ---------- ⑩ v0.54.0：总览补全统计 / 今日抽签 / 记录页群与时间 / 头像 ----------
+check("总览改「今日抽签」且时间到时分秒",
+      "ov.today_recent" in PAGE and "fmtClock(r.updated_at)" in PAGE
+      and "今日抽签" in PAGE and "ov.recent" not in PAGE)
+check("今日抽签带群名 + 首抽/换签标注",
+      "groupNameOf(r.group_id, r.group_name)" in PAGE
+      and "rerollLabel(r.nonce)" in PAGE)
+check("总览补全清单（立绘/头像/印象语）可点进角色详情",
+      all(k in PAGE for k in ("ov.quota_short", "ov.no_avatar", "ov.no_quote"))
+      and "gotoGallery(c.id)" in PAGE)
+check("总览角色卡展示 总数 / 启用 / 停用",
+      "ov.chars_enabled" in PAGE and "ov.chars_disabled" in PAGE
+      and '"chars_disabled"' in API)
+check("记录页新增抽卡时间列（时分秒，另有日期列）",
+      "<th>抽卡时间</th>" in PAGE and "fmtClock(d.updated_at)" in PAGE
+      and "<th>日期</th>" in PAGE)
+check("记录页群列显示群名 + 群号（不再一律私聊）",
+      "groupNameOf(d.group_id, d.group_name)" in PAGE
+      and "groupTitle(d.group_id, d.group_name)" in PAGE)
+check("记录页平台列走短名映射（不再露 PlatformMetadata repr）",
+      "platformLabel(d.platform)" in PAGE and "PLATFORM_LABELS" in PAGE)
+check("角色库默认头像墙，卡片第二、列表最后",
+      'var charsMode = Vue.ref("avatar")' in PAGE
+      and PAGE.index('<n-radio-button value="avatar">')
+      < PAGE.index('<n-radio-button value="card">')
+      < PAGE.index('<n-radio-button value="list">'))
+check("帮助页有指令篇",
+      'key: "commands"' in PAGE and "指令与玩法" in PAGE)
+check("群头像只做 QQ 群图床 + 平台名归一",
+      "p.qlogo.cn/gh/" in API and "def normalize_platform" in STORE
+      and "get_platform_name" in MAIN)
+check("脏平台名在启动时幂等清洗",
+      "_normalize_platforms" in STORE and "PlatformMetadata%" in STORE)
+
 if FAILURES:
     print(f"test_ui_v042: {len(FAILURES)} FAILED")
     sys.exit(1)

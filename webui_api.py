@@ -3166,7 +3166,14 @@ async def h_ui_state_set(plugin) -> dict:
 
 
 async def h_overview(plugin) -> dict:
-    """总览页聚合（只读）：库存规模 / 出卡源配置 / 抽卡概况 / 最近记录。"""
+    """总览页聚合（只读）：库存规模 / 出卡源配置 / 抽卡概况 / 今日抽签。
+
+    v0.54.0：用户口径「总览要能看出启用中的角色还缺什么」——补全清单一律只
+    数 verified（工坊里的「启用」开关）的角色，停用角色不参与统计；榜单给出
+    id/name（前端 chips 点击直接进角色详情），数字口径全部以启用角色为分母。
+    """
+    TODAY_ROWS = 15
+
     def build():
         packs = pool.load_packs(_pools_dir(plugin), logger)
         entries = []
@@ -3184,8 +3191,23 @@ async def h_overview(plugin) -> dict:
         for row in portraits:
             by_char[row["char_id"]] = by_char.get(row["char_id"], 0) + 1
 
+        # v0.54.0：启用（verified）角色的补全清单
+        enabled = [e for e in entries if e["verified"]]
+        quota_short, no_avatar, no_quote = [], [], []
+        for e in enabled:
+            have = by_char.get(e["id"], 0)
+            if have < quota:
+                quota_short.append({"id": e["id"], "name": e["name"], "have": have})
+            if not str(e.get("avatar") or "").strip():
+                no_avatar.append({"id": e["id"], "name": e["name"]})
+            if not (e.get("quotes") or str(e.get("quote") or "").strip()):
+                no_quote.append({"id": e["id"], "name": e["name"]})
+        # 缺口最大的排前面（0 张的最该补），同缺口按 id 稳定排序
+        quota_short.sort(key=lambda c: (c["have"], c["id"]))
+
         refs_bound = 0
         draw_sources = 0
+        draw_sources_enabled = 0
         no_source = []
         for e in entries:
             st = e.get("strategy") or {}
@@ -3194,19 +3216,22 @@ async def h_overview(plugin) -> dict:
             has_draw = bool(draw.draw_source(e, plugin._data_dir))
             if has_draw:
                 draw_sources += 1
+                if e["verified"]:
+                    draw_sources_enabled += 1
             if str(e.get("strategy_type") or "") == "img2img" \
                     and not has_draw and not draw.explicit_ref(st, plugin._data_dir):
                 no_source.append({"id": e["id"], "name": e["name"]})
 
         today = plugin._today()
-        recent, today_draws, total_draws = [], 0, 0
+        today_recent, today_draws, total_draws, today_draw_times = [], 0, 0, 0
         if plugin._store:
-            recent = plugin._store.list_records(1, 5)["rows"]
+            today_recent = plugin._store.list_records(1, TODAY_ROWS, today, today)["rows"]
             today_draws = plugin._store.list_records(1, 1, today, today)["total"]
             total_draws = plugin._store.list_records(1, 1)["total"]
-            # v0.51.0：最近抽签的行附卡面缩略（≤5 张、120px data URL），前端
-            # 直接当缩略图展示、点开走 openViewer(card_path) 看原图
-            for row in recent:
+            today_draw_times = plugin._store.count_events(today)
+            # 今日抽签的行附卡面缩略（15 张以内、120px data URL），前端直接当
+            # 缩略图展示、点开走 openViewer(card_path) 看原图
+            for row in today_recent:
                 fp = _safe_data_file(plugin, row.get("card_path"))
                 row["card_thumb"] = _thumb_cached(str(fp), 120) if fp else ""
         try:
@@ -3220,16 +3245,24 @@ async def h_overview(plugin) -> dict:
             "img2img_prob": _int_clamp(plugin._cfg("img2img_prob", 50), 50, 0, 100),
             "artist_draw_enabled": bool(plugin._cfg("artist_draw_enabled", False)),
             "packs": len(packs), "chars": len(entries),
-            "verified": sum(1 for e in entries if e["verified"]),
+            "verified": len(enabled),
+            # v0.54.0：总数 / 启用 / 停用（前端只展示数字文案）
+            "chars_enabled": len(enabled),
+            "chars_disabled": len(entries) - len(enabled),
             "portraits": len(portraits),
-            "chars_full": sum(1 for n in by_char.values() if n >= quota),
-            # v0.42.0：总览页配额完成度 / 停用统计（前端进度条用）
-            "chars_with_portrait": len(by_char),
+            # 配额口径同步换成「启用中的角色」，否则分母混着停用角色看着对不上
+            "chars_full": sum(1 for e in enabled if by_char.get(e["id"], 0) >= quota),
+            "chars_with_portrait": sum(1 for e in enabled if by_char.get(e["id"], 0) > 0),
             "portraits_disabled": len(all_portraits) - len(portraits),
             "refs_bound": refs_bound, "orphans": len(_orphan_items(plugin)),
-            "draw_sources": draw_sources, "no_source": no_source[:6],
-            "today_draws": today_draws, "total_draws": total_draws,
-            "recent": recent,
+            "draw_sources": draw_sources,
+            "draw_sources_enabled": draw_sources_enabled,
+            "no_source": no_source[:6],
+            # v0.54.0：补全清单（点击进角色详情）
+            "quota_short": quota_short, "no_avatar": no_avatar, "no_quote": no_quote,
+            "today": today, "today_draws": today_draws, "total_draws": total_draws,
+            "today_draw_times": today_draw_times,
+            "today_recent": today_recent,
         }
     return ok(await asyncio.to_thread(build))
 
@@ -4092,6 +4125,32 @@ async def _fetch_avatar_data_url(uid: str) -> str | None:
     return "data:image/jpeg;base64," + base64.b64encode(raw).decode("ascii")
 
 
+# v0.54.0：群头像缓存（与用户头像同一套 TTL / 上限，键是群号）
+_group_avatar_cache: dict[str, tuple[float, str]] = {}
+
+
+async def _fetch_group_avatar_data_url(gid: str) -> str | None:
+    """QQ 群头像 → data URL。群号非法或网络失败返回 None（前端回落色块）。"""
+    try:
+        import aiohttp  # AstrBot 运行期依赖；缺席时返回 None 走降级
+    except Exception:
+        return None
+
+    url = f"https://p.qlogo.cn/gh/{gid}/{gid}/100"
+    try:
+        timeout = aiohttp.ClientTimeout(total=6)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    return None
+                raw = await resp.read()
+    except Exception:
+        return None
+    if not raw:
+        return None
+    return "data:image/jpeg;base64," + base64.b64encode(raw).decode("ascii")
+
+
 async def h_user_avatar(plugin) -> dict:
     body = await _body()
     uid = str(body.get("uid") or _q("uid", "") or "").strip()
@@ -4111,6 +4170,34 @@ async def h_user_avatar(plugin) -> dict:
         ]:
             _avatar_cache.pop(k, None)
     _avatar_cache[uid] = (now, data_url)
+    return ok({"data_url": data_url, "cached": False})
+
+
+async def h_group_avatar(plugin) -> dict:
+    """QQ 群头像（v0.54.0）。只做 QQ（aiocqhttp 后续平台暂不适配）。
+
+    群名/群号在 draws 里是快照，头像没有必要落库：QQ 群头像是固定形态的
+    公开图床 `p.qlogo.cn/gh/<群号>/<群号>/100`，服务端代理成 data URL 即可，
+    与用户头像同策略（进程内缓存 + TTL，失败前端静默回落色块）。
+    """
+    body = await _body()
+    gid = str(body.get("gid") or body.get("group_id")
+              or _q("gid", "") or _q("group_id", "") or "").strip()
+    if not gid or not gid.isdigit():
+        return err("缺少合法群号")
+    now = time.time()
+    hit = _group_avatar_cache.get(gid)
+    if hit and now - hit[0] < _AVATAR_TTL:
+        return ok({"data_url": hit[1], "cached": True})
+    data_url = await _fetch_group_avatar_data_url(gid)
+    if not data_url:
+        return err("群头像获取失败")
+    if len(_group_avatar_cache) >= _AVATAR_CACHE_MAX:
+        for k in sorted(_group_avatar_cache,
+                        key=lambda k: _group_avatar_cache[k][0])[
+                : _AVATAR_CACHE_MAX // 2]:
+            _group_avatar_cache.pop(k, None)
+    _group_avatar_cache[gid] = (now, data_url)
     return ok({"data_url": data_url, "cached": False})
 
 
@@ -5861,6 +5948,8 @@ def register(plugin) -> None:
         ("/users", h_users, ["GET", "POST"]),
         ("/user", h_user, ["GET", "POST"]),
         ("/user/avatar", h_user_avatar, ["GET", "POST"]),
+        # v0.54.0：QQ 群头像（记录页 / 总览按群展示；只做 QQ 平台）
+        ("/group/avatar", h_group_avatar, ["GET", "POST"]),
         ("/filters", h_filter_options, ["GET"]),
         ("/debug/state", h_debug_state, ["GET", "POST"]),
         ("/debug/history", h_debug_history, ["GET", "POST"]),

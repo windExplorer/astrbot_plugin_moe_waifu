@@ -53,6 +53,7 @@ galDrawRef galDrawRefAbs setDrawSource galRefsSel
 workKeyword workFilterCat workFilterVerified workSort workCatOpts workVerifiedOpts
 workSortOpts filteredWorks toggleWorkChar openNewForWork
 fmtTime cfgBoundGroups pickSimGroup simScopeText
+fmtClock groupNameOf groupTitle groupAvatarOf platformLabel
 trendDurChart fmtDur
 galTabs galTab switchGalTab galSummary galSummaryLoading
 profileFields tierOpts galTier galProfile saveGalProfile galProfileSaving
@@ -112,6 +113,7 @@ cdBusy cdResult doCardDebug cdShuffle
 
 ROUTES = """
 /records /records/detail /records/events /stats /users /user /user/avatar /filters
+/group/avatar
 /debug/state /debug/history /debug/simulate /debug/rerender /debug/card
 /portraits/move_to_ref /refs/move_to_portrait /refs/orphans
 /refs/orphan_delete
@@ -137,7 +139,7 @@ ROUTES = """
 
 STORE_METHODS = """
 _migrate upsert_draw update_draw_card list_records record_detail list_events
-list_groups list_platforms list_users user_profile stats_range
+list_groups list_platforms list_users user_profile stats_range count_events
 debug_log debug_recent debug_audit debug_queries reset_char_day
 """.split()
 

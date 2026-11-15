@@ -566,6 +566,42 @@
   /* v0.51.0：总览最近抽签的卡面缩略（点开看原图） */
   .ov-card-thumb { width: 34px; height: 46px; object-fit: cover; border-radius: 4px;
     flex: none; cursor: zoom-in; border: 1px solid var(--wf-line); }
+  /* ---- v0.54.0：总览「角色补全」+「今日抽签」 ----
+     补全清单是可点击的 chip（点进角色详情）；今日抽签每行两层：
+     第一层「谁抽到了谁」，第二层「哪个群 · 首抽/换签 · 时分秒」。 */
+  .ov-mini { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 6px 0 4px; }
+  .ov-mini-card { border: 1px solid var(--wf-line); border-radius: 10px;
+    padding: 7px 10px; background: rgba(150,90,130,.04); }
+  .ov-mini-num { font-size: 19px; font-weight: 700; line-height: 1.25; }
+  .ov-mini-label { font-size: 11px; opacity: .62; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .ov-sec { display: flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600; margin: 10px 0 4px; }
+  .ov-sec .cnt { font-weight: 400; font-size: 11px; opacity: .55; }
+  .ov-miss { display: flex; flex-wrap: wrap; gap: 6px; max-height: 96px; overflow-y: auto; }
+  .ov-miss-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+    padding: 2px 9px; border-radius: 999px; font-size: 12px; cursor: pointer;
+    border: 1px solid var(--wf-line); background: var(--wf-surface);
+    transition: border-color .15s ease, color .15s ease; }
+  .ov-miss-chip:hover { border-color: var(--wf-brand); color: var(--wf-brand); }
+  .ov-miss-chip .n { font-size: 11px; opacity: .55; }
+  .ov-today-row { display: flex; align-items: center; gap: 8px;
+    padding: 6px 0; border-bottom: 1px solid rgba(128,128,128,.13); }
+  .ov-today-row:last-child { border-bottom: 0; }
+  .ov-today-body { flex: 1; min-width: 0; }
+  .ov-today-line1 { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
+  .ov-today-line2 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    margin-top: 3px; font-size: 11px; opacity: .78; }
+  .ov-today-user { max-width: 96px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  .ov-today-time { font-variant-numeric: tabular-nums; }
+  .ov-flag { font-size: 10px; padding: 1px 7px; border-radius: 999px;
+    background: rgba(214,51,132,.12); color: var(--wf-brand); flex: none; }
+  .ov-flag.reroll { background: rgba(110,135,220,.16); color: #6b7fd0; }
+  .ov-group-av { width: 18px; height: 18px; border-radius: 5px; object-fit: cover; flex: none; }
+  .ov-group-letter { width: 18px; height: 18px; border-radius: 5px; flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10px; color: #fff; font-weight: 600; user-select: none; }
 
   /* 素材库（v0.43.0）：主题表 + 维度词 chip */
   .word-list { display: flex; flex-wrap: wrap; gap: 6px; max-height: 300px;
@@ -667,7 +703,8 @@
               <div>
                 <div class="h-title">♥ 萌萌今日老婆 · 工坊</div>
                 <div class="h-sub">
-                  共 {{ ov.chars }} 位角色 / {{ ov.packs }} 卷 · 立绘 {{ ov.portraits }} 张 · 今日 {{ ov.today_draws }} 人抽到老婆<br>
+                  共 {{ ov.chars }} 位角色（启用 {{ ov.chars_enabled }} · 停用 {{ ov.chars_disabled }}）/ {{ ov.packs }} 卷<br>
+                  立绘 {{ ov.portraits }} 张 · 今日 {{ ov.today_draws }} 人抽到老婆（{{ ov.today_draw_times }} 次） · 累计 {{ ov.total_draws }} 人次<br>
                   出图方式 {{ ovGenModeLabel }}<span
                     v-if="ov.gen_source_mode === 'mix'"> · 图生图命中 {{ ov.img2img_prob }}%</span><span
                     v-if="ov.gen_source_mode === 'img2img'"> · 每次都现画（库存满也画）</span><span
@@ -697,7 +734,10 @@
                   <span class="ov-icon">♥</span>
                   <div class="ov-label">角色</div>
                   <div class="ov-num" :style="{ color: brandColor }">{{ ov.chars }}</div>
-                  <div class="ov-label">{{ ov.verified }} 个已验证 · {{ ov.packs }} 卷</div>
+                  <!-- v0.54.0：总数 / 启用 / 停用三个数字并列（用户口径：只要数字文案） -->
+                  <div class="ov-label">
+                    启用 {{ ov.chars_enabled }} · 停用 {{ ov.chars_disabled }} · {{ ov.packs }} 卷
+                  </div>
                   <div class="ov-bar"><i :style="{ width: ovVerifiedPct }"></i></div>
                 </div>
               </n-gi>
@@ -707,8 +747,8 @@
                   <!-- v0.42.0：只显示启用中的立绘，停用的单独标注不混进主数字 -->
                   <div class="ov-label">立绘（启用中）</div>
                   <div class="ov-num" :style="{ color: brandColor }">{{ ov.portraits }}</div>
-                  <div class="ov-label">{{ ov.chars_full }}/{{ ov.chars }} 个角色已满 {{ ov.quota }} 张<span
-                    v-if="ov.portraits_disabled > 0"> · 停用 {{ ov.portraits_disabled }}</span></div>
+                  <div class="ov-label">{{ ov.chars_full }}/{{ ov.chars_enabled }} 个启用角色已满 {{ ov.quota }} 张<span
+                    v-if="ov.portraits_disabled > 0"> · 停用图 {{ ov.portraits_disabled }}</span></div>
                   <div class="ov-bar"><i :style="{ width: ovFullPct }"></i></div>
                 </div>
               </n-gi>
@@ -717,7 +757,7 @@
                   <span class="ov-icon">✦</span>
                   <div class="ov-label">今日抽卡</div>
                   <div class="ov-num" :style="{ color: brandColor }">{{ ov.today_draws }}</div>
-                  <div class="ov-label">累计 {{ ov.total_draws }} 人次</div>
+                  <div class="ov-label">人 · {{ ov.today_draw_times }} 次抽签 · 累计 {{ ov.total_draws }} 人次</div>
                 </div>
               </n-gi>
               <n-gi>
@@ -725,7 +765,7 @@
                   <span class="ov-icon">◈</span>
                   <div class="ov-label">参考图 / 出卡源</div>
                   <div class="ov-num" :style="{ color: brandColor }">{{ ov.refs_bound }}</div>
-                  <div class="ov-label">{{ ov.draw_sources }} 个角色已指定出卡源 · {{ ov.orphans }} 张待找回</div>
+                  <div class="ov-label">{{ ov.draw_sources_enabled }} 个启用角色已指定出卡源 · {{ ov.orphans }} 张待找回</div>
                   <div class="ov-bar"><i :style="{ width: ovDrawSrcPct }"></i></div>
                 </div>
               </n-gi>
@@ -733,78 +773,128 @@
             <n-grid class="ov-grid" :cols="2" :x-gap="12" :y-gap="12">
               <n-gi>
                 <div class="ov-card">
-                  <div class="lib-head">立绘配额与出卡源
-                    <span class="cnt">配额 {{ ov.quota }} 张/角色</span></div>
+                  <div class="lib-head">角色补全与立绘配额
+                    <span class="cnt">只看启用中的 {{ ov.chars_enabled }} 位 · 配额 {{ ov.quota }} 张/角色</span></div>
+                  <div class="ov-mini">
+                    <div class="ov-mini-card">
+                      <div class="ov-mini-num"
+                           :style="{ color: ov.quota_short.length ? '#d03050' : brandColor }">{{ ov.quota_short.length }}</div>
+                      <div class="ov-mini-label">立绘未满 {{ ov.quota }} 张</div>
+                    </div>
+                    <div class="ov-mini-card">
+                      <div class="ov-mini-num"
+                           :style="{ color: ov.no_avatar.length ? '#d03050' : brandColor }">{{ ov.no_avatar.length }}</div>
+                      <div class="ov-mini-label">缺头像</div>
+                    </div>
+                    <div class="ov-mini-card">
+                      <div class="ov-mini-num"
+                           :style="{ color: ov.no_quote.length ? '#d03050' : brandColor }">{{ ov.no_quote.length }}</div>
+                      <div class="ov-mini-label">缺印象语</div>
+                    </div>
+                  </div>
                   <div class="bar-row">
-                    <span class="bar-label">配额已满角色</span>
+                    <span class="bar-label">配额已满</span>
                     <div class="bar-track"><div class="bar-fill"
                       :style="{ width: ovFullPct, background: brandColor }"></div></div>
-                    <span class="bar-num">{{ ov.chars_full }}/{{ ov.chars }}</span>
+                    <span class="bar-num">{{ ov.chars_full }}/{{ ov.chars_enabled }}</span>
                   </div>
                   <div class="bar-row">
-                    <span class="bar-label">已有立绘角色</span>
+                    <span class="bar-label">已有立绘</span>
                     <div class="bar-track"><div class="bar-fill"
                       :style="{ width: ovWithPortraitPct, background: brandColor }"></div></div>
-                    <span class="bar-num">{{ ov.chars_with_portrait }}/{{ ov.chars }}</span>
-                  </div>
-                  <div class="bar-row">
-                    <span class="bar-label">已验证角色</span>
-                    <div class="bar-track"><div class="bar-fill"
-                      :style="{ width: ovVerifiedPct, background: brandColor }"></div></div>
-                    <span class="bar-num">{{ ov.verified }}/{{ ov.chars }}</span>
+                    <span class="bar-num">{{ ov.chars_with_portrait }}/{{ ov.chars_enabled }}</span>
                   </div>
                   <div class="bar-row">
                     <span class="bar-label">已指定出卡源</span>
                     <div class="bar-track"><div class="bar-fill"
                       :style="{ width: ovDrawSrcPct, background: brandColor }"></div></div>
-                    <span class="bar-num">{{ ov.draw_sources }}/{{ ov.chars }}</span>
+                    <span class="bar-num">{{ ov.draw_sources_enabled }}/{{ ov.chars_enabled }}</span>
                   </div>
-                  <div style="font-size:12px; opacity:.75; line-height:1.7; margin-top:10px;">
-                    未指定出卡源时抽卡不会走图生图，也不会私自取参考图列表里的图；
-                    混合模式命中概率 {{ ov.img2img_prob }}%。
+                  <!-- v0.54.0：三个补全清单——点 chip 直接进该角色详情 -->
+                  <div class="ov-sec">立绘不达标
+                    <span class="cnt">{{ ov.quota_short.length }} 位 · 点击进详情</span></div>
+                  <div v-if="ov.quota_short.length" class="ov-miss">
+                    <span v-for="c in ov.quota_short" :key="'q' + c.id" class="ov-miss-chip"
+                          :title="c.name + '：现有 ' + c.have + ' / ' + ov.quota + ' 张'"
+                          @click="gotoGallery(c.id)">{{ c.name }}<span class="n">{{ c.have }}/{{ ov.quota }}</span></span>
                   </div>
-                  <div v-if="ov.no_source.length" style="font-size:12px; opacity:.75; margin-top:8px;">
-                    画法为图生图但没指定出卡源（将回退文生图）：
-                    <span v-for="c in ov.no_source" :key="c.id">{{ c.name }} </span>
+                  <div v-else class="lib-empty" style="font-size:12px;">启用角色都满配额了</div>
+                  <div class="ov-sec">缺头像
+                    <span class="cnt">{{ ov.no_avatar.length }} 位</span></div>
+                  <div v-if="ov.no_avatar.length" class="ov-miss">
+                    <span v-for="c in ov.no_avatar" :key="'a' + c.id" class="ov-miss-chip"
+                          title="去角色详情设头像" @click="gotoGallery(c.id)">{{ c.name }}</span>
                   </div>
-                  <div v-else style="font-size:12px; opacity:.6; margin-top:8px;">没有待补配置的角色</div>
+                  <div v-else class="lib-empty" style="font-size:12px;">启用角色都有头像</div>
+                  <div class="ov-sec">缺印象语
+                    <span class="cnt">{{ ov.no_quote.length }} 位</span></div>
+                  <div v-if="ov.no_quote.length" class="ov-miss">
+                    <span v-for="c in ov.no_quote" :key="'t' + c.id" class="ov-miss-chip"
+                          title="去角色详情补印象语" @click="gotoGallery(c.id)">{{ c.name }}</span>
+                  </div>
+                  <div v-else class="lib-empty" style="font-size:12px;">启用角色都有印象语</div>
+                  <div class="ov-sec">出卡源
+                    <span class="cnt">混合模式命中 {{ ov.img2img_prob }}%</span></div>
+                  <div style="font-size:12px; opacity:.72; line-height:1.7;">
+                    未指定出卡源时抽卡不会走图生图，也不会私自取参考图列表里的图。
+                  </div>
+                  <div v-if="ov.no_source.length" class="ov-miss" style="margin-top:6px;">
+                    <span v-for="c in ov.no_source" :key="'s' + c.id" class="ov-miss-chip"
+                          title="画法为图生图但没指定出卡源（将回退文生图）"
+                          @click="gotoGallery(c.id)">{{ c.name }}</span>
+                  </div>
+                  <div v-else style="font-size:12px; opacity:.6; margin-top:6px;">没有待补出卡源的角色</div>
                 </div>
               </n-gi>
               <n-gi>
                 <div class="ov-card">
-                  <div style="font-size:13px; font-weight:600; margin-bottom:8px;">最近抽签</div>
+                  <div class="lib-head">今日抽签
+                    <span class="cnt">{{ ov.today }} · {{ ov.today_draws }} 人 / {{ ov.today_draw_times }} 次</span>
+                    <span class="link-btn" style="margin-left:auto; font-weight:400;"
+                          @click="goMenu('records')">全部记录 →</span>
+                  </div>
                   <!-- v0.39.2：首屏加载占位（此前 loading 期显示假「还没有抽签记录」） -->
-                  <div v-if="ovLoading && !ov.recent.length" class="gal-loading">
+                  <div v-if="ovLoading && !ov.today_recent.length" class="gal-loading">
                     <n-spin size="small"></n-spin>
                     <span class="txt">正在载入…</span>
                   </div>
-                  <div v-if="!ovLoading && !ov.recent.length" style="font-size:12px; opacity:.6;">还没有抽签记录</div>
-                  <!-- v0.13.2：头像 + 昵称；v0.51.0：角色头像 + 名字（点击进角色详情，
-                       不看大图）+ 抽到的卡面缩略（点开看原图） -->
-                  <div v-for="r in ov.recent" :key="r.user_id + r.date"
-                       style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12px;">
+                  <div v-if="!ovLoading && !ov.today_recent.length" style="font-size:12px; opacity:.6;">今天还没有人抽签</div>
+                  <!-- v0.54.0：今日抽签——谁抽到了谁 / 哪个群 / 首抽还是换签 / 时分秒 -->
+                  <div v-for="r in ov.today_recent" :key="r.user_id + r.date" class="ov-today-row">
                     <img v-if="avatarOf(r.user_id)" class="avatar zoomable" :src="avatarOf(r.user_id)"
                          style="width:26px; height:26px;" alt=""
                          title="点击查看头像大图"
                          @click.stop="openAvatarBig(r.user_id, r.nickname || r.user_id)">
                     <span v-else class="avatar-fallback" :style="{ width: '26px', height: '26px',
                           fontSize: '12px', background: hashColor(r.user_id) }">{{ (r.nickname || r.user_id).slice(0, 1) }}</span>
-                    <span style="flex:none; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
-                          :title="r.user_id">{{ r.nickname || r.user_id }}</span>
-                    <span class="char-av-link" style="flex:1; min-width:0;"
-                          title="进入角色详情" @click="gotoGallery(r.char_id)">
-                      <img v-if="charAvatarOf(r.char_id)" class="char-av"
-                           :src="charAvatarOf(r.char_id)" alt="">
-                      <span v-else class="char-av char-av-letter"
-                            :style="{ background: (r.char_color || colorOf(r.char_id)) + '33',
-                                      color: r.char_color || colorOf(r.char_id) }">{{ (r.char_name || r.char_id || '?').slice(0, 1) }}</span>
-                      <span class="char-av-name"
-                            style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ r.char_name || r.char_id }}</span>
-                    </span>
+                    <div class="ov-today-body">
+                      <div class="ov-today-line1">
+                        <span class="ov-today-user" :title="r.user_id">{{ r.nickname || r.user_id }}</span>
+                        <span class="char-av-link" style="min-width:0;"
+                              title="进入角色详情" @click="gotoGallery(r.char_id)">
+                          <img v-if="charAvatarOf(r.char_id)" class="char-av"
+                               :src="charAvatarOf(r.char_id)" alt="">
+                          <span v-else class="char-av char-av-letter"
+                                :style="{ background: (r.char_color || colorOf(r.char_id)) + '33',
+                                          color: r.char_color || colorOf(r.char_id) }">{{ (r.char_name || r.char_id || '?').slice(0, 1) }}</span>
+                          <span class="char-av-name">{{ r.char_name || r.char_id }}</span>
+                        </span>
+                      </div>
+                      <div class="ov-today-line2">
+                        <span class="char-av-link" :title="groupTitle(r.group_id, r.group_name)">
+                          <img v-if="groupAvatarOf(r.group_id)" class="ov-group-av"
+                               :src="groupAvatarOf(r.group_id)" alt="">
+                          <span v-else-if="r.group_id" class="ov-group-letter"
+                                :style="{ background: hashColor(r.group_id) }">{{ (r.group_name || r.group_id).slice(0, 1) }}</span>
+                          <span>{{ groupNameOf(r.group_id, r.group_name) }}</span>
+                        </span>
+                        <span class="ov-flag" :class="{ reroll: Number(r.nonce || 0) > 0 }">{{ rerollLabel(r.nonce) }}</span>
+                        <span class="ov-today-time" :title="fmtTime(r.updated_at)">{{ fmtClock(r.updated_at) }}</span>
+                      </div>
+                    </div>
                     <img v-if="r.card_thumb" class="ov-card-thumb" :src="r.card_thumb"
                          alt="卡面" title="点击查看卡片大图"
                          @click.stop="r.card_path && openViewer(r.card_path, r.date + ' 卡片')">
-                    <span class="bind-tip" style="margin-top:0; flex:none;">{{ r.date }}</span>
                   </div>
                 </div>
               </n-gi>
@@ -825,10 +915,10 @@
           <div v-if="menu === 'chars'">
             <n-space align="center" :wrap="true" class="sticky-tools">
               <n-radio-group v-model:value="charsMode" size="small">
+                <!-- v0.54.0：默认头像墙（找角色最快），卡片次之，列表最后 -->
+                <n-radio-button value="avatar">头像</n-radio-button>
                 <n-radio-button value="card">卡片</n-radio-button>
                 <n-radio-button value="list">列表</n-radio-button>
-                <!-- v0.49.0：头像墙——只留头像，悬停才浮出名字与作品 -->
-                <n-radio-button value="avatar">头像</n-radio-button>
               </n-radio-group>
               <n-button type="primary" size="small" @click="openNew">新增角色</n-button>
               <n-button size="small" @click="openImport">导入角色</n-button>
@@ -1852,12 +1942,14 @@
                   </div>
                   <table class="rec-table" v-if="recRows.length">
                     <thead><tr>
-                      <th>日期</th><th>用户</th><th>昵称</th><th>老婆</th><th>作品</th>
-                      <th>群</th><th>重抽</th><th>平台</th><th>立绘来源</th><th>卡片</th><th>操作</th>
+                      <th>日期</th><th>抽卡时间</th><th>用户</th><th>昵称</th><th>老婆</th><th>作品</th>
+                      <th>群聊</th><th>重抽</th><th>平台</th><th>立绘来源</th><th>卡片</th><th>操作</th>
                     </tr></thead>
                     <tbody>
                       <tr v-for="d in recRows" :key="d.user_id + '|' + d.date">
                         <td>{{ d.date }}</td>
+                        <!-- v0.54.0：抽卡时间（时分秒）——日期列只有日期，看不出谁先抽 -->
+                        <td :title="fmtTime(d.updated_at)">{{ fmtClock(d.updated_at) }}</td>
                         <td><a class="link-btn" :title="d.user_id" @click="gotoUser(d.user_id)"
                                style="display:inline-flex; align-items:center; gap:6px;">
                           <img v-if="avatarOf(d.user_id)" class="avatar zoomable"
@@ -1877,9 +1969,22 @@
                           <span class="char-av-name">{{ d.char_name || d.char_id }}</span>
                         </span></td>
                         <td>{{ d.series || "—" }}</td>
-                        <td>{{ d.group_name || "私聊" }}</td>
+                        <!-- v0.54.0：群列改「头像 + 群名 + 群号」——此前 aiocqhttp 的
+                             群消息事件不带给群名，整列都显示成「私聊」 -->
+                        <td>
+                          <span class="char-av-link" :title="groupTitle(d.group_id, d.group_name)">
+                            <img v-if="groupAvatarOf(d.group_id)" class="ov-group-av"
+                                 :src="groupAvatarOf(d.group_id)" alt="">
+                            <span v-else-if="d.group_id" class="ov-group-letter"
+                                  :style="{ background: hashColor(d.group_id) }">{{ (d.group_name || d.group_id).slice(0, 1) }}</span>
+                            <span style="display:inline-flex; flex-direction:column; line-height:1.25;">
+                              <span class="char-av-name">{{ groupNameOf(d.group_id, d.group_name) }}</span>
+                              <span v-if="d.group_id" style="font-size:11px; opacity:.55;">{{ d.group_id }}</span>
+                            </span>
+                          </span>
+                        </td>
                         <td>{{ rerollLabel(d.nonce) }}</td>
-                        <td>{{ d.platform || "—" }}</td>
+                        <td>{{ platformLabel(d.platform) }}</td>
                         <!-- v0.19.4：鼠标悬停看「这次为什么这么出图」（决策原因随签落库） -->
                         <td :title="d.decision_note || '旧记录没有原因（v0.19.4 之前的签）'">{{ decisionLabel(d.decision) }}</td>
                         <td><a v-if="d.card_path" class="link-btn" @click="openViewer(d.card_path, d.date + ' 卡片')">查看</a><span v-else>—</span></td>
@@ -2189,6 +2294,12 @@
                         <b class="char-av-name">{{ userDetail.today.char_name || userDetail.today.char_id }}</b>
                       </span>
                       <span class="bind-tip" style="margin: 0;">{{ userDetail.today.series || "—" }}</span>
+                      <!-- v0.54.0：今日签也带上群与时分秒 -->
+                      <span class="bind-tip" style="margin: 0;"
+                            :title="groupTitle(userDetail.today.group_id, userDetail.today.group_name)">
+                        {{ groupNameOf(userDetail.today.group_id, userDetail.today.group_name) }}
+                        · {{ fmtClock(userDetail.today.updated_at) }}
+                      </span>
                       <n-tag size="tiny" :bordered="false" v-if="userDetail.today.rerolled">换过老婆</n-tag>
                       <n-button size="tiny" v-if="userDetail.today.card_path"
                                 @click="openViewer(userDetail.today.card_path, '今日老婆卡片')">查看卡片</n-button>
@@ -2262,7 +2373,8 @@
                             <span class="char-av-name">{{ h.char_name || h.char_id }}</span>
                           </span></td>
                           <td>{{ h.series || "—" }}</td>
-                          <td>{{ h.group_name || "私聊" }}</td>
+                          <!-- v0.54.0：群名缺失回落群号（此前整列显示「私聊」） -->
+                          <td :title="groupTitle(h.group_id, h.group_name)">{{ groupNameOf(h.group_id, h.group_name) }}</td>
                           <td>{{ rerollLabel(h.nonce) }}</td>
                           <td>{{ decisionLabel(h.decision) }}</td>
                           <td><a v-if="h.card_path" class="link-btn"
@@ -2387,7 +2499,7 @@
                         <tbody>
                           <tr><td>今日老婆</td><td>{{ dbgState.draw ? (dbgState.draw.char_name || dbgState.draw.char_id) : "今天还没抽" }}</td></tr>
                           <tr><td>角色 ID</td><td>{{ dbgState.draw ? dbgState.draw.char_id : "—" }}</td></tr>
-                          <tr><td>群 / 平台</td><td>{{ dbgState.draw ? (dbgState.draw.group_name || dbgState.draw.group_id || "私聊") : "—" }} · {{ dbgState.draw ? (dbgState.draw.platform || "—") : "—" }}</td></tr>
+                          <tr><td>群 / 平台</td><td>{{ dbgState.draw ? groupTitle(dbgState.draw.group_id, dbgState.draw.group_name) : "—" }} · {{ dbgState.draw ? platformLabel(dbgState.draw.platform) : "—" }}</td></tr>
                           <tr><td>nonce / 上限</td><td>{{ dbgState.nonce }} / {{ dbgState.reroll_limit }}</td></tr>
                           <tr><td>卡图文件</td><td>{{ dbgState.card_exists ? "存在" : "缺失或没有" }}</td></tr>
                           <tr><td>该角色立绘</td><td>{{ dbgState.portraits_of_current }} 张</td></tr>
@@ -2680,7 +2792,7 @@
                     <tr><td>日期</td><td>{{ recDetail.draw.date }}</td></tr>
                     <tr><td>老婆</td><td>{{ recDetail.draw.char_name || recDetail.draw.char_id }}（{{ recDetail.draw.char_id }}）</td></tr>
                     <tr><td>作品 / 卷</td><td>{{ recDetail.draw.series || "—" }} · {{ recDetail.draw.pack || "—" }}</td></tr>
-                    <tr><td>群 / 平台</td><td>{{ recDetail.draw.group_name || "私聊" }} · {{ recDetail.draw.platform || "—" }}</td></tr>
+                    <tr><td>群 / 平台</td><td>{{ groupTitle(recDetail.draw.group_id, recDetail.draw.group_name) }} · {{ platformLabel(recDetail.draw.platform) }}</td></tr>
                     <tr><td>nonce / 重抽</td><td>{{ recDetail.draw.nonce }} · {{ rerollLabel(recDetail.draw.nonce) }}</td></tr>
                     <tr><td>抽签种子</td><td :title="recDetail.draw.seed_hex">{{ recDetail.draw.seed_hex || "—" }}</td></tr>
                     <tr><td>立绘来源</td><td>{{ decisionLabel(recDetail.draw.decision) }}</td></tr>
@@ -4766,7 +4878,12 @@
         version: "", anima_ready: false, quota: 5, gen_source_mode: "mix",
         img2img_prob: 50, packs: 0, chars: 0, verified: 0, portraits: 0,
         chars_full: 0, refs_bound: 0, orphans: 0, draw_sources: 0,
-        no_source: [], today_draws: 0, total_draws: 0, recent: [],
+        draw_sources_enabled: 0,
+        no_source: [], today: "", today_draws: 0, total_draws: 0, today_draw_times: 0,
+        today_recent: [],
+        // v0.54.0：总数 / 启用 / 停用 + 三个补全清单（只含启用角色）
+        chars_enabled: 0, chars_disabled: 0,
+        quota_short: [], no_avatar: [], no_quote: [],
         // v0.42.0：总览进度条（后端 overview 只数启用中立绘）
         chars_with_portrait: 0, portraits_disabled: 0
       });
@@ -4775,17 +4892,19 @@
         if (!d) { return "0%"; }
         return Math.max(0, Math.min(100, Math.round(n / d * 100))) + "%";
       }
+      // v0.54.0：进度条分母统一换成「启用中的角色」——停用角色不抽卡、不占配额，
+      // 混进分母会让完成度永远差一截（用户口径）。
       var ovVerifiedPct = Vue.computed(function () {
-        return ovPct(ov.value.verified, ov.value.chars);
+        return ovPct(ov.value.chars_enabled, ov.value.chars);
       });
       var ovFullPct = Vue.computed(function () {
-        return ovPct(ov.value.chars_full, ov.value.chars);
+        return ovPct(ov.value.chars_full, ov.value.chars_enabled);
       });
       var ovWithPortraitPct = Vue.computed(function () {
-        return ovPct(ov.value.chars_with_portrait, ov.value.chars);
+        return ovPct(ov.value.chars_with_portrait, ov.value.chars_enabled);
       });
       var ovDrawSrcPct = Vue.computed(function () {
-        return ovPct(ov.value.draw_sources, ov.value.chars);
+        return ovPct(ov.value.draw_sources_enabled, ov.value.chars_enabled);
       });
       // v0.19.3：出图方式的中文标签 + 两种「配了却不会按预期生效」的提示。
       // 用户实报：「配置的是只用图生图模板，但还是取的立绘」——两条真实原因：
@@ -4813,7 +4932,8 @@
           var res = await apiGet("overview", {});
           if (res) {
             ov.value = Object.assign({}, ov.value, res);
-            ensureAvatars(ov.value.recent);
+            ensureAvatars(ov.value.today_recent);
+            ensureGroupAvatars(ov.value.today_recent);
           }
         } catch (e) { /* 已提示 */ } finally {
           ovLoading.value = false;
@@ -5239,8 +5359,9 @@
         } catch (err2) { /* 已提示 */ }
       }
 
-      // 卡片/列表双视图（默认卡片）+ 分页
-      var charsMode = Vue.ref("card");
+      // 三个视图：头像墙（默认）/ 卡片 / 列表 + 分页
+      // v0.54.0：默认头像墙——用户口径「角色库默认展示头像形式，卡片第二，列表最后」
+      var charsMode = Vue.ref("avatar");
       var cardPageSize = 12;
       var cardPage = Vue.ref(1);
       var pagedEntries = Vue.computed(function () {
@@ -7251,6 +7372,65 @@
           if (r && r.user_id) { fetchAvatar(r.user_id); }
         });
       }
+      // v0.54.0：群头像（只做 QQ）。群号必须是数字才去拉，其它平台直接回落首字色块。
+      var groupAvatarMap = Vue.ref({});
+      var groupAvatarPending = {};
+      function groupAvatarOf(gid) {
+        gid = String(gid || "");
+        return gid ? (groupAvatarMap.value[gid] || "") : "";
+      }
+      function fetchGroupAvatar(gid) {
+        gid = String(gid || "");
+        if (!gid || !/^\d+$/.test(gid)) { return; }
+        if (groupAvatarMap.value[gid] || groupAvatarPending[gid]) { return; }
+        var p;
+        try { p = bridge.apiGet("group/avatar", { gid: gid }); }
+        catch (e) { return; }
+        if (!p || typeof p.then !== "function") { return; }
+        groupAvatarPending[gid] = true;
+        p.then(function (res) {
+          var url = res && res.data_url;
+          if (url) {
+            var m = Object.assign({}, groupAvatarMap.value);
+            m[gid] = url;
+            groupAvatarMap.value = m;
+          }
+        }).catch(function () { /* 静默回落 */ }).then(function () {
+          delete groupAvatarPending[gid];
+        });
+      }
+      function ensureGroupAvatars(rows) {
+        (rows || []).slice(0, 50).forEach(function (r) {
+          if (r && r.group_id) { fetchGroupAvatar(r.group_id); }
+        });
+      }
+      // 群列文案：群名优先；没有群名（老记录 / 适配器不给）就显示群号——
+      // 空群号才是真的私聊（此前 aiocqhttp 群消息没有群名，整列都显示成「私聊」）。
+      function groupNameOf(gid, gname) {
+        gid = String(gid || "");
+        if (!gid) { return "私聊"; }
+        return String(gname || "").trim() || ("群 " + gid);
+      }
+      function groupTitle(gid, gname) {
+        gid = String(gid || "");
+        if (!gid) { return "私聊"; }
+        var name = String(gname || "").trim();
+        return name ? (name + " · " + gid) : ("群号 " + gid + "（没读到群名）");
+      }
+      // 只要时分秒（今日抽签 / 记录表的时间列；完整时间进 title）
+      function fmtClock(s) {
+        var full = fmtTime(s);
+        if (!full || full === "—") { return "—"; }
+        var parts = String(full).split(" ");
+        return parts.length > 1 ? parts[1] : full;
+      }
+      // 平台列只给短名（只做 QQ，其它平台原样显示）
+      var PLATFORM_LABELS = { aiocqhttp: "QQ", qq: "QQ", webui: "工坊" };
+      function platformLabel(p) {
+        var s = String(p || "").trim();
+        if (!s) { return "—"; }
+        return PLATFORM_LABELS[s] || s;
+      }
       // 首字母色块底色：uid 稳定散列到萌系色板
       var AVATAR_COLORS = ["#d63384", "#9b72c9", "#39c5bb", "#f0a04b",
                            "#5b8def", "#77b255", "#e879b5", "#c94f6a"];
@@ -7505,6 +7685,32 @@
       ].join("\n");
 
       var helpDocs = [
+        {
+          key: "commands",
+          title: "指令与玩法",
+          intro: "聊天里只有下面这三条指令；角色库、试画台、立绘维护、记录统计都在这套工坊页面里做（仅管理员可见）。",
+          where: "群里 @机器人 或私聊发指令都可以；「分群绑定」里被停用的群会直接拒绝抽卡。",
+          fields: [
+            { name: "/今日老婆", type: "指令", required: true,
+              desc: "抽今天缘定的那位（别名 /jrlp）。一人一天一位；当天再发只会重发同一张卡，不会换人。" },
+            { name: "/换老婆", type: "指令", required: false,
+              desc: "重新抽一位（别名 /换老婆卡）。次数由配置「每日换老婆次数」限制：默认 1 次，配 0 = 关闭。" },
+            { name: "/老婆帮助", type: "指令", required: false,
+              desc: "发送帮助图（别名 /waifu帮助）；图渲染失败时回落成纯文本。" },
+            { name: "抽取范围", type: "—", required: false,
+              desc: "只在「该群绑定作品 ∩ 已启用角色」里抽；没绑定作品的群 / 私聊用全部启用角色。" },
+            { name: "卡面内容", type: "—", required: false,
+              desc: "立绘全幅打底 + 应援色面板：名字、作品、分类 / 稀有度、印象语、今日同款人数、累计第几次抽到她、日期与重抽标。" },
+            { name: "今日同款", type: "—", required: false,
+              desc: "同一群里今天抽到同一角色的人数（角色同款，与用哪张立绘无关）；卡面数字是出卡那一刻的快照。" }
+          ],
+          notes: [
+            "结果由「日期 + QQ 号 + 盐」派生的种子决定：同一天重启、重发都是同一位，刷不出不同结果。",
+            "「换老婆」换的是角色，不是立绘；被换掉的那位在「抽签记录 → 详情 → 流水」里仍可追溯。",
+            "首张卡需要现画立绘（20~120 秒），同一角色当天后续抽卡直接复用库存，秒出。",
+            "要清掉某人当天的签：调试工具 →「清抽取签」——只删签与卡图，立绘库完全不动。"
+          ]
+        },
         {
           key: "general",
           title: "通用约定",
@@ -8569,7 +8775,8 @@
       });
       var platformOpts = Vue.computed(function () {
         return (filterOpts.value.platforms || []).map(function (p) {
-          return { label: p, value: p };
+          // v0.54.0：下拉显示短名（aiocqhttp → QQ），筛选值仍是库里的原值
+          return { label: platformLabel(p), value: p };
         });
       });
       async function loadFilterOpts() {
@@ -8591,6 +8798,7 @@
           recRows.value = (res && res.rows) || [];
           recTotal.value = (res && res.total) || 0;
           ensureAvatars(recRows.value);
+          ensureGroupAvatars(recRows.value);
         } catch (e) { /* 已提示 */ } finally {
           recLoading.value = false;
         }
@@ -9389,7 +9597,11 @@
           if (!meta.value.packs || !meta.value.packs.length) { fetchPools(); }
         }
         else if (m === "overview") { loadOverview(); }
-        else if (m === "chars") { fetchPools(); }
+        else if (m === "chars") {
+          fetchPools();
+          // v0.54.0：默认视图已改为头像墙，进页就得把缩略准备好
+          if (charsMode.value === "avatar") { loadAvatarThumbs(); }
+        }
         else if (m === "works") { loadWorks().then(resyncCurrentWork); }
         else if (m === "try") { loadTryRefs(); }
         else if (m === "gallery") { loadGallery(); loadGalRefs(); }
@@ -10199,7 +10411,10 @@
         moveRefToPortrait: moveRefToPortrait,
         loadGallery: loadGallery,
         charNameOf: charNameOf, decisionLabel: decisionLabel, barPct: barPct,
-        fmtTime: fmtTime,
+        fmtTime: fmtTime, fmtClock: fmtClock,
+        // v0.54.0：群名/群号展示、群头像、平台短名
+        groupNameOf: groupNameOf, groupTitle: groupTitle,
+        groupAvatarOf: groupAvatarOf, platformLabel: platformLabel,
         recF: recF, recRows: recRows, recTotal: recTotal, recPage: recPage,
         recSize: recSize, recLoading: recLoading,
         groupOpts: groupOpts, charSelectOpts: charSelectOpts, platformOpts: platformOpts,
