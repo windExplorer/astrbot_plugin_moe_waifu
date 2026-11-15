@@ -192,6 +192,27 @@ if skirt:
           not any(("婚纱" in z or "连衣裙" in z or "JK" in z or "水手" in z) for z in _sk_zh))
     check("半身裙套装 200 种子款式 >= 8 种",
           len({prompt_gen.pick_variations(s, skirt)["outfit"]["zh"] for s in range(200)}) >= 8)
+    # v0.53.1 套装精确鞋袜：每套绑定一双（单候选），配色前缀不影响命中，
+    # 鞋袜跨种子恒定（随机初摇不再从家族池摇出不搭的鞋）
+    _bad_feet = [z for z in _sk_zh if len(prompt_gen.feet_candidates(z)) != 1]
+    check("半身裙套装鞋袜逐一绑定（单候选）", not _bad_feet)
+    check("套装鞋袜绑定不受配色前缀影响",
+          all(len(prompt_gen.feet_candidates("白色" + z)) == 1 for z in _sk_zh))
+    check("套装鞋袜跨配色恒定",
+          all(prompt_gen.feet_candidates(z)[0]
+              == prompt_gen.feet_candidates("黑色" + z)[0] for z in _sk_zh))
+    # 套装主题下点换一套（outfit attempts 重摇）不跳出主题，且鞋袜随新套装整套换
+    _sk_base = prompt_gen.pick_variations(4242, skirt)
+    _sk_rer = [prompt_gen.apply_dim_state(_sk_base, 4242,
+                                          {"attempts": {"outfit": n}}, skirt)
+               for n in range(1, 41)]
+    check("套装主题重摇不跳出子集（40 次全为套装）",
+          all(any(kw in str(p["outfit"]["zh"] or "") for kw in skirt["outfit_kw"])
+              for p in _sk_rer))
+    check("套装重摇鞋袜随套装走（40 次鞋袜均为绑定款）",
+          all(str(p["footwear"]["zh"] or "")
+              in {c["zh"] for _f, c in prompt_gen._FEET_SET_OVERRIDES}
+              for p in _sk_rer))
 # 泳装主题换一版分布：200 种子里款式 >= 5 种（原来 3 款二选一）
 _sw_zh = set()
 for s in range(200):

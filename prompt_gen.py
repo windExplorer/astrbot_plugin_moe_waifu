@@ -177,33 +177,33 @@ OUTFITS = [
     #    甜酷系配牛仔短上衣厚底鞋）。zh 关键词同步挂接家族联动：
     #    挂脖/Y2K/叠穿/牛仔/开衫 → 街头族（厚底鞋/帆布鞋/马丁靴/罗马凉鞋），
     #    衬衫/铅笔裙 → 通勤族（高跟鞋），学院 → JK 族（乐福鞋/及膝袜）。
-    # 街头少女系
-    {"w": 3, "zh": "紧身迷你裙与挂脖露脐上衣（腿环）",
-     "en": "miniskirt, halterneck crop top, thigh strap, midriff, navel"},
+    # 街头少女系（en tag 按参考图补裙子剪裁特征，v0.53.1）
+    {"w": 3, "zh": "紧身包臀迷你裙与挂脖露脐上衣（腿环）",
+     "en": "miniskirt, tight skirt, thigh strap, halterneck, crop top, midriff, navel"},
     {"w": 3, "zh": "Y2K 伞摆喇叭短裙与短款上衣",
-     "en": "y2k fashion, flared skirt, crop top, midriff"},
+     "en": "y2k fashion, flared skirt, flowy skirt, crop top, midriff"},
     {"w": 3, "zh": "不对称围裹短裙与挂脖上衣（宽腰带）",
-     "en": "asymmetric skirt, wrap skirt, halterneck, wide belt, crop top"},
+     "en": "asymmetric skirt, wrap skirt, d-ring belt, wide belt, halterneck, crop top"},
     {"w": 3, "zh": "泡泡裙与牛仔短上衣（宽腰带）",
-     "en": "bubble skirt, denim crop top, wide belt"},
+     "en": "bubble skirt, puffy skirt, d-ring belt, wide belt, denim crop top"},
     {"w": 3, "zh": "双层叠穿短裙与吊带上衣（缎带）",
-     "en": "layered skirt, camisole, ribbon"},
+     "en": "layered skirt, two-tone skirt, side ribbon, camisole"},
     {"w": 2, "zh": "高开衩围裹裙与短款上衣（Y2K）",
-     "en": "wrap skirt, front slit, crop top, midriff"},
+     "en": "y2k fashion, wrap skirt, front slit, asymmetric skirt, crop top, midriff"},
     # 通勤优雅系
     {"w": 3, "zh": "铅笔裙与收腰衬衫（通勤）",
-     "en": "pencil skirt, fitted shirt, office lady"},
+     "en": "pencil skirt, buckled belt, fitted shirt, tucked in, office lady"},
     {"w": 3, "zh": "围裹半身裙与衬衫（侧边蝴蝶结）",
-     "en": "wrap skirt, shirt, side bow"},
+     "en": "wrap skirt, side bow, side knot, shirt, tucked in"},
     {"w": 3, "zh": "鱼尾裙与修身衬衫（荷叶下摆）",
-     "en": "mermaid skirt, frilled hem, fitted shirt"},
+     "en": "mermaid skirt, frilled hem, fitted shirt, tucked in"},
     {"w": 3, "zh": "背后大蝴蝶结半身裙与衬衫",
-     "en": "back bow, large bow, skirt, shirt"},
+     "en": "back bow, large bow, ribbon, skirt, shirt"},
     # 层叠华丽系
     {"w": 3, "zh": "荷叶边蛋糕裙与吊带上衣（开衫披肩）",
-     "en": "frilled skirt, tiered skirt, camisole, cardigan draped over shoulders"},
+     "en": "tiered skirt, frilled skirt, multiple frills, camisole, cardigan draped over shoulders"},
     {"w": 2, "zh": "学院风百褶裙与短款针织毛衣",
-     "en": "pleated skirt, cropped sweater"},
+     "en": "pleated skirt, buckled belt, cropped sweater, knit sweater"},
     # —— 通用（无主题归属，随机模式专属）——
     {"w": 5, "zh": "运动外套与短裤", "en": "track jacket, gym clothes"},
     {"w": 5, "zh": "冬季大衣与围巾", "en": "winter coat, scarf"},
@@ -748,19 +748,46 @@ _FEET_FAMILIES = (
     (("偶像", "打歌服", "舞台", "演出服"), _F_IDOL),
     (("大衣", "冬", "毛衣"), _F_WINTER),
     (("西装", "通勤", "铅笔裙", "航空", "职业", "衬衫"), _F_OFFICE),
-    (("婚纱", "礼服", "秀禾", "白无垢", "旗袍", "连衣裙"), _F_HEELS),
+    (("婚纱", "礼服", "秀禾", "白无垢", "旗袍", "连衣裙"), _F_HEELS,),
+)
+
+# v0.53.1：套装精确鞋袜——半身裙 12 套逐一绑定一双（子串命中即返回单候选，
+# 优先于家族表）。单候选 = 该套鞋袜固定：换一套（穿搭重摇）自动连鞋整套换、
+# 随机初摇不再从家族池摇出与套装不搭的鞋。子串刻意避开 zh 开头（配色前缀
+# 只拼接在款名前，见 _apply_outfit_color），且互不重叠、不命中池内旧条目。
+_FEET_SET_OVERRIDES = (
+    ("包臀迷你裙与挂脖露脐上衣", {"w": 1, "zh": "马丁靴", "en": "combat boots"}),
+    ("伞摆喇叭短裙与短款上衣", {"w": 1, "zh": "厚底运动鞋", "en": "platform sneakers"}),
+    ("不对称围裹短裙与挂脖上衣", {"w": 1, "zh": "罗马凉鞋", "en": "gladiator sandals"}),
+    ("泡泡裙与牛仔短上衣", {"w": 1, "zh": "帆布鞋与白色短袜", "en": "sneakers, white socks"}),
+    ("双层叠穿短裙与吊带上衣", {"w": 1, "zh": "黑色玛丽珍鞋与白色短袜",
+                                "en": "mary janes, white socks"}),
+    ("高开衩围裹裙与短款上衣", {"w": 1, "zh": "黑色长靴", "en": "black boots"}),
+    ("铅笔裙与收腰衬衫", {"w": 1, "zh": "黑色高跟鞋", "en": "black high heels"}),
+    ("围裹半身裙与衬衫", {"w": 1, "zh": "黑色裤袜配高跟鞋",
+                          "en": "black pantyhose, high heels"}),
+    ("鱼尾裙与修身衬衫", {"w": 1, "zh": "白色高跟鞋", "en": "white high heels"}),
+    ("大蝴蝶结半身裙与衬衫", {"w": 1, "zh": "黑色玛丽珍鞋与黑色裤袜",
+                              "en": "mary janes, black pantyhose"}),
+    ("蛋糕裙与吊带上衣", {"w": 1, "zh": "罗马凉鞋", "en": "gladiator sandals"}),
+    ("百褶裙与短款针织毛衣", {"w": 1, "zh": "黑色及膝袜与乐福鞋",
+                              "en": "black kneehighs, loafers"}),
 )
 
 
 def feet_candidates(outfit_zh: str):
     """穿搭 zh → 鞋袜候选列表（纯函数，可直测）。
 
-    空穿搭返回空元组（鞋袜跟随角色原本，不提及）；无家族命中的穿搭回落
+    空穿搭返回空元组（鞋袜跟随角色原本，不提及）；套装精确绑定（
+    _FEET_SET_OVERRIDES，v0.53.1）单候选优先；无家族命中的穿搭回落
     泛用候选（_FEET_GENERIC）。
     """
     z = str(outfit_zh or "")
     if not z.strip():
         return ()
+    for frag, cand in _FEET_SET_OVERRIDES:
+        if frag in z:
+            return (cand,)
     for keys, cands in _FEET_FAMILIES:
         if any(k in z for k in keys):
             return cands
@@ -1135,7 +1162,7 @@ THEMES = (
     #    鱼尾婚纱 / 蝴蝶结舞台连衣裙等旧条目混入），选它 = 服装必为 12 套
     #    半身裙组合之一；背景/表情走街头/咖啡馆子集。
     {"id": "skirt", "label": "半身裙 · 套装",
-     "outfit_kw": ["紧身迷你裙", "伞摆", "不对称围裹", "泡泡裙", "双层叠穿",
+     "outfit_kw": ["包臀迷你裙", "伞摆", "不对称围裹", "泡泡裙", "双层叠穿",
                    "高开衩", "铅笔裙与", "围裹半身裙", "鱼尾裙", "大蝴蝶结半身裙",
                    "蛋糕裙", "学院风百褶裙"],
      "bg_kw": ["街道", "咖啡馆", "霓虹", "花园"],
@@ -1696,7 +1723,12 @@ def apply_dim_state(picks: dict, seed_int: int, dim_state: dict | None,
         # 「画风永远黏土手办」）。主题子集只管种子初摇；显式点骰子 = 用户明确
         # 要换一个，与下拉选项（dim_pool_options 全池）同一口径。non_empty_only
         # 让已展示的维度重摇后仍非空（compose/body/framing 不会被摇成空项消失）。
-        out[dim] = _pick_dim(dim, sub_seed, None, non_empty_only=True)
+        # v0.53.1：outfit 重摇留在主题子集内——用户选了「半身裙 · 套装」就该
+        # 换出另一套裙子（鞋袜随新套装重派生 = 整套一起换），而不是跳出主题
+        # 摇成女仆装；其余维度维持 v0.29.10 全池重摇口径（「困在子集」的教训
+        # 只针对单元素画风子集，outfit 子集 >= 5 款有测试守卫，无此问题）。
+        out[dim] = _pick_dim(dim, sub_seed, theme if dim == "outfit" else None,
+                             non_empty_only=True)
         if dim == "outfit":
             color = _weighted_pick(
                 OUTFIT_COLORS, _sub(sub_seed, "outfit_color", 2 ** 30))
