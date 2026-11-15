@@ -90,6 +90,11 @@ with tempfile.TemporaryDirectory() as td:
           st.set_group_name("999", "另一个名字") >= 0
           and st.get_draw("u4", TODAY)["group_name"] == "测试群")
 
+    # v0.54.6：卡面版式版本（旧版式卡片重发时强制重画）
+    st.update_draw_card("u2", TODAY, "/tmp/card3.png", card_ver=2)
+    check("card_ver 落库", st.get_draw("u2", TODAY)["card_ver"] == 2,
+          st.get_draw("u2", TODAY)["card_ver"])
+
     check("user_char_count 可用（无记录=0）", st.user_char_count("u1", "y") == 0,
           st.user_char_count("u1", "y"))
     st.bump_user_char("u1", "y")

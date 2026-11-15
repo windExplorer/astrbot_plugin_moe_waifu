@@ -39,6 +39,10 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 CARD_W, CARD_H = 700, 1200
+
+# v0.54.6：卡面版式版本。改了版式就 +1，落库时随卡图记下；重发卡时版本低的
+# 一律重渲染一次（否则磁盘上那张旧图会一直带旧版元素，比如 v0.54.5 删掉的「重抽」标）。
+CARD_VER = 2
 _CARD_RADIUS = 30       # 圆角卡片
 _PAD_X = 54             # 左右安全边（文字一律从这里起排）
 _FOOT_PAD = 36          # 页脚下沿到卡片底边的距离（统计/日期当页脚，贴着底边）

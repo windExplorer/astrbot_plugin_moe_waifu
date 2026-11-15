@@ -468,6 +468,8 @@ check("卡面不再画重抽标（card.py 没有该绘制文案）",
       and "rt = " not in CARD)
 check("卡片调试页去掉「重抽」开关，换成今日名次",
       "cdRerolled" not in PAGE and "cdRank" in PAGE)
+check("旧版式卡片重发时强制重画（card_ver，清掉历史「重抽」标）",
+      "CARD_VER" in CARD and "card_ver" in MAIN and "card_ver" in STORE)
 
 if FAILURES:
     print(f"test_ui_v042: {len(FAILURES)} FAILED")

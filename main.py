@@ -317,7 +317,9 @@ class MoeWaifuPlugin(Star):
             # 几个抽到她」有没有变，变了就用库存底图重渲染再发；没变直接重发省一次渲染。
             stale = (int(existing.get("same_count") or 0) != same
                      or int(existing.get("today_rank") or 0) != rank
-                     or total <= 0)
+                     or total <= 0
+                     # v0.54.6：旧版式画的卡（含已下线的「重抽」标）重发时重画一次
+                     or int(existing.get("card_ver") or 0) < int(card.CARD_VER))
             if card_ok and not stale:
                 # v0.51.1（用户）：重复抽只重发卡图，不带「明天可以再抽一位」
                 # 这类解释性文案——今天抽没抽过、要不要换老婆，用户自己清楚。
@@ -361,8 +363,9 @@ class MoeWaifuPlugin(Star):
                     logger.error(f"[{PLUGIN_NAME}] 卡图重渲染失败\n{traceback.format_exc()}")
                     yield event.plain_result("抽卡失败，请稍后再试。")
                     return
-                self._store.update_draw_card(uid, date, card_path, same_count=same,
-                                             today_rank=rank, total_count=max(1, total))
+                self._store.update_draw_card(
+                    uid, date, card_path, same_count=same, today_rank=rank,
+                    total_count=max(1, total), card_ver=card.CARD_VER)
                 yield event.chain_result([Image.fromFileSystem(card_path)])
                 return
             # 没有可用底图（立绘库被清 / 调试「强制换签」已重派新角色）：
@@ -821,9 +824,10 @@ class MoeWaifuPlugin(Star):
             logger.error(f"[{PLUGIN_NAME}] 卡图渲染失败\n{traceback.format_exc()}")
             await self._send_plain(event, "抽卡失败，请稍后再试。")
             return None
-        # 顺手记下本次渲染用的统计快照：重发卡时用它判断要不要重渲染
+        # 顺手记下本次渲染用的统计快照 + 版式版本：重发卡时用它判断要不要重渲染
         self._store.update_draw_card(uid, date, card_path, same_count=same,
-                                     today_rank=rank, total_count=total)
+                                     today_rank=rank, total_count=total,
+                                     card_ver=card.CARD_VER)
         if decision != "generate":
             self._store.log_job(char_id, date, decision, "from_pool", uid,
                                 entry["strategy_type"], None, "", 0, str(src))

@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS draws (
   same_count INTEGER NOT NULL DEFAULT 0,   -- 卡面统计快照（v0.54.2）
   today_rank INTEGER NOT NULL DEFAULT 0,   -- 今日第几个抽到她
   total_count INTEGER NOT NULL DEFAULT 0,  -- 累计第几次抽到她
+  card_ver INTEGER NOT NULL DEFAULT 0,     -- 卡面版式版本（v0.54.6）
   PRIMARY KEY (user_id, date)
 );
 CREATE TABLE IF NOT EXISTS user_char_counts (
@@ -233,6 +234,8 @@ _MIGRATIONS = {
         "same_count": "INTEGER NOT NULL DEFAULT 0",
         "today_rank": "INTEGER NOT NULL DEFAULT 0",
         "total_count": "INTEGER NOT NULL DEFAULT 0",
+        # v0.54.6：卡面版式版本（0 = 这版之前画的卡，重发时强制重渲染一次）
+        "card_ver": "INTEGER NOT NULL DEFAULT 0",
         "char_name": "TEXT NOT NULL DEFAULT ''",
         "series": "TEXT NOT NULL DEFAULT ''",
         "portrait_file": "TEXT NOT NULL DEFAULT ''",
@@ -511,15 +514,17 @@ class Store:
     def update_draw_card(self, user_id: str, date: str, card_path: str,
                          same_count: int | None = None,
                          today_rank: int | None = None,
-                         total_count: int | None = None) -> None:
+                         total_count: int | None = None,
+                         card_ver: int | None = None) -> None:
         """更新卡图路径；顺带记下这次渲染用的统计快照（不传就不动）。
 
         v0.54.2：卡面不再是一次性快照——重发前用快照跟实时统计比，变了才重渲染。
+        v0.54.6：`card_ver` 记录卡面版式版本，旧版式的卡重发时强制重画一次。
         """
         sets = ["card_path=?", "updated_at=?"]
         args: list = [card_path, _now()]
         for col, val in (("same_count", same_count), ("today_rank", today_rank),
-                         ("total_count", total_count)):
+                         ("total_count", total_count), ("card_ver", card_ver)):
             if val is not None:
                 sets.append(f"{col}=?")
                 args.append(int(val))

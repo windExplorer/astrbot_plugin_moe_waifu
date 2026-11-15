@@ -4421,7 +4421,8 @@ async def h_debug_rerender(plugin) -> dict:
         seal_pos=plugin._cfg("card_seal_pos", "name"),
         scrim=plugin._cfg("card_scrim", 100))
     plugin._store.update_draw_card(uid, date, card_path, same_count=same,
-                                   today_rank=rank, total_count=total)
+                                   today_rank=rank, total_count=total,
+                                   card_ver=getattr(card, "CARD_VER", 0))
     await asyncio.to_thread(plugin._store.debug_log, "rerender", uid, f"{date} 重渲染卡片")
     return ok({"card_path": card_path, "date": date})
 
