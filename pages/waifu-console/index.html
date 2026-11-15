@@ -2794,6 +2794,9 @@
                     <tr><td>作品 / 卷</td><td>{{ recDetail.draw.series || "—" }} · {{ recDetail.draw.pack || "—" }}</td></tr>
                     <tr><td>群 / 平台</td><td>{{ groupTitle(recDetail.draw.group_id, recDetail.draw.group_name) }} · {{ platformLabel(recDetail.draw.platform) }}</td></tr>
                     <tr><td>nonce / 重抽</td><td>{{ recDetail.draw.nonce }} · {{ rerollLabel(recDetail.draw.nonce) }}</td></tr>
+                    <!-- v0.54.2：卡面统计快照（重发时会跟实时统计比，变了就重渲染） -->
+                    <tr><td>今日同款 / 名次</td><td>{{ recDetail.draw.same_count || "—" }} 人 ·
+                      今日第 {{ recDetail.draw.today_rank || "—" }} 个 · 累计第 {{ recDetail.draw.total_count || "—" }} 次</td></tr>
                     <tr><td>抽签种子</td><td :title="recDetail.draw.seed_hex">{{ recDetail.draw.seed_hex || "—" }}</td></tr>
                     <tr><td>立绘来源</td><td>{{ decisionLabel(recDetail.draw.decision) }}</td></tr>
                     <tr><td>为什么</td><td>{{ recDetail.draw.decision_note || "—（v0.19.4 之前的签没有记录原因）" }}</td></tr>
@@ -7690,7 +7693,7 @@
           title: "指令与玩法",
           intro: "聊天里只有下面这三条指令；角色库、试画台、立绘维护、记录统计都在这套工坊页面里做（仅管理员可见）。",
           fieldsLabel: "指令 / 口径",
-          where: "群里 @机器人 或私聊发指令都可以；「分群绑定」里被停用的群会直接拒绝抽卡。",
+          where: "在群里 @机器人 发指令；私聊能不能抽由配置「允许私聊抽卡」决定（默认关闭）。「分群绑定」里被停用的群会直接拒绝抽卡。",
           fields: [
             { name: "/今日老婆", type: "指令", required: true,
               desc: "抽今天缘定的那位（别名 /jrlp）。一人一天一位；当天再发只会重发同一张卡，不会换人。" },
@@ -7702,8 +7705,8 @@
               desc: "只在「该群绑定作品 ∩ 已启用角色」里抽；没绑定作品的群 / 私聊用全部启用角色。" },
             { name: "卡面内容", type: "—", required: false,
               desc: "立绘全幅打底 + 应援色面板：名字、作品、分类 / 稀有度、印象语、今日同款人数、累计第几次抽到她、日期与重抽标。" },
-            { name: "今日同款", type: "—", required: false,
-              desc: "同一群里今天抽到同一角色的人数（角色同款，与用哪张立绘无关）；卡面数字是出卡那一刻的快照。" }
+            { name: "今日同款 / 名次", type: "—", required: false,
+              desc: "今天抽到同一角色的人数（角色同款，与用哪张立绘无关）与「你是今天第几个抽到她」；口径按配置「卡面统计口径」，默认所有群共用。重复发卡会比对最新统计，变了就重渲染卡面再发。" }
           ],
           notes: [
             "结果由「日期 + QQ 号 + 盐」派生的种子决定：同一天重启、重发都是同一位，刷不出不同结果。",
@@ -10042,11 +10045,14 @@
       // ---- 配置（schema 驱动；group_pools 在分群绑定页签管理，此处排除） ----
       var CONFIG_SECTIONS = [
         { title: "基础", keys: ["timezone", "salt", "reroll_daily_limit", "portraits_per_char",
-                                "allow_unverified", "ui_grid_cols", "disabled_groups"] },
+                                "allow_unverified", "allow_private_draw", "ui_grid_cols",
+                                "disabled_groups"] },
         // v0.47.2：卡面外观（v0.47.0 加了这两个键却没登记分区 → 配置页里根本看不到）
         { title: "卡面", keys: ["card_scrim", "card_seal_pos"] },
         // v0.48.0：抽卡公平性（避开最近抽到的角色 / 立绘按用户遍历）
-        { title: "抽卡规则", keys: ["draw_recency", "prefer_unused_portrait"] },
+        // v0.54.2：same_stat_scope = 卡面统计口径（所有群共用 / 仅当前群）
+        { title: "抽卡规则", keys: ["draw_recency", "prefer_unused_portrait",
+                                    "same_stat_scope"] },
         { title: "萌绘生图", keys: ["gen_source_mode", "img2img_prob", "artist_draw_enabled", "draw_workflow", "img2img_workflow",
                                     "draw_width", "draw_height", "draw_timeout", "img2img_denoise",
                                     "draw_negative_enabled", "draw_negative_prompt", "announce_enabled",

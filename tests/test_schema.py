@@ -51,4 +51,11 @@ check("v0.5.6 提示词/变化配置键齐全", new_keys.issubset(schema.keys())
 check("提示词开关默认开启", schema.get("prompt_llm_enabled", {}).get("default") is True)
 check("提供商默认留空", schema.get("prompt_llm_provider", {}).get("default") == "")
 
+# v0.54.2：私聊抽卡开关（默认关闭）+ 卡面统计口径（默认所有群共用）
+check("私聊抽卡开关默认关闭", schema.get("allow_private_draw", {}).get("default") is False)
+_scope = schema.get("same_stat_scope", {})
+check("统计口径默认所有群共用", _scope.get("default") == "all")
+check("统计口径选项齐全", set(_scope.get("options") or []) == {"all", "group"})
+check("统计口径有中文标签", len(_scope.get("labels") or []) == len(_scope.get("options") or []))
+
 print("test_schema: ALL OK")

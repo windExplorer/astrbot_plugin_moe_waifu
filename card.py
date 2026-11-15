@@ -453,11 +453,15 @@ def _quote_layout(text: str, data_dir, max_w: int) -> tuple:
 
 def render_card(portrait_path, entry: dict, *, date_str: str, same_count: int = 1,
                 total_count: int = 1, rerolled: bool = False, out_path=None,
-                data_dir=None, seal_pos="name", scrim=100) -> str:
+                data_dir=None, seal_pos="name", scrim=100,
+                today_rank: int = 0) -> str:
     """渲染今日老婆卡，返回输出路径。portrait 必须存在（无图不渲染）。
 
     `seal_pos` 印章位置（name / top_left / top_right）、`scrim` 遮罩浓度百分比
     （100 = 默认）都直接吃插件配置值，本函数内部自行归一，调用方不用预处理。
+
+    `today_rank`（v0.54.2）：今天第几个抽到她（1 起）。>0 才印「今日第 N 个抽到
+    她」；0（老调用方 / 卡片调试）保持旧文案，版式不变。
     """
     src = Path(portrait_path)
     if not src.is_file():
@@ -492,13 +496,18 @@ def render_card(portrait_path, entry: dict, *, date_str: str, same_count: int = 
     bottom = CARD_H - _FOOT_PAD
 
     # ---- 页脚一整行：左 = 统计，右 = 日期（重抽标贴在日期左侧） ----
-    stats = f"今日同款 {max(1, same_count)} 人 · 第 {max(1, total_count)} 次抽到她"
+    # v0.54.2：加了「今日第 N 个抽到她」，三段文字在窄卡上会撞到日期，
+    # 所以先量出可用宽度再逐档缩字号（最小 12px，再小就糊了）。
+    if today_rank and today_rank > 0:
+        stats = (f"今日同款 {max(1, same_count)} 人"
+                 f" · 今日第 {max(1, today_rank)} 个抽到她"
+                 f" · 第 {max(1, total_count)} 次抽到她")
+    else:
+        stats = f"今日同款 {max(1, same_count)} 人 · 第 {max(1, total_count)} 次抽到她"
     dot_r = 3
     dot_cy = bottom - meta_f.size // 2
     draw.ellipse((_PAD_X, dot_cy - dot_r, _PAD_X + dot_r * 2, dot_cy + dot_r),
                  fill=(*t_rgb, 230))
-    _mixed(layer, (_PAD_X + dot_r * 2 + 10, bottom - meta_f.size), stats, meta_f,
-           None, (255, 255, 255, 176))
 
     dtext = str(date_str or "")
     dspace = 1.2                      # 日期逐字加一点字距，像页脚小标尺
@@ -506,9 +515,19 @@ def render_card(portrait_path, entry: dict, *, date_str: str, same_count: int = 
     # 页脚贴底后右下角会撞上卡片圆角（半径 30）：右沿再多收 8px，
     # 避免日期最后一个字的底部被圆角裁掉一小块
     dx = CARD_W - _PAD_X - 8 - dw
+    rtw = draw.textlength("重抽", font=meta_f) if rerolled else 0
+    stats_x = _PAD_X + dot_r * 2 + 10
+    avail = dx - stats_x - (rtw + 36 if rerolled else 0) - 16
+    ssize = meta_f.size
+    sfont = meta_f
+    while ssize > 12 and text_width(stats, sfont) > avail:
+        ssize -= 1
+        sfont = load_font(ssize, "body", data_dir)
+    _mixed(layer, (stats_x, bottom - sfont.size), stats, sfont,
+           None, (255, 255, 255, 176))
+
     if rerolled:
         rt = "重抽"
-        rtw = draw.textlength(rt, font=meta_f)
         bx1 = dx - 14
         bx0 = bx1 - rtw - 22
         draw.rounded_rectangle((bx0, bottom - meta_f.size - 5, bx1, bottom + 6),

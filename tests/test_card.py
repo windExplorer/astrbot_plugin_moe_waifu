@@ -36,6 +36,20 @@ with tempfile.TemporaryDirectory() as td:
         check("输出 700×1200", img.size == (card.CARD_W, card.CARD_H))
     check("重抽标渲染不报错", True)
 
+    # v0.54.2：新增「今日第 N 个抽到她」——同一参数下给不给 today_rank 输出必然不同，
+    # 且三段文字在窄卡上要和日期错开（缩字号兜底，不重叠）
+    no_rank = td / "no_rank.png"
+    with_rank = td / "with_rank.png"
+    card.render_card(portrait, ENTRY, date_str="2026-11-11",
+                     same_count=3, total_count=12, out_path=no_rank)
+    card.render_card(portrait, ENTRY, date_str="2026-11-11",
+                     same_count=3, total_count=12, today_rank=2,
+                     out_path=with_rank)
+    check("today_rank 真的进排版",
+          no_rank.read_bytes() != with_rank.read_bytes())
+    with Image.open(with_rank) as imr:
+        check("带名次的卡仍是 700×1200", imr.size == (card.CARD_W, card.CARD_H))
+
     # 无图必须拒绝渲染（PRD 铁律 1：不存在无图版式）
     try:
         card.render_card(td / "missing.png", ENTRY, date_str="2026-11-11",

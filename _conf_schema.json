@@ -23,11 +23,25 @@
     "type": "string",
     "default": ""
   },
+  "allow_private_draw": {
+    "description": "允许私聊抽卡",
+    "hint": "关闭（默认）时只允许群聊抽卡，私聊发 /今日老婆 会被拒绝；开启后私聊也能抽（私聊没有群，统计一律按「所有群共用」口径算）",
+    "type": "bool",
+    "default": false
+  },
   "reroll_daily_limit": {
     "description": "每日换老婆次数",
     "hint": "每人每天可用 /换老婆 重抽的次数；0 = 禁用换老婆",
     "type": "int",
     "default": 1
+  },
+  "same_stat_scope": {
+    "description": "卡面统计口径",
+    "hint": "「今日同款人数 / 今日第几个抽到她」按哪个范围统计：所有群共用（默认，跨群合并成一份统计）或仅当前群（各群各算各的，私聊没有群，仍按所有群算）",
+    "type": "string",
+    "options": ["all", "group"],
+    "labels": ["所有群共用（默认）", "仅当前群"],
+    "default": "all"
   },
   "portraits_per_char": {
     "description": "每角色立绘配额",

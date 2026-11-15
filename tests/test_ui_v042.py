@@ -425,6 +425,23 @@ check("群头像只做 QQ 群图床 + 平台名归一",
 check("脏平台名在启动时幂等清洗",
       "_normalize_platforms" in STORE and "PlatformMetadata%" in STORE)
 
+# ---------- ⑪ v0.54.2：私聊开关 / 统计口径 / 卡面不快照 ----------
+_SCHEMA = (ROOT / "_conf_schema.json").read_text(encoding="utf-8")
+check("私聊抽卡开关默认关闭且两个指令都拦",
+      '"allow_private_draw"' in _SCHEMA
+      and MAIN.count("if not gid and not self._allow_private()") == 2)
+check("卡面统计口径可配（all / group）",
+      '"same_stat_scope"' in _SCHEMA and "same_stat_scope" in MAIN
+      and "same_stat_scope" in PAGE)
+check("卡面统计不再是一次性快照（重发前比对 + 变了才重渲染）",
+      "stale = (" in MAIN and "today_char_stats" in MAIN
+      and "today_rank=rank" in MAIN and "update_draw_card(uid, date, card_path, same_count=same" in MAIN)
+check("卡面新增「今日第几个抽到她」且宽度自适应",
+      "today_rank" in (ROOT / "card.py").read_text(encoding="utf-8")
+      and "个抽到她" in (ROOT / "card.py").read_text(encoding="utf-8"))
+check("统计快照列有迁移（老库就地补列）",
+      '"same_count"' in STORE and '"today_rank"' in STORE and '"total_count"' in STORE)
+
 if FAILURES:
     print(f"test_ui_v042: {len(FAILURES)} FAILED")
     sys.exit(1)

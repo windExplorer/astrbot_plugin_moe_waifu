@@ -199,6 +199,30 @@ class MoeWaifuPlugin(Star):
         raw = str(self._cfg("disabled_groups", "") or "")
         return {line.strip() for line in raw.splitlines() if line.strip()}
 
+    def _allow_private(self) -> bool:
+        """私聊是否允许抽卡（v0.54.2，默认关闭：只允许群聊抽）。"""
+        return bool(self._cfg("allow_private_draw", False))
+
+    def _same_scope(self) -> str:
+        """卡面统计口径：`all`（所有群共用一份，默认）/ `group`（仅当前群）。"""
+        scope = str(self._cfg("same_stat_scope", "all") or "all").strip().lower()
+        return "group" if scope == "group" else "all"
+
+    def _today_stats(self, existing: dict) -> tuple:
+        """按当前口径算（今日同款人数, 今日第几个抽到她），出错回落 (1, 1)。
+
+        调用前该人当天的 draws 行必须已存在（含自己）。
+        """
+        try:
+            return self._store.today_char_stats(
+                str(existing.get("char_id") or ""), str(existing.get("date") or ""),
+                str(existing.get("user_id") or ""),
+                str(existing.get("group_id") or ""), self._same_scope())
+        except Exception:
+            logger.warning(f"[{PLUGIN_NAME}] 统计同款人数失败（按 1 处理）\n"
+                           f"{traceback.format_exc()}")
+            return 1, 1
+
     def _draw_cfg(self) -> dict:
         return {
             "draw_width": self._cfg("draw_width", 700),
@@ -276,17 +300,30 @@ class MoeWaifuPlugin(Star):
         if gid and gid in self._disabled_groups():
             yield event.plain_result("本群暂未开启抽卡。")
             return
+        # v0.54.2：私聊抽卡默认关闭（配置 allow_private_draw）
+        if not gid and not self._allow_private():
+            yield event.plain_result("私聊暂未开放抽卡，请在群里发送 /今日老婆 吧～")
+            return
         date = self._today()
 
         existing = self._store.get_draw(uid, date)
         if existing:
+            same, rank = self._today_stats(existing)
+            # 累计次数以 user_char_counts 为准（老行的 total_count 快照是 0）
+            total = self._store.user_char_count(uid, str(existing.get("char_id") or ""))
             card_path = str(existing.get("card_path") or "")
-            if card_path and Path(card_path).is_file():
+            card_ok = bool(card_path) and Path(card_path).is_file()
+            # v0.54.2（用户）：卡面不再是快照——重发前先看「今日同款人数 / 今日第
+            # 几个抽到她」有没有变，变了就用库存底图重渲染再发；没变直接重发省一次渲染。
+            stale = (int(existing.get("same_count") or 0) != same
+                     or int(existing.get("today_rank") or 0) != rank
+                     or total <= 0)
+            if card_ok and not stale:
                 # v0.51.1（用户）：重复抽只重发卡图，不带「明天可以再抽一位」
                 # 这类解释性文案——今天抽没抽过、要不要换老婆，用户自己清楚。
                 yield event.chain_result([Image.fromFileSystem(card_path)])
                 return
-            # 卡图被清理过：立绘库里还有底图就重渲染一张（不重新生图）
+            # 卡图被清理 / 统计变了：立绘库里还有底图就重渲染一张（不重新生图）
             entry = pool.find_entry(self._load_packs(), existing["char_id"])
             rel = self._store.portrait_by_date(existing["char_id"], date) \
                 or (self._store.list_portraits(existing["char_id"]) or [None])[-1]
@@ -312,7 +349,8 @@ class MoeWaifuPlugin(Star):
                 try:
                     card_path = await asyncio.to_thread(
                         card.render_card, self._data_dir / rel["file"], entry,
-                        date_str=date, same_count=1, total_count=1,
+                        date_str=date, same_count=same, total_count=max(1, total),
+                        today_rank=rank,
                         rerolled=bool(existing["rerolled"]),
                         out_path=str(self._data_dir / "cards" / f"{uid}_{date}.png"),
                         data_dir=self._data_dir,
@@ -323,7 +361,8 @@ class MoeWaifuPlugin(Star):
                     logger.error(f"[{PLUGIN_NAME}] 卡图重渲染失败\n{traceback.format_exc()}")
                     yield event.plain_result("抽卡失败，请稍后再试。")
                     return
-                self._store.update_draw_card(uid, date, card_path)
+                self._store.update_draw_card(uid, date, card_path, same_count=same,
+                                             today_rank=rank, total_count=max(1, total))
                 yield event.chain_result([Image.fromFileSystem(card_path)])
                 return
             # 没有可用底图（立绘库被清 / 调试「强制换签」已重派新角色）：
@@ -382,6 +421,10 @@ class MoeWaifuPlugin(Star):
             yield event.plain_result("无法识别你的账号，请稍后再试。")
             return
         gid = "" if event.is_private_chat() else str(event.get_group_id() or "")
+        # v0.54.2：私聊抽卡关闭时，换老婆同样拒绝（否则可以先私聊抽再换）
+        if not gid and not self._allow_private():
+            yield event.plain_result("私聊暂未开放抽卡，请在群里发送 /换老婆 吧～")
+            return
         date = self._today()
         limit = int(self._cfg("reroll_daily_limit", 1))
         if limit <= 0:
@@ -734,14 +777,17 @@ class MoeWaifuPlugin(Star):
         )
         total = self._store.bump_user_char(uid, char_id)
         self._store.bump_char_stats(char_id, date)
-        same = self._store.same_group_today(gid, date, char_id)
+        # v0.54.2：口径可配置（所有群共用 / 仅当前群），返回 (今日同款人数, 今日第几个)
+        same, rank = self._store.today_char_stats(
+            char_id, date, uid, gid, self._same_scope())
 
         cards_dir = self._data_dir / "cards"
         cards_dir.mkdir(parents=True, exist_ok=True)
         try:
             card_path = await asyncio.to_thread(
                 card.render_card, src, entry,
-                date_str=date, same_count=same, total_count=total, rerolled=rerolled,
+                date_str=date, same_count=same, total_count=total, today_rank=rank,
+                rerolled=rerolled,
                 out_path=str(cards_dir / f"{uid}_{date}.png"), data_dir=self._data_dir,
                 seal_pos=self._cfg("card_seal_pos", "name"),
                 scrim=self._cfg("card_scrim", 100),
@@ -751,7 +797,9 @@ class MoeWaifuPlugin(Star):
             logger.error(f"[{PLUGIN_NAME}] 卡图渲染失败\n{traceback.format_exc()}")
             await self._send_plain(event, "抽卡失败，请稍后再试。")
             return None
-        self._store.update_draw_card(uid, date, card_path)
+        # 顺手记下本次渲染用的统计快照：重发卡时用它判断要不要重渲染
+        self._store.update_draw_card(uid, date, card_path, same_count=same,
+                                     today_rank=rank, total_count=total)
         if decision != "generate":
             self._store.log_job(char_id, date, decision, "from_pool", uid,
                                 entry["strategy_type"], None, "", 0, str(src))

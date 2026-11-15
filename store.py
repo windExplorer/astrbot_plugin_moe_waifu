@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS draws (
   card_path TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  same_count INTEGER NOT NULL DEFAULT 0,   -- 卡面统计快照（v0.54.2）
+  today_rank INTEGER NOT NULL DEFAULT 0,   -- 今日第几个抽到她
+  total_count INTEGER NOT NULL DEFAULT 0,  -- 累计第几次抽到她
   PRIMARY KEY (user_id, date)
 );
 CREATE TABLE IF NOT EXISTS user_char_counts (
@@ -225,6 +228,11 @@ _MIGRATIONS = {
     },
     "draws": {
         "seed_hex": "TEXT NOT NULL DEFAULT ''",
+        # v0.54.2：卡面统计快照（今日同款人数 / 今日第几个抽到她 / 第几次抽到她）。
+        # 重发卡时与该人当天的实时统计比较，变了才重渲染——卡面不再是死的快照。
+        "same_count": "INTEGER NOT NULL DEFAULT 0",
+        "today_rank": "INTEGER NOT NULL DEFAULT 0",
+        "total_count": "INTEGER NOT NULL DEFAULT 0",
         "char_name": "TEXT NOT NULL DEFAULT ''",
         "series": "TEXT NOT NULL DEFAULT ''",
         "portrait_file": "TEXT NOT NULL DEFAULT ''",
@@ -500,10 +508,25 @@ class Store:
         )
         self._conn.commit()
 
-    def update_draw_card(self, user_id: str, date: str, card_path: str) -> None:
+    def update_draw_card(self, user_id: str, date: str, card_path: str,
+                         same_count: int | None = None,
+                         today_rank: int | None = None,
+                         total_count: int | None = None) -> None:
+        """更新卡图路径；顺带记下这次渲染用的统计快照（不传就不动）。
+
+        v0.54.2：卡面不再是一次性快照——重发前用快照跟实时统计比，变了才重渲染。
+        """
+        sets = ["card_path=?", "updated_at=?"]
+        args: list = [card_path, _now()]
+        for col, val in (("same_count", same_count), ("today_rank", today_rank),
+                         ("total_count", total_count)):
+            if val is not None:
+                sets.append(f"{col}=?")
+                args.append(int(val))
+        args += [user_id, date]
         self._conn.execute(
-            "UPDATE draws SET card_path=?, updated_at=? WHERE user_id=? AND date=?",
-            (card_path, _now(), user_id, date),
+            f"UPDATE draws SET {', '.join(sets)} WHERE user_id=? AND date=?",
+            tuple(args),
         )
         # 流水补上成卡路径（只写该人当天最后一条事件）
         self._conn.execute(
@@ -515,7 +538,10 @@ class Store:
         self._conn.commit()
 
     def same_group_today(self, group_id: str, date: str, char_id: str) -> int:
-        """今天本群有多少人抽到同一角色（调用方需先 upsert_draw 再查，含自己）。"""
+        """今天本群有多少人抽到同一角色（调用方需先 upsert_draw 再查，含自己）。
+
+        保留给老调用/外部引用；新代码用 `today_char_stats`（口径可切跨群）。
+        """
         if not group_id:
             return 1
         row = self._conn.execute(
@@ -523,6 +549,38 @@ class Store:
             (group_id, date, char_id),
         ).fetchone()
         return int(row["n"]) if row else 1
+
+    def today_char_stats(self, char_id: str, date: str, user_id: str,
+                         group_id: str = "", scope: str = "all") -> tuple:
+        """今日该角色的「同款人数」与「第几个抽到她」（都含自己）。
+
+        `scope="group"` 只算本群；`"all"`（默认）跨群合并成一份统计——同一角色
+        在不同群被抽到也算同一个人数池。群号为空（私聊）时 `group` 口径无意义，
+        一律按 `all` 统计，避免私聊恒等于 1。
+
+        返回 `(count, rank)`：count = 今天有多少人（当前签）抽到她；rank = 你在这
+        批人里按「最近一次抽到她」的时间排第几。调用方需先 upsert_draw（含自己）。
+        """
+        where = "date=? AND char_id=?"
+        args: list = [date, char_id]
+        if scope == "group" and group_id:
+            where += " AND group_id=?"
+            args.append(group_id)
+        row = self._conn.execute(
+            f"SELECT COUNT(*) AS n FROM draws WHERE {where}", tuple(args)).fetchone()
+        count = int(row["n"]) if row and row["n"] else 1
+        rank = 1
+        me = self._conn.execute(
+            "SELECT updated_at FROM draws WHERE user_id=? AND date=?",
+            (user_id, date)).fetchone()
+        if me is not None and me["updated_at"]:
+            # 同一秒内的并发用 user_id 兜底排序，保证名次稳定（同秒不并列）
+            r2 = self._conn.execute(
+                f"SELECT COUNT(*) AS n FROM draws WHERE {where}"
+                " AND (updated_at < ? OR (updated_at = ? AND user_id <= ?))",
+                tuple(args) + (me["updated_at"], me["updated_at"], user_id)).fetchone()
+            rank = int(r2["n"]) if r2 and r2["n"] else 1
+        return max(1, count), max(1, min(rank, count))
 
     # ---------- 计数 ----------
 
@@ -540,6 +598,14 @@ class Store:
         ).fetchone()
         self._conn.commit()
         return int(row["count"]) if row else 1
+
+    def user_char_count(self, user_id: str, char_id: str) -> int:
+        """某人对某角色的累计抽到次数（卡面「第 N 次抽到她」的真实来源）。"""
+        row = self._conn.execute(
+            "SELECT count FROM user_char_counts WHERE user_id=? AND char_id=?",
+            (str(user_id), str(char_id)),
+        ).fetchone()
+        return int(row["count"]) if row else 0
 
     def bump_char_stats(self, char_id: str, date: str) -> None:
         self._conn.execute(

@@ -4296,13 +4296,21 @@ async def h_debug_rerender(plugin) -> dict:
         from . import card  # 延迟导入：Pillow 只在真的重渲染时才需要
     except ImportError:  # pragma: no cover - 平铺调试
         import card  # type: ignore
+    # v0.54.2：重渲染也用真实统计（口径跟卡面配置一致），并把快照写回去——
+    # 否则下一次 /今日老婆 会拿旧快照比，误判「没变」继续发那张 1 人版旧卡
+    same, rank = plugin._store.today_char_stats(
+        str(row["char_id"]), date, uid, str(row.get("group_id") or ""),
+        str(plugin._cfg("same_stat_scope", "all") or "all"))
+    total = plugin._store.user_char_count(uid, str(row["char_id"])) or 1
     card_path = await asyncio.to_thread(
-        card.render_card, src, entry, date_str=date, same_count=1, total_count=1,
+        card.render_card, src, entry, date_str=date, same_count=same,
+        total_count=total, today_rank=rank,
         rerolled=bool(row["rerolled"]), out_path=str(out),
         data_dir=Path(plugin._data_dir),
         seal_pos=plugin._cfg("card_seal_pos", "name"),
         scrim=plugin._cfg("card_scrim", 100))
-    plugin._store.update_draw_card(uid, date, card_path)
+    plugin._store.update_draw_card(uid, date, card_path, same_count=same,
+                                   today_rank=rank, total_count=total)
     await asyncio.to_thread(plugin._store.debug_log, "rerender", uid, f"{date} 重渲染卡片")
     return ok({"card_path": card_path, "date": date})
 
