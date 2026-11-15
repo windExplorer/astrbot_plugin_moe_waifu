@@ -471,6 +471,14 @@ check("卡片调试页去掉「重抽」开关，换成今日名次",
 check("旧版式卡片重发时强制重画（card_ver，清掉历史「重抽」标）",
       "CARD_VER" in CARD and "card_ver" in MAIN and "card_ver" in STORE)
 
+# ---------- ⑮ v0.54.7：重发卡不污染抽卡时间 / 名次改按流水 id ----------
+check("重发卡不再刷新 updated_at",
+      'sets = ["card_path=?", "updated_at=?"]' not in STORE)
+check("名次按 draw_events.id 排（不按时间列，重发不会漂）",
+      "MAX(id) AS eid" in STORE and "e.eid<=" in STORE)
+check("历史被污染的时间有回填修复",
+      "_backfill_draw_times" in STORE)
+
 if FAILURES:
     print(f"test_ui_v042: {len(FAILURES)} FAILED")
     sys.exit(1)

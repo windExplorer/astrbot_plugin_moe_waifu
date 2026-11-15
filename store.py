@@ -367,6 +367,27 @@ class Store:
         self._backfill_portrait_durations()
         # v0.33.2：为历史已生成的参考图回填耗时（ref_meta 有 seed 的行）
         self._backfill_ref_durations()
+        # v0.54.7：把被「卡图刷新」污染的 draws.updated_at 修回本签产生时间
+        self._backfill_draw_times()
+
+    def _backfill_draw_times(self) -> None:
+        """修复被卡图刷新碰过的抽卡时间（幂等）。
+
+        v0.54.2~v0.54.6 的 `update_draw_card` 会顺带把 `updated_at` 刷成当前时间，
+        于是一条 10:00 抽的签在 12:00 重发卡后，记录页「抽卡时间」变成 12:00，
+        名次也按这个时间重排（用户实报「明明是第一个，变成第二个」）。
+        真实时间在只追加的 `draw_events.created_at` 里：取该人当天最后一条事件，
+        只改「比它更晚」的行——新写入的两者相等，不会被误改。
+        """
+        self._conn.execute(
+            "UPDATE draws SET updated_at = ("
+            "  SELECT MAX(e.created_at) FROM draw_events e"
+            "  WHERE e.user_id=draws.user_id AND e.date=draws.date)"
+            " WHERE EXISTS (SELECT 1 FROM draw_events e2"
+            "   WHERE e2.user_id=draws.user_id AND e2.date=draws.date)"
+            " AND updated_at > (SELECT MAX(e3.created_at) FROM draw_events e3"
+            "   WHERE e3.user_id=draws.user_id AND e3.date=draws.date)"
+        )
 
     def _backfill_ref_durations(self) -> None:
         """为已生成的参考图回填耗时（幂等）。
@@ -520,9 +541,11 @@ class Store:
 
         v0.54.2：卡面不再是一次性快照——重发前用快照跟实时统计比，变了才重渲染。
         v0.54.6：`card_ver` 记录卡面版式版本，旧版式的卡重发时强制重画一次。
+        v0.54.7：**不再改 `updated_at`**。这里只是刷新卡图缓存，不是「又抽了一次」；
+        原先跟着刷新会把「抽卡时间」显示成重发时间，也让名次（按时间排）漂掉。
         """
-        sets = ["card_path=?", "updated_at=?"]
-        args: list = [card_path, _now()]
+        sets = ["card_path=?"]
+        args: list = [card_path]
         for col, val in (("same_count", same_count), ("today_rank", today_rank),
                          ("total_count", total_count), ("card_ver", card_ver)):
             if val is not None:
@@ -564,28 +587,37 @@ class Store:
         一律按 `all` 统计，避免私聊恒等于 1。
 
         返回 `(count, rank)`：count = 今天有多少人（当前签）抽到她；rank = 你在这
-        批人里按「最近一次抽到她」的时间排第几。调用方需先 upsert_draw（含自己）。
+        批人里第几个抽到她。调用方需先 upsert_draw（含自己）。
+
+        ⚠️ 名次**必须**按 `draw_events.id`（只追加、单调）排，不能按 draws 的时间列：
+        `updated_at` 会被卡图缓存刷新碰到，一刷新名次就漂（v0.54.7 用户实报
+        「明明是第一个抽到的，重发一次变成第 2 个」）。这里取「产生当前签的那条
+        流水」的 id 做序，重发多少次都不会变。
         """
-        where = "date=? AND char_id=?"
-        args: list = [date, char_id]
+        grp, grp_args = "", []
         if scope == "group" and group_id:
-            where += " AND group_id=?"
-            args.append(group_id)
+            grp, grp_args = " AND d.group_id=?", [group_id]
         row = self._conn.execute(
-            f"SELECT COUNT(*) AS n FROM draws WHERE {where}", tuple(args)).fetchone()
-        count = int(row["n"]) if row and row["n"] else 1
+            "SELECT COUNT(*) AS n FROM draws d WHERE d.date=? AND d.char_id=?" + grp,
+            [date, char_id] + grp_args).fetchone()
+        count = max(1, int(row["n"]) if row and row["n"] else 0)
+
+        mine = self._conn.execute(
+            "SELECT MAX(id) AS eid FROM draw_events"
+            " WHERE user_id=? AND date=? AND char_id=?",
+            (str(user_id), date, char_id)).fetchone()
+        eid = int(mine["eid"]) if mine and mine["eid"] else 0
         rank = 1
-        me = self._conn.execute(
-            "SELECT updated_at FROM draws WHERE user_id=? AND date=?",
-            (user_id, date)).fetchone()
-        if me is not None and me["updated_at"]:
-            # 同一秒内的并发用 user_id 兜底排序，保证名次稳定（同秒不并列）
+        if eid:
             r2 = self._conn.execute(
-                f"SELECT COUNT(*) AS n FROM draws WHERE {where}"
-                " AND (updated_at < ? OR (updated_at = ? AND user_id <= ?))",
-                tuple(args) + (me["updated_at"], me["updated_at"], user_id)).fetchone()
+                "SELECT COUNT(*) AS n FROM draws d JOIN ("
+                "  SELECT user_id, MAX(id) AS eid FROM draw_events"
+                "  WHERE date=? AND char_id=? GROUP BY user_id) e"
+                "  ON e.user_id=d.user_id"
+                " WHERE d.date=? AND d.char_id=?" + grp + " AND e.eid<=?",
+                [date, char_id, date, char_id] + grp_args + [eid]).fetchone()
             rank = int(r2["n"]) if r2 and r2["n"] else 1
-        return max(1, count), max(1, min(rank, count))
+        return count, max(1, min(rank, count))
 
     # ---------- 计数 ----------
 

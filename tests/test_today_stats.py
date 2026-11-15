@@ -71,6 +71,24 @@ with tempfile.TemporaryDirectory() as td:
           (row["same_count"], row["today_rank"], row["total_count"]))
     check("card_path 仍会更新", row["card_path"] == "/tmp/card.png", row["card_path"])
 
+    # v0.54.7（用户实报）：重发卡不能改「抽卡时间」，也不能让名次漂移。
+    # 把时间人为改老，再走一次 update_draw_card，值必须原样。
+    st._conn.execute("UPDATE draws SET updated_at='2000-01-01T00:00:00Z'"
+                     " WHERE user_id='u2' AND date=?", (TODAY,))
+    st._conn.commit()
+    cnt_b, rank_b = st.today_char_stats("x", TODAY, "u2", "200", "all")
+    st.update_draw_card("u2", TODAY, "/tmp/card3.png", same_count=2,
+                        today_rank=rank_b, total_count=4)
+    row_t = st.get_draw("u2", TODAY)
+    check("重发卡不改抽卡时间（updated_at）",
+          row_t["updated_at"] == "2000-01-01T00:00:00Z", row_t["updated_at"])
+    cnt_a, rank_a = st.today_char_stats("x", TODAY, "u2", "200", "all")
+    check("重发卡后同款人数与名次都不变",
+          (cnt_b, rank_b) == (cnt_a, rank_a), (cnt_b, rank_b, cnt_a, rank_a))
+    # 此时 x 的当前持有者是 u2 / u3（u1 已换成 y），按流水 id 排 u2 是第 1 个。
+    # 关键点：把时间列改老也影响不到名次（按事件 id 排）。
+    check("时间列被改老不影响名次", cnt_a == 2 and rank_a == 1, (cnt_a, rank_a))
+
     # 不传统计时不覆盖已有快照（工坊重渲染路径）
     st.update_draw_card("u2", TODAY, "/tmp/card2.png")
     row = st.get_draw("u2", TODAY)
