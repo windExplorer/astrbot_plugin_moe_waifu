@@ -4096,33 +4096,51 @@ async def h_user(plugin) -> dict:
 
 # ---------- 用户头像（v0.13.2） ----------
 # 前端在记录表 / 用户卡 / 总览批量展示头像，逐个直连 QQ 图床既慢又不稳，
-# 统一走本代理：q4.qlogo.cn/headimg_dl（q1 g?qq= 端点已死，星语同款通道）
-# 拉 spec=100 小图转 data URL；进程内缓存 + TTL，失败返回 err（前端静默回落色块）。
-
+# 统一走本代理拉小图转 data URL；进程内缓存 + TTL，失败返回 err（前端静默回落色块）。
+#
+# v0.54.3：`q4.qlogo.cn/headimg_dl?qq=` 这个老端点现在直接回 400（实测 2026-11-15），
+# 头像因此一张都取不到。现改用 `q.qlogo.cn/headimg_dl?dst_uin=`（主）+ 
+# `q1.qlogo.cn/g?b=qq&nk=`（备），两条都实测 200 image/jpeg。
 _AVATAR_TTL = 6 * 3600
 _AVATAR_CACHE_MAX = 500
 _avatar_cache: dict[str, tuple[float, str]] = {}
+_AVATAR_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " \
+             "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 
 
-async def _fetch_avatar_data_url(uid: str) -> str | None:
+async def _http_image_data_url(urls) -> str | None:
+    """按顺序试一组图床 URL，返回第一个能拿到的 data URL（全失败返回 None）。"""
+    if isinstance(urls, str):
+        urls = [urls]
     try:
         import aiohttp  # AstrBot 运行期依赖；缺席时返回 None 走降级
     except Exception:
         return None
-
-    url = f"https://q4.qlogo.cn/headimg_dl?qq={uid}&spec=100"
+    headers = {"User-Agent": _AVATAR_UA, "Referer": "https://qzone.qq.com/"}
+    timeout = aiohttp.ClientTimeout(total=6)
     try:
-        timeout = aiohttp.ClientTimeout(total=6)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    return None
-                raw = await resp.read()
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+            for url in urls:
+                try:
+                    async with session.get(url) as resp:
+                        if resp.status != 200:
+                            continue
+                        raw = await resp.read()
+                except Exception:
+                    continue
+                if raw:
+                    ctype = "png" if raw[:4] == b"\x89PNG" else "jpeg"
+                    return f"data:image/{ctype};base64," + base64.b64encode(raw).decode("ascii")
     except Exception:
         return None
-    if not raw:
-        return None
-    return "data:image/jpeg;base64," + base64.b64encode(raw).decode("ascii")
+    return None
+
+
+async def _fetch_avatar_data_url(uid: str) -> str | None:
+    return await _http_image_data_url([
+        f"https://q.qlogo.cn/headimg_dl?dst_uin={uid}&spec=100",
+        f"https://q1.qlogo.cn/g?b=qq&nk={uid}&s=100",
+    ])
 
 
 # v0.54.0：群头像缓存（与用户头像同一套 TTL / 上限，键是群号）
@@ -4131,24 +4149,8 @@ _group_avatar_cache: dict[str, tuple[float, str]] = {}
 
 async def _fetch_group_avatar_data_url(gid: str) -> str | None:
     """QQ 群头像 → data URL。群号非法或网络失败返回 None（前端回落色块）。"""
-    try:
-        import aiohttp  # AstrBot 运行期依赖；缺席时返回 None 走降级
-    except Exception:
-        return None
-
-    url = f"https://p.qlogo.cn/gh/{gid}/{gid}/100"
-    try:
-        timeout = aiohttp.ClientTimeout(total=6)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    return None
-                raw = await resp.read()
-    except Exception:
-        return None
-    if not raw:
-        return None
-    return "data:image/jpeg;base64," + base64.b64encode(raw).decode("ascii")
+    return await _http_image_data_url(
+        f"https://p.qlogo.cn/gh/{gid}/{gid}/100")
 
 
 async def h_user_avatar(plugin) -> dict:
@@ -4199,6 +4201,91 @@ async def h_group_avatar(plugin) -> dict:
             _group_avatar_cache.pop(k, None)
     _group_avatar_cache[gid] = (now, data_url)
     return ok({"data_url": data_url, "cached": False})
+
+
+# ---------- 群名补全（v0.54.3） ----------
+# aiocqhttp 的群消息事件本身不带群名（OneBot V11 只给 group_id），历史记录会
+# 一直是空的。抽卡时的实时回填只对之后的签生效，老签要在工坊里补：这里直接问
+# 活着的适配器（platform_manager → aiocqhttp inst.bot.call_action），拿到就写回库。
+_group_name_cache: dict[str, str] = {}
+
+
+def _aiocqhttp_clients(plugin) -> list:
+    """当前存活的 aiocqhttp 适配器的 CQHttp 客户端（优先级：meta.name 前缀）。"""
+    out = []
+    try:
+        insts = list(plugin.context.platform_manager.get_insts())
+    except Exception:
+        return out
+    for inst in insts:
+        try:
+            pname = str(inst.meta().name or "")
+        except Exception:
+            pname = ""
+        client = getattr(inst, "bot", None)
+        if client is None:
+            getter = getattr(inst, "get_client", None)
+            try:
+                client = getter() if callable(getter) else None
+            except Exception:
+                client = None
+        if client is not None and pname.startswith("aiocqhttp"):
+            out.append(client)
+    return out
+
+
+async def _resolve_group_name(plugin, gid: str) -> str:
+    """向适配器要一次群名；拿不到返回空串（不抛异常）。"""
+    gid = str(gid or "").strip()
+    if not gid.isdigit():
+        return ""
+    for client in _aiocqhttp_clients(plugin):
+        try:
+            info = await asyncio.wait_for(
+                client.call_action("get_group_info", group_id=int(gid)), timeout=6)
+        except Exception:
+            logger.debug(f"[{PLUGIN_NAME}] 群名查询失败 gid={gid}\n"
+                         f"{traceback.format_exc()}")
+            continue
+        if isinstance(info, dict):
+            name = str(info.get("group_name") or "").strip()
+            if name:
+                return name
+    return ""
+
+
+async def h_groups_names(plugin) -> dict:
+    """批量补群名（v0.54.3）：传入群号列表，返回能解析到的 {群号: 群名}。
+
+    命中后顺手写回 draws / draw_events 的空群名行（`Store.set_group_name`），
+    前端下次刷新就自带群名，不用每次重复问适配器。
+    """
+    body = await _body()
+    raw = body.get("gids") or _q("gids", "") or ""
+    if isinstance(raw, str):
+        gids = [g.strip() for g in raw.replace("，", ",").split(",") if g.strip()]
+    elif isinstance(raw, (list, tuple)):
+        gids = [str(g).strip() for g in raw if str(g).strip()]
+    else:
+        gids = []
+    gids = [g for g in dict.fromkeys(gids) if g.isdigit()][:30]
+    if not gids:
+        return err("缺少群号")
+    names, patched = {}, 0
+    for gid in gids:
+        name = _group_name_cache.get(gid) or await _resolve_group_name(plugin, gid)
+        if not name:
+            continue
+        _group_name_cache[gid] = name
+        names[gid] = name
+        try:
+            patched += plugin._store.set_group_name(gid, name)
+        except Exception:
+            logger.debug(f"[{PLUGIN_NAME}] 群名写回失败 gid={gid}\n"
+                         f"{traceback.format_exc()}")
+    if not names:
+        return err("没能从适配器读到群名（确认机器人仍在群里、适配器在线）")
+    return ok({"names": names, "patched": patched})
 
 
 async def h_filter_options(plugin) -> dict:
@@ -5958,6 +6045,8 @@ def register(plugin) -> None:
         ("/user/avatar", h_user_avatar, ["GET", "POST"]),
         # v0.54.0：QQ 群头像（记录页 / 总览按群展示；只做 QQ 平台）
         ("/group/avatar", h_group_avatar, ["GET", "POST"]),
+        # v0.54.3：群名补全（老记录群名空 → 问适配器并写回库）
+        ("/groups/names", h_groups_names, ["GET", "POST"]),
         ("/filters", h_filter_options, ["GET"]),
         ("/debug/state", h_debug_state, ["GET", "POST"]),
         ("/debug/history", h_debug_history, ["GET", "POST"]),

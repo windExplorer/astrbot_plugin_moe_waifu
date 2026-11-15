@@ -567,24 +567,48 @@ class MoeWaifuPlugin(Star):
         直接塞进 `message_obj.group.group_name`，于是老记录页整列都显示「私聊」。
         这里按需向适配器要一次 get_group_info；失败 / 超时一律返回空串——
         抽卡不能因为查群名失败而中断。
+
+        v0.54.3：先看事件里现成的群名；再带 self_id 试一次，失败去掉 self_id 再试
+        （不同适配器对多余参数的容忍度不一）；仍失败就把真实原因写进日志（warning，
+        之前是 debug 级，排查时完全看不见）。
         """
         if not gid:
             return ""
+        try:
+            g = getattr(getattr(event, "message_obj", None), "group", None)
+            name = str(getattr(g, "group_name", "") or "").strip()
+            if name:
+                return name
+        except Exception:
+            pass
         bot = getattr(event, "bot", None)
         if bot is None:
+            logger.debug(f"[{PLUGIN_NAME}] 群名查询跳过：事件没有 bot 属性（gid={gid}）")
             return ""
-        params = {"group_id": int(gid) if str(gid).isdigit() else gid}
-        self_id = str(getattr(getattr(event, "message_obj", None), "self_id", "") or "")
+        api_gid = int(gid) if str(gid).isdigit() else gid
+        # ⚠️ self_id 必须原样透传（aiocqhttp 用它路由到具体连接，int/str 不通用；
+        # 早先这里 str() 了一把，路由不上直接报错 → 群名永远读不到）。
+        self_id = getattr(getattr(event, "message_obj", None), "self_id", None)
+        variants = []
         if self_id:
-            params["self_id"] = self_id
-        try:
-            info = await asyncio.wait_for(
-                bot.call_action("get_group_info", **params), timeout=5)
-        except Exception:
-            logger.debug(f"[{PLUGIN_NAME}] 群名查询失败（gid={gid}）\n{traceback.format_exc()}")
-            return ""
-        if isinstance(info, dict):
-            return str(info.get("group_name") or "").strip()
+            variants.append({"group_id": api_gid, "self_id": self_id})
+        variants.append({"group_id": api_gid})
+        last_err = ""
+        for params in variants:
+            try:
+                info = await asyncio.wait_for(
+                    bot.call_action("get_group_info", **params), timeout=5)
+            except Exception as exc:
+                last_err = f"{type(exc).__name__}: {exc}"
+                continue
+            if isinstance(info, dict):
+                name = str(info.get("group_name") or "").strip()
+                if name:
+                    return name
+                last_err = f"返回里没有 group_name：{str(info)[:200]}"
+            else:
+                last_err = f"返回类型异常：{type(info).__name__}"
+        logger.warning(f"[{PLUGIN_NAME}] 群名获取失败（gid={gid}）：{last_err}")
         return ""
 
     async def _produce(self, event: AstrMessageEvent, entry: dict, uid: str, date: str,

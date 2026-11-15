@@ -1532,6 +1532,30 @@ class Store:
             row = self._conn.execute("SELECT COUNT(*) AS n FROM draw_events").fetchone()
         return int(row["n"]) if row else 0
 
+    def set_group_name(self, group_id: str, name: str) -> int:
+        """把群名回填到历史行（draws + draw_events 里所有空群名的行）。
+
+        v0.54.3：群名是抽卡那一刻向适配器要的，老记录（或适配器当时没给）会
+        一直空着。工坊拿到真群名后调用本方法补齐，前端刷新即可显示。
+        返回受影响行数。
+        """
+        gid = str(group_id or "").strip()
+        gname = str(name or "").strip()
+        if not gid or not gname:
+            return 0
+        n = 0
+        for table in ("draws", "draw_events"):
+            try:
+                cur = self._conn.execute(
+                    f"UPDATE {table} SET group_name=?"
+                    " WHERE group_id=? AND (group_name IS NULL OR group_name='')",
+                    (gname, gid))
+                n += int(cur.rowcount or 0)
+            except sqlite3.DatabaseError:
+                continue
+        self._conn.commit()
+        return n
+
     def list_groups(self) -> list:
         """记录里出现过的群（含私聊伪群 `__private__`），群名取最近一次非空快照。"""
         rows = self._conn.execute(

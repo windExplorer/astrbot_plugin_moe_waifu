@@ -4937,6 +4937,7 @@
             ov.value = Object.assign({}, ov.value, res);
             ensureAvatars(ov.value.today_recent);
             ensureGroupAvatars(ov.value.today_recent);
+            ensureGroupNames(ov.value.today_recent);
           }
         } catch (e) { /* 已提示 */ } finally {
           ovLoading.value = false;
@@ -7407,18 +7408,70 @@
           if (r && r.group_id) { fetchGroupAvatar(r.group_id); }
         });
       }
-      // 群列文案：群名优先；没有群名（老记录 / 适配器不给）就显示群号——
-      // 空群号才是真的私聊（此前 aiocqhttp 群消息没有群名，整列都显示成「私聊」）。
+      // v0.54.3：群名补全。aiocqhttp 群消息事件不带群名，老记录会一直是空的；
+      // 进页时把「有群号但没群名」的群批量问一次适配器（/groups/names），
+      // 顺手写回库 + 就地改名，不用整页重刷。
+      var groupNameMap = Vue.ref({});
+      var groupNamePending = {};
       function groupNameOf(gid, gname) {
         gid = String(gid || "");
         if (!gid) { return "私聊"; }
-        return String(gname || "").trim() || ("群 " + gid);
+        var known = String(gname || "").trim() || groupNameMap.value[gid] || "";
+        return known || ("群 " + gid);
       }
       function groupTitle(gid, gname) {
         gid = String(gid || "");
         if (!gid) { return "私聊"; }
-        var name = String(gname || "").trim();
-        return name ? (name + " · " + gid) : ("群号 " + gid + "（没读到群名）");
+        var name = String(gname || "").trim() || groupNameMap.value[gid] || "";
+        return name ? (name + " · " + gid) : ("群号 " + gid);
+      }
+      // 内存里的行跟着改名（表格 / 总览 / 详情都不用整页重刷）
+      function patchGroupNames(names) {
+        var lists = [recRows.value, ov.value.today_recent, recEvents.value,
+                     (recDetail.value && recDetail.value.draw) ? [recDetail.value.draw] : [],
+                     (userDetail.value && userDetail.value.history) || []];
+        lists.forEach(function (list) {
+          (list || []).forEach(function (r) {
+            if (!r || !r.group_id) { return; }
+            var n = names[String(r.group_id)];
+            if (n && !String(r.group_name || "").trim()) { r.group_name = n; }
+          });
+        });
+      }
+      function ensureGroupNames(rows) {
+        var need = [];
+        (rows || []).forEach(function (r) {
+          var gid = String((r && r.group_id) || "");
+          if (!gid || !/^\d+$/.test(gid)) { return; }
+          if (String(r.group_name || "").trim()) { return; }
+          if (groupNameMap.value[gid] || groupNamePending[gid]) { return; }
+          if (need.indexOf(gid) < 0) { need.push(gid); }
+        });
+        if (!need.length) { return; }
+        need = need.slice(0, 20);
+        need.forEach(function (g) { groupNamePending[g] = true; });
+        var p;
+        try { p = bridge.apiGet("groups/names", { gids: need.join(",") }); }
+        catch (e) {
+          need.forEach(function (g) { delete groupNamePending[g]; });
+          return;
+        }
+        if (!p || typeof p.then !== "function") {
+          need.forEach(function (g) { delete groupNamePending[g]; });
+          return;
+        }
+        p.then(function (res) {
+          var names = (res && res.names) || {};
+          var keys = Object.keys(names);
+          if (!keys.length) { return; }
+          var m = Object.assign({}, groupNameMap.value);
+          keys.forEach(function (k) { m[k] = names[k]; });
+          groupNameMap.value = m;
+          patchGroupNames(names);
+        }).catch(function () { /* 静默：只是名字没读到，回落群号 */ })
+          .then(function () {
+            need.forEach(function (g) { delete groupNamePending[g]; });
+          });
       }
       // 只要时分秒（今日抽签 / 记录表的时间列；完整时间进 title）
       function fmtClock(s) {
@@ -8803,6 +8856,7 @@
           recTotal.value = (res && res.total) || 0;
           ensureAvatars(recRows.value);
           ensureGroupAvatars(recRows.value);
+          ensureGroupNames(recRows.value);
         } catch (e) { /* 已提示 */ } finally {
           recLoading.value = false;
         }
@@ -8832,6 +8886,9 @@
         try {
           var res = await apiGet("records/detail", { user_id: row.user_id, date: row.date });
           recDetail.value = res || null;
+          if (recDetail.value && recDetail.value.draw) {
+            ensureGroupNames([recDetail.value.draw]);
+          }
         } catch (e) { /* 已提示 */ }
       }
       async function loadRecEvents() {
@@ -8844,6 +8901,7 @@
           recEvents.value = (res && res.rows) || [];
           recEventsTotal.value = (res && res.total) || 0;
           ensureAvatars(recEvents.value);
+          ensureGroupNames(recEvents.value);
         } catch (e) { /* 已提示 */ }
       }
       function setRecEventPage(p) { recEventPage.value = p; loadRecEvents(); }
@@ -9095,6 +9153,10 @@
         try {
           var res = await apiGet("user", { uid: uid, months: 3 });
           userDetail.value = res || null;
+          if (userDetail.value) {
+            ensureGroupAvatars(userDetail.value.history);
+            ensureGroupNames(userDetail.value.history);
+          }
         } catch (e) { userDetail.value = null; } finally {
           userDetailLoading.value = false;
         }

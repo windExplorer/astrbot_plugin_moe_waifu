@@ -2,6 +2,34 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.54.3 (2026-11-15)
+
+- **用户头像一张都取不到**：根因是 `q4.qlogo.cn/headimg_dl?qq=<号>` 这个老端点
+  已经失效（2026-11-15 实测直接回 `400 text/plain`）。改用
+  `q.qlogo.cn/headimg_dl?dst_uin=<号>&spec=100`（主）+
+  `q1.qlogo.cn/g?b=qq&nk=<号>&s=100`（备），两条实测都是 `200 image/jpeg`；
+  统一收口到 `_http_image_data_url()`：带 UA / Referer（部分图床拦默认 UA），
+  按字节头嗅探 png/jpeg，多个 URL 顺序回退，全失败才返回 None（前端静默回落色块）。
+- **群名读不到（记录页 tooltip「没读到群名」）**，三层修：
+  1. `_group_name_of` 把 `message_obj.self_id` 又 `str()` 了一遍——aiocqhttp 用它
+     路由到具体连接，int/str 不通用，路由不上就抛错，群名永远空。现改为**原样
+     透传**，并且失败后去掉 `self_id` 再试一次（单连接场景不需要它）。
+  2. 先看事件里现成的 `message_obj.group.group_name`（有些适配器会给），没有才打 API。
+  3. 失败原因从 `logger.debug` 提到 `logger.warning`（打印异常类型/文本、返回里的
+     `retcode`），以前排查时日志里完全看不到。
+- **老记录群名补齐**：新增 `POST /groups/names`（`h_groups_names`）——批量（≤30 个）
+  问活着的 aiocqhttp 适配器（`context.platform_manager.get_insts()` → `inst.bot
+  .call_action("get_group_info")`），命中后 `Store.set_group_name` 写回
+  `draws` + `draw_events` 里所有空群名的行，成功结果在进程内缓存。
+  前端在记录页 / 总览「今日抽签」/ 用户详情 / 流水加载完后自动补名，并就地改名
+  （`patchGroupNames`），不用整页重刷；补不到就用「群 <群号>」显示，
+  tooltip 不再出现「没读到群名」这种吓人措辞。
+- 测试：`test_today_stats.py` 加群名回填（两张表都写、不覆盖已有名字）守卫；
+  `test_ui_v042.py` 加 4 条 v0.54.3 守卫（不再用 q4 端点 / 带 UA / 群名补全链路 /
+  失败进 warning 日志）；`test_webui_contract.py` 补 `/groups/names` 路由与
+  `set_group_name` / `user_char_count` / `today_char_stats` 方法清单。
+- 版本 v0.54.2 -> v0.54.3。
+
 ## v0.54.2 (2026-11-15)
 
 - **新增配置「允许私聊抽卡」（默认关闭）**：默认只允许群聊抽卡，私聊发

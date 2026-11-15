@@ -442,6 +442,18 @@ check("卡面新增「今日第几个抽到她」且宽度自适应",
 check("统计快照列有迁移（老库就地补列）",
       '"same_count"' in STORE and '"today_rank"' in STORE and '"total_count"' in STORE)
 
+# ---------- ⑫ v0.54.3：头像图床换端点 + 群名补全 ----------
+check("用户头像不再用已失效的 q4 端点",
+      "q.qlogo.cn/headimg_dl?dst_uin=" in API
+      and 'https://q4.qlogo.cn' not in API)
+check("头像/群图拉取带 UA 且失败静默",
+      "_http_image_data_url" in API and "User-Agent" in API)
+check("群名可从适配器补全并写回库",
+      "/groups/names" in API and "h_groups_names" in API
+      and "set_group_name" in STORE and "ensureGroupNames" in PAGE)
+check("抽卡时群名失败原因进日志（warning，不再 debug 吞掉）",
+      "群名获取失败" in MAIN and "call_action(\"get_group_info\"" in MAIN)
+
 if FAILURES:
     print(f"test_ui_v042: {len(FAILURES)} FAILED")
     sys.exit(1)

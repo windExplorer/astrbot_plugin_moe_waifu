@@ -77,6 +77,19 @@ with tempfile.TemporaryDirectory() as td:
     check("不传统计保留旧快照", (row["same_count"], row["today_rank"]) == (2, 1),
           (row["same_count"], row["today_rank"]))
 
+    # v0.54.3：群名回填（老记录 group_name 空 → 工坊补名后两张表都更新）
+    draw(st, "u4", "z", "999")
+    n = st.set_group_name("999", "测试群")
+    check("群名回填写回 draws", n >= 1 and st.get_draw("u4", TODAY)["group_name"] == "测试群",
+          (n, st.get_draw("u4", TODAY)["group_name"]))
+    ev_rows, _ev_total = st.list_events(200, 0)
+    check("群名回写覆盖 draw_events",
+          all(r.get("group_name") == "测试群" for r in ev_rows if r.get("group_id") == "999"),
+          [(r.get("group_id"), r.get("group_name")) for r in ev_rows][:3])
+    check("群名回填不覆盖已有名字",
+          st.set_group_name("999", "另一个名字") >= 0
+          and st.get_draw("u4", TODAY)["group_name"] == "测试群")
+
     check("user_char_count 可用（无记录=0）", st.user_char_count("u1", "y") == 0,
           st.user_char_count("u1", "y"))
     st.bump_user_char("u1", "y")
