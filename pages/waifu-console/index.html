@@ -458,6 +458,47 @@
   .ov-quick-btn:hover { transform: translateY(-2px); border-color: var(--wf-brand);
     box-shadow: 0 8px 18px -12px rgba(160,50,120,.9); }
 
+  /* ==================== v0.54.11：全局弹窗版式 ====================
+     用户口径：头 / 内容 / 脚三段要分清，操作按钮统一放右下角。
+     做法：① 标题下、操作区上各一条分隔线（naive 的 dialog 自带 .n-dialog__title /
+     __content / __action 三层 DOM，直接给前后加边线即可）；② 大部分老弹窗把按钮行
+     写在 content 末尾（没走 #action 插槽），用 :has 兜底把那一排靠右——不支持的
+     浏览器（老 Chromium）会自动忽略这条，保持原样，不会炸版。 */
+  .n-dialog { border-radius: 14px; }
+  .n-dialog__title {
+    padding-bottom: 12px; margin-bottom: 14px;
+    border-bottom: 1px solid var(--wf-line); }
+  .n-dialog__action {
+    display: flex; justify-content: flex-end; align-items: center; gap: 8px;
+    padding-top: 12px; margin-top: 14px;
+    border-top: 1px solid var(--wf-line); }
+  /* 兜底：content 里最后一排（含按钮的 n-space）靠右，视觉上等同页脚 */
+  .n-dialog__content > .n-space:last-child:has(.n-button) {
+    width: 100%; justify-content: flex-end; align-items: center; }
+
+  /* v0.54.11：出图队列的「表格」——长错误文案曾把角色名列挤成竖排单字，
+     改成三列 grid：标签固定宽 / 名字单行省略 / 状态最多两行截断。 */
+  .queue-row { display: grid; gap: 10px; align-items: center;
+    grid-template-columns: 84px minmax(0, 1fr) minmax(0, 1.3fr);
+    padding: 7px 0; border-bottom: 1px solid var(--wf-line); }
+  .queue-row:last-child { border-bottom: 0; }
+  .queue-label { font-size: 13px; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .queue-status { font-size: 12px; opacity: .72; text-align: right;
+    min-width: 0; word-break: break-word;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; }
+  /* 补齐配额预览的行（长主题名不再把按钮挤走） */
+  .fill-row { display: grid; gap: 8px; align-items: center;
+    grid-template-columns: 62px minmax(0, 1fr) auto; }
+  /* 批量补图进度行：长错误文案单行省略，不再把名字挤成竖排 */
+  .batch-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .batch-row > .bind-tip { min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .fill-idx { font-size: 12px; opacity: .6; }
+  .fill-label { font-size: 13px; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
   /* 角色详情 · 图库页签：三类图片分节网格 */
   .lib-sec { margin-bottom: 16px; }
   .lib-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
@@ -3349,10 +3390,11 @@
           </n-gi>
         </n-grid>
         <n-empty v-else description="该作品还没有可用图片：先去试画或补图"></n-empty>
-        <n-space>
-          <n-button size="small" @click="setWorkCover(null)">清除作品封面（回退自动）</n-button>
-        </n-space>
       </n-space>
+      <template #action>
+        <n-button size="small" @click="setWorkCover(null)">清除作品封面（回退自动）</n-button>
+        <n-button size="small" type="primary" @click="workCoverModal = false">关闭</n-button>
+      </template>
     </n-modal>
 
     <!-- ============ 角色详情 · 生成立绘弹窗（v0.6.2 提示词面板；v0.7.0 起「开始生成」在此触发）
@@ -3438,15 +3480,16 @@
           来源：{{ galPromptSource || "尚未生成" }}。点「开始生成」即按这份文本出图（v0.7.0 起：
           面板上的主按钮只负责打开本面板，在这里按下生成才真正开始）；换主题或附加要求后需重新生成。
         </div>
-        <n-space>
-          <n-button type="primary" :loading="galSubmitting"
-                    :disabled="!galPrompt || galPromptLoading"
-                    @click="generateFromModal">开始生成</n-button>
-          <n-button @click="galPromptOpen = false">取消</n-button>
-          <n-checkbox v-model:checked="galAsRef"
-                      style="margin-left: auto;">转为参考图（不入立绘库）</n-checkbox>
-        </n-space>
       </n-space>
+      <!-- v0.54.11：操作行搬到弹窗页脚（右下角、带上分隔线） -->
+      <template #action>
+        <n-checkbox v-model:checked="galAsRef"
+                    style="margin-right: auto;">转为参考图（不入立绘库）</n-checkbox>
+        <n-button @click="galPromptOpen = false">取消</n-button>
+        <n-button type="primary" :loading="galSubmitting"
+                  :disabled="!galPrompt || galPromptLoading"
+                  @click="generateFromModal">开始生成</n-button>
+      </template>
     </n-modal>
 
     <!-- ============ 角色详情 · 立绘详情弹窗（v0.15.0 建，v0.20.0 丰富）：
@@ -3632,18 +3675,19 @@
             </div>
           </div>
         </div>
-        <div style="display: flex; gap: 10px; align-items: center; margin-top: 6px;">
-          <n-button type="primary" size="small" :loading="batchStarting"
-                    :disabled="batchRunning" @click="doBatchStart">开始补图</n-button>
-          <!-- v0.39.1：画师模式按次勾选——LLM 整体创作，题材序列降级为灵感 -->
-          <n-checkbox v-model:checked="batchArtist" :disabled="batchRunning"
-                      title="本次批量由 LLM 画师整体创作提示词（不经预设维度池）；题材序列只作灵感参考，单张失败自动回落池子链路">🎨 画师出词</n-checkbox>
-          <n-button size="small" :disabled="!batchRunning" @click="doBatchStop">停止</n-button>
-          <span class="bind-tip" style="margin-top: 0;" v-if="batchRunning">
-            队列在后端继续运行，可安全离开本页面
-          </span>
-        </div>
       </div>
+      <!-- v0.54.11：操作行搬到弹窗页脚（右下角、带上分隔线） -->
+      <template #action>
+        <!-- v0.39.1：画师模式按次勾选——LLM 整体创作，题材序列降级为灵感 -->
+        <n-checkbox v-model:checked="batchArtist" :disabled="batchRunning"
+                    title="本次批量由 LLM 画师整体创作提示词（不经预设维度池）；题材序列只作灵感参考，单张失败自动回落池子链路">🎨 画师出词</n-checkbox>
+        <span class="bind-tip" style="margin: 0 auto 0 0;" v-if="batchRunning">
+          队列在后端继续运行，可安全离开本页面
+        </span>
+        <n-button size="small" :disabled="!batchRunning" @click="doBatchStop">停止</n-button>
+        <n-button type="primary" size="small" :loading="batchStarting"
+                  :disabled="batchRunning" @click="doBatchStart">开始补图</n-button>
+      </template>
     </n-modal>
 
     <!-- ============ 作品发现弹窗（v0.18.0）：作品名 → websearch(可选)+LLM 草稿 →
@@ -3683,15 +3727,17 @@
             </span>
           </div>
         </div>
-        <div style="display: flex; gap: 10px; align-items: center; margin-top: 6px;">
-          <n-button size="small" type="primary" :loading="discAdding"
-                    :disabled="discCandidates.length === 0 || !discPack"
-                    @click="doDiscoverAdd">入库所选（未验证）</n-button>
-          <span class="bind-tip" style="margin-top: 0;" v-if="discAdded">
-            已入库 {{ discAdded }} 个{{ discDup ? "（跳过重复 " + discDup + " 个）" : "" }}，去试画台验证
-          </span>
-        </div>
       </div>
+      <!-- v0.54.11：操作行搬到弹窗页脚（右下角、带上分隔线） -->
+      <template #action>
+        <span class="bind-tip" style="margin: 0 auto 0 0;" v-if="discAdded">
+          已入库 {{ discAdded }} 个{{ discDup ? "（跳过重复 " + discDup + " 个）" : "" }}，去试画台验证
+        </span>
+        <n-button size="small" @click="discOpen = false">关闭</n-button>
+        <n-button size="small" type="primary" :loading="discAdding"
+                  :disabled="discCandidates.length === 0 || !discPack"
+                  @click="doDiscoverAdd">入库所选（未验证）</n-button>
+      </template>
     </n-modal>
 
     <!-- ============ 角色详情 · 参考图上传弹窗（v0.6.2 拖拽多选；v0.6.3 换公共组件 + 粘贴；preset 须 dialog，见上） ============ -->
@@ -3903,59 +3949,57 @@
         </div>
         <div class="stack" v-if="galFillRows.length > 0"
              style="max-height: 260px; overflow-y: auto;">
-          <div v-for="(r, i) in galFillRows" :key="'galfill' + i"
-               style="display: flex; align-items: center; gap: 8px;">
-            <span class="bind-tip" style="margin-top: 0; width: 56px; flex: none;">第 {{ i + 1 }} 张</span>
-            <span style="flex: 1; font-size: 13px;">{{ r.label }}</span>
+          <div v-for="(r, i) in galFillRows" :key="'galfill' + i" class="fill-row">
+            <span class="fill-idx">第 {{ i + 1 }} 张</span>
+            <span class="fill-label" :title="r.label">{{ r.label }}</span>
             <n-button size="tiny" secondary @click="rerollFillRow(i)">换一个</n-button>
           </div>
         </div>
         <div class="bind-tip" v-else>没有需要补的立绘。</div>
-        <n-space align="center">
-          <n-button size="small" type="primary" :loading="galFillLoading"
-                    :disabled="batchRunning || galFillRows.length === 0"
-                    @click="doFillStart">开始补图</n-button>
-          <!-- v0.39.1：画师模式按次勾选——LLM 整体创作，题材序列降级为灵感 -->
-          <n-checkbox v-model:checked="galFillArtist" :disabled="batchRunning"
-                      title="本次补齐由 LLM 画师整体创作提示词（不经预设维度池）；主题序列只作灵感参考，单张失败自动回落池子链路">🎨 画师出词</n-checkbox>
-          <n-button size="small" :disabled="batchRunning || galFillRows.length === 0"
-                    @click="rerollFillAll">全部重随机</n-button>
-          <n-button size="small" @click="galFillOpen = false">取消</n-button>
-          <span class="bind-tip" style="margin-top: 0;"
-                v-if="batchRunning">批量队列运行中，请等待完成</span>
-        </n-space>
       </n-space>
+      <!-- v0.54.11：操作行搬到弹窗页脚（右下角、带上分隔线） -->
+      <template #action>
+        <!-- v0.39.1：画师模式按次勾选——LLM 整体创作，题材序列降级为灵感 -->
+        <n-checkbox v-model:checked="galFillArtist" :disabled="batchRunning"
+                    title="本次补齐由 LLM 画师整体创作提示词（不经预设维度池）；主题序列只作灵感参考，单张失败自动回落池子链路">🎨 画师出词</n-checkbox>
+        <span class="bind-tip" style="margin: 0 auto 0 0;"
+              v-if="batchRunning">批量队列运行中，请等待完成</span>
+        <n-button size="small" :disabled="batchRunning || galFillRows.length === 0"
+                  @click="rerollFillAll">全部重随机</n-button>
+        <n-button size="small" @click="galFillOpen = false">取消</n-button>
+        <n-button size="small" type="primary" :loading="galFillLoading"
+                  :disabled="batchRunning || galFillRows.length === 0"
+                  @click="doFillStart">开始补图</n-button>
+      </template>
     </n-modal>
 
     <!-- ============ 全局出图队列面板（v0.34.2）：合并生成立绘 / 试画 / 头像 /
          批量补图 / 批量头像；顶部队列指示器点击展开。preset 须 dialog ============ -->
     <n-modal v-model:show="queuePanelOpen" preset="dialog" title="出图队列"
-             style="width: 620px;">
-      <n-space vertical size="medium">
+             style="width: 640px;">
+      <div class="stack">
         <!-- v0.35.0：查询连续失败时明说，别让面板看起来「只是没任务」 -->
         <n-alert v-if="queueTopBroken" type="warning" :bordered="false">
           队列状态查询连续失败：插件后端可能没有重载到最新版
           （旧模块没有 /queue/list 路由）。请重载插件或重启 AstrBot 后再看。
         </n-alert>
-        <div class="bind-tip" v-if="queueRows.length === 0">
+        <div class="bind-tip" style="margin-top: 0;" v-if="queueRows.length === 0">
           当前没有排队 / 进行中的出图任务。
         </div>
-        <div class="stack" v-if="queueRows.length > 0"
-             style="max-height: 340px; overflow-y: auto;">
-          <div v-for="row in queueRows" :key="row.key"
-               style="display: flex; align-items: center; gap: 8px;">
-            <n-tag size="small" :bordered="false" :type="row.tagType"
-                   style="flex: none;">{{ row.kindLabel }}</n-tag>
-            <span style="flex: 1; font-size: 13px;">{{ row.label }}</span>
-            <span class="bind-tip" style="margin-top: 0;">{{ row.statusText }}</span>
+        <!-- v0.54.11：改三列 grid——长错误文案不再把角色名挤成竖排单字 -->
+        <div v-if="queueRows.length > 0" style="max-height: 340px; overflow-y: auto;">
+          <div v-for="row in queueRows" :key="row.key" class="queue-row">
+            <n-tag size="small" :bordered="false" :type="row.tagType">{{ row.kindLabel }}</n-tag>
+            <span class="queue-label" :title="row.label">{{ row.label }}</span>
+            <span class="queue-status" :title="row.statusText">{{ row.statusText }}</span>
           </div>
         </div>
-        <n-space align="center">
-          <n-button size="small" @click="queuePanelOpen = false">关闭</n-button>
-          <n-button size="small" v-if="batchRunning" type="warning"
-                    @click="doBatchStop">停止批量补图</n-button>
-        </n-space>
-      </n-space>
+      </div>
+      <template #action>
+        <n-button size="small" v-if="batchRunning" type="warning"
+                  @click="doBatchStop">停止批量补图</n-button>
+        <n-button size="small" @click="queuePanelOpen = false">关闭</n-button>
+      </template>
     </n-modal>
 
     <!-- ============ 拖拽全页提示层（纯视觉；drop 在 document 级路由） ============ -->

@@ -503,6 +503,16 @@ check("带页签的固定头独享更大下沿间距（30px，不再两条灰线
       and "margin-bottom: 30px; }" in PAGE
       and PAGE.count('class="sticky-head has-tabs"') >= 2)
 
+# ---------- ⑱ v0.54.11：全局弹窗版式 + 出图队列表格 ----------
+check("弹窗头/脚有分隔线，操作区右下角",
+      ".n-dialog__title {" in PAGE and ".n-dialog__action {" in PAGE
+      and "border-top: 1px solid var(--wf-line); }" in PAGE)
+check("主要弹窗的操作行走 #action 插槽（至少 6 处）",
+      PAGE.count("<template #action>") >= 6)
+check("出图队列改三列 grid（长文案不再把名字挤成竖排）",
+      ".queue-row {" in PAGE and 'class="queue-row"' in PAGE
+      and "text-overflow: ellipsis;" in PAGE and "-webkit-line-clamp: 2" in PAGE)
+
 if FAILURES:
     print(f"test_ui_v042: {len(FAILURES)} FAILED")
     sys.exit(1)
