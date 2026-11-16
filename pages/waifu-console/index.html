@@ -715,6 +715,35 @@
   .gr-detail-grid .k { opacity: .6; white-space: nowrap; }
   .gr-detail-grid .v { overflow-wrap: anywhere; }
   .swap-panel { display: block; }
+  /* v0.58.0：全局图片选择弹窗网格（普通 div，不用 n-space——v-if 兄弟撞 key 老坑） */
+  .picker-tip { font-size: 12px; opacity: .75; line-height: 1.5; }
+  .picker-count { font-size: 12px; font-weight: 600; margin: 8px 0 10px; }
+  .picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+    gap: 10px; max-height: 56vh; overflow-y: auto; padding: 2px; }
+  .picker-cell { position: relative; border: 2px solid transparent; border-radius: 8px;
+    overflow: hidden; cursor: pointer; background: rgba(127,127,127,.06); }
+  .picker-cell.sel { border-color: #ff7ab2; box-shadow: 0 0 0 2px rgba(255,122,178,.28); }
+  .picker-cell.gone { opacity: .4; cursor: not-allowed; }
+  .picker-cell img { display: block; width: 100%; height: 96px; object-fit: cover; }
+  .picker-noimg { height: 96px; display: flex; align-items: center; justify-content: center;
+    font-size: 11px; opacity: .55; }
+  .picker-mark { position: absolute; top: 4px; left: 4px; background: #ff7ab2; color: #fff;
+    font-size: 11px; font-weight: 700; border-radius: 5px; padding: 1px 6px; }
+  .picker-label { font-size: 11px; padding: 4px 6px 1px; overflow-wrap: anywhere; }
+  .picker-sub { font-size: 10px; opacity: .55; padding: 0 6px 4px; overflow-wrap: anywhere; }
+  .picker-del { font-size: 10px; text-align: center; padding: 3px; margin: 0 5px 5px;
+    border: 1px solid rgba(208,48,80,.45); border-radius: 4px; color: #d03050; }
+  .picker-del.armed { background: #d03050; color: #fff; }
+  .picker-empty { padding: 40px 0; text-align: center; font-size: 13px; opacity: .55; }
+  .picker-entry { margin-top: 10px; }
+  .picker-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .picker-strip-cell { display: flex; align-items: center; gap: 5px; max-width: 220px;
+    padding: 2px 7px 2px 3px; border: 1px solid var(--wf-line); border-radius: 999px;
+    font-size: 11px; cursor: pointer; }
+  .picker-strip-cell:hover { border-color: #ff7ab2; }
+  .picker-strip-ord { flex: none; min-width: 17px; height: 17px; line-height: 17px; text-align: center;
+    background: #ff7ab2; color: #fff; border-radius: 50%; font-size: 10px; font-weight: 700; }
+  .picker-strip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -1378,30 +1407,19 @@
                          v-if="(tryOverride.refs || []).length > 0">
                       本次已选 {{ tryOverride.refs.length }} 张参考图（顺序即「图1/图2/图3」）。
                     </div>
-                    <n-grid :cols="6" :x-gap="8" :y-gap="8" v-if="tryRefs.length > 0"
-                            style="margin-top: 10px;">
-                      <n-gi v-for="r in tryRefs" :key="r.path">
-                        <div class="gal-item"
-                             :class="{ 'ref-selected': (tryOverride.refs || []).indexOf(r.path) >= 0 }"
-                             @click="selectTryRef(r.path)">
-                          <img v-if="r.thumb" :src="r.thumb" class="clickable-img"
-                           title="点击查看大图" alt="参考图"
-                           @click.stop="openViewer(r.path, '参考图')">
-                          <div v-else class="gal-meta">文件丢失</div>
-                          <div class="gal-ops">
-                            <w-icon-btn icon="trash" size="tiny" type="error"
-                                        :armed="delArm === r.path"
-                                        :tip="delArm === r.path ? '再点一次确认删除' : '删除参考图'"
-                                        @click.stop="deleteTryRef(r)"></w-icon-btn>
-                          </div>
-                          <div class="gal-meta">
-                            {{ (tryOverride.refs || []).indexOf(r.path) >= 0
-                               ? "已选 #" + ((tryOverride.refs || []).indexOf(r.path) + 1)
-                               : "点击加入" }}
-                          </div>
+                    <div class="picker-entry" v-if="tryRefs.length > 0">
+                      <n-button size="small" secondary @click="openTryRefPicker">
+                        从参考图库点选（已选 {{ (tryOverride.refs || []).length }} 张）…
+                      </n-button>
+                      <div class="picker-strip" v-if="(tryOverride.refs || []).length">
+                        <div v-for="(p, pi) in tryOverride.refs" :key="p" class="picker-strip-cell"
+                             :title="'图' + (pi + 1) + '：' + p"
+                             @click="openViewer(p, '参考图 图' + (pi + 1))">
+                          <span class="picker-strip-ord">{{ pi + 1 }}</span>
+                          <span class="picker-strip-name">{{ p.split('/').pop() }}</span>
                         </div>
-                      </n-gi>
-                    </n-grid>
+                      </div>
+                    </div>
                     <div class="bind-tip" v-if="tryRefsLoading">参考图加载中…</div>
                     <div class="bind-tip" v-if="tryRefs.length === 0 && !tryRefsLoading">
                       该角色还没有绑定参考图：上传/拖入后会自动绑定并存起来，之后随时选用。
@@ -1415,10 +1433,12 @@
                       全局图库为空时先去侧栏「全局图库」上传。
                     </div>
                     <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px;">
-                      <n-select v-model:value="trySwapGlobal" :options="globalRefOpts" filterable clearable
-                                placeholder="① 全局参考图（画布 · 图1）" style="width: 260px;"></n-select>
-                      <n-select v-model:value="trySwapChar" :options="trySwapCharOpts" filterable clearable
-                                placeholder="② 角色参考图（身份 · 图2）" style="width: 260px;"></n-select>
+                      <n-button size="small" secondary @click="openTrySwapGlobalPicker">
+                        {{ trySwapGlobal ? "① 画布：" + tryNameOf(trySwapGlobal) : "① 点选全局参考图（画布）…" }}
+                      </n-button>
+                      <n-button size="small" secondary @click="openTrySwapCharPicker">
+                        {{ trySwapChar ? "② 身份：" + tryNameOf(trySwapChar) : "② 点选角色参考图（身份）…" }}
+                      </n-button>
                       <n-select v-model:value="trySwapWf" :options="wfOpts('img')" filterable tag clearable
                                 placeholder="Qwen Edit 工作流（留空=萌绘默认）" style="width: 230px;"></n-select>
                       <n-input-number v-model:value="trySwapDenoise" :step="0.05" :min="0.2" :max="0.95"
@@ -1453,6 +1473,28 @@
                     </div>
                   </div>
                 </div>
+
+                <!-- v0.58.0：图片选择弹窗（三处共用的全局组件） -->
+                <w-image-picker v-model:show="tryRefPickerOpen" :items="tryRefPickerItems"
+                                :value="tryOverride.refs || []" multiple title="选择本次参考图"
+                                hint="从该角色已绑定的参考图里点选；点图看大图，点卡片选中，顺序即图1/图2/图3。删除在卡片下方（两段确认）。"
+                                :deletable="true"
+                                @update:value="onTryRefPickerConfirm"
+                                @preview="onPickerPreview"
+                                @delete="onTryRefPickerDelete"></w-image-picker>
+                <w-image-picker v-model:show="trySwapGlobalPickerOpen"
+                                :items="trySwapGlobalPickerItems"
+                                :value="trySwapGlobal ? [trySwapGlobal] : []" :multiple="false"
+                                title="选择全局参考图（画布 · 图1）"
+                                hint="选一张精美图当画布：构图 / 姿势 / 背景会保留，只把人物换成角色。可以在「全局图库」页上传更多。"
+                                @update:value="onTrySwapGlobalConfirm"
+                                @preview="onPickerPreview"></w-image-picker>
+                <w-image-picker v-model:show="trySwapCharPickerOpen" :items="tryRefPickerItems"
+                                :value="trySwapChar ? [trySwapChar] : []" :multiple="false"
+                                title="选择角色参考图（身份 · 图2）"
+                                hint="选该角色的一张参考图提供身份：面部 / 发型发色 / 个人配饰会迁移到画布人物上。"
+                                @update:value="onTrySwapCharConfirm"
+                                @preview="onPickerPreview"></w-image-picker>
 
                 <!-- 第 2 步：主题 + 提示词预览/编辑 -->
                 <div v-if="tryStep === 2">
@@ -4856,6 +4898,104 @@
     "面部特征、五官、发型发色及可辨识的个人配饰都与 <image2> 一致。" +
     "除人物身份外不做任何其它改动。";
 
+  // ---- 图片选择弹窗公共组件（v0.58.0）----
+  // 缩略网格里点选图片，支持单选/多选、点选顺序编号（图1/图2/图3）、看大图、删除。
+  // value 是 path 数组（单选也是长度 1 的数组），父级负责把它写回自己的 ref。
+  // 删除按钮自带两段确认，确认后 emit("delete") 交给父级执行（不走父级的 armDelete）。
+  var WImagePicker = {
+    name: "WImagePicker",
+    props: {
+      show: { type: Boolean, default: false },
+      items: { type: Array, default: function () { return []; } },   // [{path,thumb,label,sub,exists}]
+      value: { type: Array, default: function () { return []; } },
+      multiple: { type: Boolean, default: true },
+      title: { type: String, default: "选择图片" },
+      hint: { type: String, default: "" },
+      max: { type: Number, default: 0 },        // 0 = 不限
+      deletable: { type: Boolean, default: false }
+    },
+    emits: ["update:show", "update:value", "preview", "delete"],
+    data: function () { return { draft: [], armedDel: "" }; },
+    watch: {
+      show: function (v) {
+        if (v) { this.draft = (this.value || []).slice(); this.armedDel = ""; }
+      },
+      value: function (v) { if (!this.show) { this.draft = (v || []).slice(); } }
+    },
+    methods: {
+      selIndex: function (p) { return this.draft.indexOf(p); },
+      toggle: function (it) {
+        if (it.exists === false || !it.path) return;
+        var i = this.draft.indexOf(it.path);
+        if (i >= 0) { this.draft.splice(i, 1); }
+        else if (!this.multiple) { this.draft = [it.path]; }
+        else if (!this.max || this.draft.length < this.max) { this.draft.push(it.path); }
+      },
+      doPreview: function (it) { this.$emit("preview", it.path, it.label || "图片"); },
+      doDelete: function (it) {
+        if (this.armedDel !== it.path) { this.armedDel = it.path; return; }
+        this.armedDel = "";
+        this.$emit("delete", it);
+      },
+      doCancel: function () { this.$emit("update:show", false); },
+      doConfirm: function () {
+        this.$emit("update:value", this.draft.slice());
+        this.$emit("update:show", false);
+      }
+    },
+    render: function () {
+      var self = this;
+      var cells = [];
+      for (var i = 0; i < this.items.length; i++) {
+        (function (it) {
+          var ord = self.selIndex(it.path);
+          var sel = ord >= 0;
+          var cls = "picker-cell" + (sel ? " sel" : "") + (it.exists === false ? " gone" : "");
+          var img = it.thumb
+            ? h("img", { src: it.thumb, alt: it.label || "",
+                onClick: function (e) { e.stopPropagation(); self.doPreview(it); } })
+            : h("div", { class: "picker-noimg" }, "无缩略图");
+          var mark = sel ? h("div", { class: "picker-mark" }, self.multiple ? ("#" + (ord + 1)) : "✓") : null;
+          var kids = [img, mark, h("div", { class: "picker-label" }, String(it.label || ""))];
+          if (it.sub) { kids.push(h("div", { class: "picker-sub" }, String(it.sub))); }
+          if (self.deletable && it.exists !== false) {
+            var armed = self.armedDel === it.path;
+            kids.push(h("div", {
+              class: "picker-del" + (armed ? " armed" : ""),
+              onClick: function (e) { e.stopPropagation(); self.doDelete(it); }
+            }, armed ? "确认删除" : "删除"));
+          }
+          cells.push(h("div", { class: cls, key: it.path,
+            onClick: function () { self.toggle(it); } }, kids));
+        })(this.items[i]);
+      }
+      var body = [
+        h("div", { class: "picker-tip" }, String(this.hint || "")),
+        h("div", { class: "picker-count" }, "已选 " + this.draft.length + " 张" +
+          (this.multiple ? "（点选顺序即图1/图2/图3）" : ""))
+      ];
+      body.push(cells.length
+        ? h("div", { class: "picker-grid" }, cells)
+        : h("div", { class: "picker-empty" }, "这里还没有图片"));
+      return h(NS.NModal, {
+        show: this.show,
+        "onUpdate:show": function (v) { self.$emit("update:show", v); },
+        preset: "dialog",
+        title: this.title,
+        style: "width: 860px; max-width: 94vw;"
+      }, {
+        default: function () { return body; },
+        action: function () {
+          return [
+            h(NS.NButton, { size: "small", onClick: self.doCancel }, "取消"),
+            h(NS.NButton, { size: "small", type: "primary", onClick: self.doConfirm },
+              "确定" + (self.multiple ? "（" + self.draft.length + "）" : ""))
+          ];
+        }
+      });
+    }
+  };
+
   function bridgeCtx() {
     try { return bridge.getContext() || {}; } catch (e) { return {}; }
   }
@@ -5925,6 +6065,62 @@
       function tryHasSwapSource() {
         return !!(String(trySwapGlobal.value || "").trim()
                   && String(trySwapChar.value || "").trim());
+      }
+      // v0.58.0：图片选择弹窗——三处共用（img2img 参考图 / swap 全局图 / swap 角色图）
+      var tryRefPickerOpen = Vue.ref(false);
+      var trySwapGlobalPickerOpen = Vue.ref(false);
+      var trySwapCharPickerOpen = Vue.ref(false);
+      // tryRefs 项 → picker item（{path,thumb,label,sub,exists}）
+      function _tryRefPickerItem(r, i) {
+        return {
+          path: r.path, thumb: r.thumb, exists: r.exists !== false,
+          label: (r.note ? r.note + " · " : "") + String((r.path || "").split("/").pop() || ("参考图 " + (i + 1))),
+          sub: (r.width && r.height ? r.width + "×" + r.height : "") || (r.source ? "来源：" + r.source : "")
+        };
+      }
+      var tryRefPickerItems = Vue.computed(function () {
+        return (tryRefs.value || []).map(_tryRefPickerItem);
+      });
+      var trySwapGlobalPickerItems = Vue.computed(function () {
+        return (globalRefs.value || []).filter(function (r) { return r.exists !== false; })
+          .map(function (r, i) {
+            return {
+              path: r.path, thumb: r.thumb, exists: r.exists !== false,
+              label: (r.note ? r.note + " · " : "") + grName(r),
+              sub: (r.width && r.height ? r.width + "×" + r.height + " · " : "") + grSize(r.size)
+            };
+          });
+      });
+      function openTryRefPicker() { tryRefPickerOpen.value = true; }
+      function openTrySwapGlobalPicker() { trySwapGlobalPickerOpen.value = true; }
+      function openTrySwapCharPicker() { trySwapCharPickerOpen.value = true; }
+      function onTryRefPickerConfirm(vals) { tryOverride.value.refs = (vals || []).slice(); }
+      function onTrySwapGlobalConfirm(vals) { trySwapGlobal.value = (vals && vals[0]) || null; }
+      function onTrySwapCharConfirm(vals) { trySwapChar.value = (vals && vals[0]) || null; }
+      function onPickerPreview(path, title) { openViewer(path, title); }
+      // 弹窗内删除参考图：复用现有解绑逻辑，但弹窗组件已做两段确认，这里直接删
+      async function onTryRefPickerDelete(it) {
+        try {
+          var res = await apiPost("refs/unbind",
+            { id: tryCharId.value, path: it.path, delete_file: true });
+          var arr = (tryOverride.value.refs || []).filter(function (p) { return p !== it.path; });
+          tryOverride.value.refs = arr;
+          if (tryOverride.value.ref === it.path) { tryOverride.value.ref = ""; }
+          if (trySwapChar.value === it.path) { trySwapChar.value = null; }
+          message.success("已删除参考图" + (res && res.file_deleted ? "（文件已删）" : ""));
+          await refreshAll();
+        } catch (e) { /* 已提示 */ }
+      }
+      // 按路径找可读名（优先全局图备注，其次角色参考图备注，最后文件名）
+      function tryNameOf(path) {
+        var all = (globalRefs.value || []).concat(tryRefs.value || []);
+        for (var i = 0; i < all.length; i++) {
+          if (all[i].path === path) {
+            return (all[i].note ? all[i].note + " · " : "")
+              + String((path || "").split("/").pop() || path);
+          }
+        }
+        return String((path || "").split("/").pop() || path);
       }
       function trySwapPrompt() { return SWAP_INSTRUCTION; }
       function tryHasSource() {
@@ -10985,6 +11181,21 @@
         trySwapGlobal: trySwapGlobal, trySwapChar: trySwapChar,
         trySwapWf: trySwapWf, trySwapDenoise: trySwapDenoise,
         trySwapCharOpts: trySwapCharOpts, tryHasSwapSource: tryHasSwapSource,
+        // v0.58.0：图片选择弹窗
+        tryRefPickerOpen: tryRefPickerOpen,
+        trySwapGlobalPickerOpen: trySwapGlobalPickerOpen,
+        trySwapCharPickerOpen: trySwapCharPickerOpen,
+        tryRefPickerItems: tryRefPickerItems,
+        trySwapGlobalPickerItems: trySwapGlobalPickerItems,
+        openTryRefPicker: openTryRefPicker,
+        openTrySwapGlobalPicker: openTrySwapGlobalPicker,
+        openTrySwapCharPicker: openTrySwapCharPicker,
+        onTryRefPickerConfirm: onTryRefPickerConfirm,
+        onTrySwapGlobalConfirm: onTrySwapGlobalConfirm,
+        onTrySwapCharConfirm: onTrySwapCharConfirm,
+        onPickerPreview: onPickerPreview,
+        onTryRefPickerDelete: onTryRefPickerDelete,
+        tryNameOf: tryNameOf,
         tryMode: tryMode, tryOverride: tryOverride, tryElapsed: tryElapsed,
         tryStep: tryStep, tryTheme: tryTheme, themeOpts: themeOpts,
         tryOutfit: tryOutfit,
@@ -11249,6 +11460,7 @@
   app.use(NS);
   app.component("w-icon-btn", WIconBtn);
   app.component("w-upload-panel", WUploadPanel);
+  app.component("w-image-picker", WImagePicker);
   // 找到桥才挂载；4 秒等不到 = 不是从 Dashboard 插件拓展页打开，整页友好报错
   bridgeReady.then(function (b) {
     bridge = b;
