@@ -1282,12 +1282,19 @@ async def h_global_refs_list(plugin) -> dict:
     for row in plugin._store.list_global_refs():
         rel = str(row.get("file") or "")
         fp = _safe_data_file(plugin, rel)
+        try:
+            size = int(fp.stat().st_size) if fp is not None else 0
+        except OSError:
+            size = 0
         items.append({
             "path": rel, "rel": rel, "exists": fp is not None,
             "thumb": _thumb_cached(fp, 420) if fp is not None else None,
             "sha256": row.get("sha256", ""), "note": row.get("note", ""),
             "width": int(row.get("width") or 0), "height": int(row.get("height") or 0),
             "created_at": row.get("created_at", ""),
+            # v0.56.1：卡片信息展示用——文件大小 / 文件名 / 后缀，实时读盘不入库
+            "size": size, "file_name": Path(rel).name,
+            "ext": Path(rel).suffix.lower().lstrip("."),
         })
     return ok({"items": items, "total": len(items)})
 

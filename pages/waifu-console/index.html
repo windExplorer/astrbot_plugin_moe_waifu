@@ -705,6 +705,15 @@
   .pi-list { max-height: 300px; overflow-y: auto; padding-right: 4px; }
   /* v0.56.0：全局图库备注编辑（普通 div，不用 n-space——v-if 兄弟节点撞 key 老坑） */
   .gr-note-edit { display: flex; gap: 4px; align-items: center; margin-top: 4px; }
+  /* v0.56.1：全局图库卡片信息（小字分层，不用 n-space——v-if 兄弟节点撞 key 老坑） */
+  .gr-card-note { font-size: 12px; line-height: 1.4; min-height: 30px;
+    overflow-wrap: anywhere; cursor: pointer; }
+  .gr-card-note.empty { opacity: .5; font-style: italic; }
+  .gr-card-meta { font-size: 11px; opacity: .78; line-height: 1.5; overflow-wrap: anywhere; }
+  .gr-card-file { font-size: 10px; opacity: .5; overflow-wrap: anywhere; }
+  .gr-detail-grid { display: grid; grid-template-columns: 84px 1fr; gap: 10px 12px; font-size: 13px; }
+  .gr-detail-grid .k { opacity: .6; white-space: nowrap; }
+  .gr-detail-grid .v { overflow-wrap: anywhere; }
   .swap-panel { display: block; }
 </style>
 </head>
@@ -1225,17 +1234,31 @@
                                 @files="onGlobalPanelFiles"></w-upload-panel>
                 <n-alert v-if="globalRefsLoading" type="info" :bordered="false">加载中…</n-alert>
                 <n-grid v-if="globalRefs.length > 0" :cols="5" :x-gap="10" :y-gap="10">
-                  <n-gi v-for="r in globalRefs" :key="r.path">
+                  <n-gi v-for="(r, ri) in globalRefs" :key="r.path">
                     <div class="gal-item">
                       <img v-if="r.thumb" :src="r.thumb" class="clickable-img"
                            alt="全局参考图" title="点击查看大图"
                            @click="openViewer(r.path, '全局参考图')">
                       <div v-else class="gal-meta">文件丢失</div>
-                      <div class="gal-meta" style="overflow-wrap: anywhere;">{{ r.note || (r.width ? r.width + '×' + r.height : (r.path || '').split('/').pop()) }}</div>
+                      <div class="gr-card-note" :class="{ empty: !r.note }"
+                           :title="'第 ' + (ri + 1) + ' 张 · 点这里写备注'"
+                           @click="beginGrNote(r)">
+                        {{ r.note || "＋ 点这里写备注（场景 / 画风 / 适合谁）" }}
+                      </div>
+                      <div class="gr-card-meta" v-if="r.exists">
+                        {{ r.width && r.height ? r.width + ' × ' + r.height + ' ' + grShape(r) : '尺寸未知' }}
+                      </div>
+                      <div class="gr-card-meta" v-if="r.exists">
+                        {{ grSize(r.size) }} · {{ (r.ext || 'img').toUpperCase() }} · {{ fmtTime(r.created_at) }}
+                      </div>
+                      <div class="gr-card-file" :title="r.path">{{ grName(r) }}</div>
                       <div class="gal-ops">
                         <w-icon-btn icon="edit" size="tiny"
                                     :tip="'备注：' + (r.note || '未填')"
                                     @click="beginGrNote(r)"></w-icon-btn>
+                        <w-icon-btn icon="info" size="tiny"
+                                    tip="查看完整信息（路径 / sha256 / 尺寸等）"
+                                    @click="openGrDetail(r)"></w-icon-btn>
                         <w-icon-btn icon="trash" size="tiny" type="error"
                                     :armed="grDeleteArm === r.path"
                                     :tip="grDeleteArm === r.path ? '再点一次确认删除' : '删除全局参考图'"
@@ -1252,6 +1275,39 @@
                 <n-empty v-else description="全局图库还是空的：上传几张精美图，就能在角色替换里当画布"></n-empty>
               </n-space>
             </n-card>
+            <!-- v0.56.1：单张完整信息（卡片放不下的路径 / sha256 / 添加时间等） -->
+            <n-modal v-model:show="grDetailOpen" preset="dialog" title="全局参考图 · 完整信息"
+                     style="width: 560px;">
+              <div v-if="grDetail" class="gr-detail-grid">
+                <div class="k">备注</div>
+                <div class="v">{{ grDetail.note || "未填（点卡片上的备注可编辑）" }}</div>
+                <div class="k">预览</div>
+                <div class="v">
+                  <img v-if="grDetail.thumb" :src="grDetail.thumb" alt="预览"
+                       style="max-width: 100%; max-height: 220px; border-radius: 6px;">
+                  <span v-else>文件已丢失</span>
+                </div>
+                <div class="k">尺寸</div>
+                <div class="v">{{ grDetail.width && grDetail.height
+                  ? grDetail.width + ' × ' + grDetail.height + ' ' + grShape(grDetail)
+                  : '未知' }}</div>
+                <div class="k">文件</div>
+                <div class="v">{{ grName(grDetail) }} · {{ grSize(grDetail.size) }} ·
+                  {{ (grDetail.ext || 'img').toUpperCase() }}</div>
+                <div class="k">添加时间</div>
+                <div class="v">{{ fmtTime(grDetail.created_at) }}</div>
+                <div class="k">相对路径</div>
+                <div class="v">{{ grDetail.path }}</div>
+                <div class="k">内容标识</div>
+                <div class="v">sha256:{{ grDetail.sha256 || '—' }}</div>
+                <div class="k">用途</div>
+                <div class="v">角色替换时作为「画布 · 图1」；在试画台 / 角色详情的
+                  「角色替换」模式里选择它。</div>
+              </div>
+              <template #action>
+                <n-button size="small" type="primary" @click="grDetailOpen = false">关闭</n-button>
+              </template>
+            </n-modal>
           </div>
 
           <!-- ============ 试画台（v0.5.9 三步流：选角色 → 确认提示词 → 生成） ============ -->
@@ -5084,6 +5140,24 @@
       var grDeleteArm = Vue.ref("");         // 两段确认：当前待删 path
       var grNoteEdit = Vue.ref("");          // 正在编辑备注的 path
       var grNoteText = Vue.ref("");
+      var grDetailOpen = Vue.ref(false);     // v0.56.1：详情弹窗
+      var grDetail = Vue.ref(null);
+      function openGrDetail(r) { grDetail.value = r; grDetailOpen.value = true; }
+      function grSize(n) {
+        var b = Number(n || 0);
+        if (b < 1024) { return b + " B"; }
+        if (b < 1024 * 1024) { return (b / 1024).toFixed(1) + " KB"; }
+        return (b / 1024 / 1024).toFixed(2) + " MB";
+      }
+      function grShape(r) {
+        var w = Number(r && r.width || 0), h = Number(r && r.height || 0);
+        if (!w || !h) { return ""; }
+        var ratio = w / h;
+        return ratio > 1.05 ? "· 横版" : (ratio < 0.95 ? "· 竖版" : "· 方图");
+      }
+      function grName(r) {
+        return String((r && r.path || "").split("/").pop() || (r && r.path || ""));
+      }
       var globalRefOpts = Vue.computed(function () {
         return (globalRefs.value || []).filter(function (r) { return r.exists !== false; })
           .map(function (r) {
@@ -10884,6 +10958,8 @@
         grNoteEdit: grNoteEdit, grNoteText: grNoteText,
         saveGlobalRefNote: saveGlobalRefNote, beginGrNote: beginGrNote,
         deleteGlobalRef: deleteGlobalRef,
+        grDetailOpen: grDetailOpen, grDetail: grDetail, openGrDetail: openGrDetail,
+        grSize: grSize, grShape: grShape, grName: grName,
         trySwapGlobal: trySwapGlobal, trySwapChar: trySwapChar,
         trySwapWf: trySwapWf, trySwapDenoise: trySwapDenoise,
         trySwapCharOpts: trySwapCharOpts, tryHasSwapSource: tryHasSwapSource,
