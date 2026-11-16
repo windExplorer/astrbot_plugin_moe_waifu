@@ -29,7 +29,28 @@ except Exception:  # pragma: no cover - 本地平铺调试
 
     logger = logging.getLogger("moe_waifu")
 
+# v0.59.0：头像生成边长（可配置，默认 1024）。旧版固定 512 是「竖图裁方后归一」的
+# 存储尺寸；现在生成阶段直接按方形出图，边长跟随配置。crop_square 仍保留 512 默认
+# 供「手动上传/从立绘裁取」路径用（那些是已有图，不是生成）。
 AVATAR_SIDE = 512
+DEFAULT_AVATAR_GEN_SIZE = 1024
+
+
+def avatar_gen_size(cfg: dict) -> int:
+    """读头像生成边长配置，非法值回落 1024，并对齐到 16 的倍数（latent 习惯）。
+
+    配置键 `avatar_size` 与 `_conf_schema.json` / 前端「萌绘生图」分区一致。
+    允许 256~2048（头像太小糊、太大慢），非 16 步长按四舍五入对齐。
+    """
+    try:
+        v = int((cfg or {}).get("avatar_size", DEFAULT_AVATAR_GEN_SIZE))
+    except (TypeError, ValueError):
+        v = DEFAULT_AVATAR_GEN_SIZE
+    if v < 256 or v > 2048:
+        v = DEFAULT_AVATAR_GEN_SIZE
+    return max(256, min(2048, int(round(v / 16.0)) * 16))
+
+
 # 竖版图裁剪的顶部偏移比例（正方形上沿 = 高度差 × 该比例）。
 # 头像特写类产物脸就在上半部，偏移取小；全身立绘的脸在 10%~40% 区间，
 # 6% 偏移 + 整宽窗口能把头+肩都装进去。
@@ -77,6 +98,40 @@ def crop_square(src, dst) -> tuple:
         dst.parent.mkdir(parents=True, exist_ok=True)
         sq.save(str(dst), format="PNG")
     return (AVATAR_SIDE, AVATAR_SIDE)
+
+
+def finalize_avatar(src, dst, side: int) -> tuple:
+    """生成头像落盘（v0.59.0）：目标是「直接按方形出图」，不再默认竖图裁方。
+
+    - 产物已是正方形：只缩放到 ``side``（同尺寸直接存），**不裁剪**——保住工作流
+      按请求出的方形构图（脸的居中/占比由提示词控制，不该再被二次裁切）。
+    - 产物非正方形（工作流忽略了 width/height，仍按参考图/竖版出图）：回退到
+      ``crop_square`` 的偏上裁方保脸，再归一到 side。是兜底，不再是主路径。
+    返回 (side, side)。
+    """
+    from PIL import Image
+
+    target = max(256, min(2048, int(side)))
+    with Image.open(str(src)) as im:
+        im = im.convert("RGBA")
+        w, h = im.size
+        if w == h:
+            sq = im if w == target else im.resize((target, target), Image.LANCZOS)
+        else:
+            side0 = min(w, h)
+            if h > w:
+                y0 = min(max(0, int((h - side0) * _TOP_RATIO)), h - side0)
+                box = (0, y0, w, y0 + side0)
+            else:
+                x0 = (w - side0) // 2
+                box = (x0, 0, x0 + side0, h)
+            sq = im.crop(box)
+            if sq.width != target or sq.height != target:
+                sq = sq.resize((target, target), Image.LANCZOS)
+        dst = Path(dst)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        sq.save(str(dst), format="PNG")
+    return (target, target)
 
 
 def build_avatar_prompt(entry: dict, style: str) -> str:

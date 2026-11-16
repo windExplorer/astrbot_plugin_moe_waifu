@@ -5805,6 +5805,11 @@ async def generate_avatar_for(plugin, entry: dict, workflow: str = "",
     if not cid:
         raise RuntimeError("条目缺 id")
     cfg = plugin._draw_cfg()
+    # v0.59.0：头像直接按方形出图（不再竖图生成后裁方）。读 avatar_size 配置，
+    # 文生图覆盖 draw_width/draw_height；图生图靠下面 effective_entry 的 width/height。
+    avatar_side = avatars.avatar_gen_size(cfg)
+    cfg["draw_width"] = avatar_side
+    cfg["draw_height"] = avatar_side
     data_dir = str(plugin._data_dir or "")
     want_i2i = str(mode or "").strip().lower() == "i2i"
     want_t2i = str(mode or "").strip().lower() == "t2i"
@@ -5825,7 +5830,8 @@ async def generate_avatar_for(plugin, entry: dict, workflow: str = "",
                 gen.insert(0, fallback)
         if gen:
             use_entry = draw.effective_entry(
-                entry, {"strategy_type": "img2img", "ref": gen[0], "refs": gen})
+                entry, {"strategy_type": "img2img", "ref": gen[0], "refs": gen,
+                        "width": avatar_side, "height": avatar_side})
             prompt = avatars.I2I_INSTRUCTION
         elif want_i2i:
             raise RuntimeError(
@@ -5855,7 +5861,9 @@ async def generate_avatar_for(plugin, entry: dict, workflow: str = "",
         rel = (f"{avatars.AVATAR_DIR}/_pending_"
                f"{avatars.safe_avatar_name(cid)}_{stamp}.png")
         dst = Path(plugin._data_dir) / rel
-    w, h = avatars.crop_square(src, dst)
+    # v0.59.0：方形产物直接缩放落盘（不裁）；工作流若忽略尺寸仍按参考图出竖图，
+    # finalize_avatar 会回退偏上裁方保脸，两种口径都归一到 avatar_side。
+    w, h = avatars.finalize_avatar(src, dst, avatar_side)
     if apply:
         def mutate(_e, raw):
             raw["avatar"] = rel

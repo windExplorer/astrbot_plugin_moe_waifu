@@ -1670,7 +1670,7 @@
                                 :tip="delArm === 'avatar:' + galCharId ? '再点一次确认移除' : '移除头像'"
                                 @click="avatarClear">移除头像</n-button>
                     </n-space>
-                    <div class="bind-tip">「AI 生成头像」会打开设置弹窗：默认图生图并使用主参考图，也可切换文生图；结果先预览，由你决定是否替换当前头像（统一裁成 512×512 方形）。生成期间不能重复提交。</div>
+                    <div class="bind-tip">「AI 生成头像」会打开设置弹窗：默认图生图并使用主参考图，也可切换文生图；结果先预览，由你决定是否替换当前头像（直接生成正方形，边长见配置「头像生成边长」，默认 1024×1024）。生成期间不能重复提交。</div>
                   </div>
                 </div>
               </n-card>
@@ -4036,7 +4036,7 @@
                 <img :src="avatarGenResult.thumb" alt="生成结果"><figcaption>本次生成</figcaption>
               </figure>
             </div>
-            <div class="bind-tip" style="margin-top:0;">{{ avatarGenResult.mode === "i2i" ? "图生图" : "文生图" }} · 512×512 方形</div>
+            <div class="bind-tip" style="margin-top:0;">{{ avatarGenResult.mode === "i2i" ? "图生图" : "文生图" }} · {{ avatarGenResult.w || 1024 }}×{{ avatarGenResult.h || 1024 }} 方形</div>
             <div class="av-mode-row">
               <n-button size="small" type="primary" :loading="avatarGenApplying"
                         @click="applyAvatarResult">替换当前头像</n-button>
@@ -9026,7 +9026,9 @@
             avatarGenResult.value = {
               thumb: (st && st.thumb) || "",
               file: (st && (st.pending || st.avatar)) || "",
-              mode: mode
+              mode: mode,
+              // v0.59.0：直接生成正方形，展示实际边长（配置 avatar_size）
+              w: (st && st.width) || 0, h: (st && st.height) || 0
             };
             message.success("头像已生成，请在弹窗里决定是否替换");
           }, function (why) {
@@ -10838,7 +10840,8 @@
         { title: "萌绘生图", keys: ["gen_source_mode", "img2img_prob", "artist_draw_enabled", "draw_workflow", "img2img_workflow",
                                     "draw_width", "draw_height", "draw_timeout", "img2img_denoise",
                                     "draw_negative_enabled", "draw_negative_prompt", "announce_enabled",
-                                    "batch_art_every", "batch_require_ref", "avatar_batch_overwrite"] },
+                                    "batch_art_every", "batch_require_ref", "avatar_batch_overwrite",
+                                    "avatar_size"] },
         { title: "提示词与变化", keys: ["prompt_llm_enabled", "prompt_llm_provider",
                                         "prompt_llm_timeout", "variations_enabled"] }
       ];

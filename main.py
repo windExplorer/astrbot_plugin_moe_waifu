@@ -239,6 +239,8 @@ class MoeWaifuPlugin(Star):
             "draw_negative_prompt": self._cfg("draw_negative_prompt", ""),
             "img2img_workflow": self._cfg("img2img_workflow", ""),
             "img2img_denoise": self._cfg("img2img_denoise", 0.65),
+            # v0.59.0：头像生成边长（方形直出，默认 1024）
+            "avatar_size": self._cfg("avatar_size", 1024),
             "prompt_llm_enabled": self._cfg("prompt_llm_enabled", True),
             "prompt_llm_provider": self._cfg("prompt_llm_provider", ""),
             "prompt_llm_timeout": self._cfg("prompt_llm_timeout", 30),

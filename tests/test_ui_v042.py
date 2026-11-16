@@ -142,8 +142,12 @@ with tempfile.TemporaryDirectory() as td2:
     async def fake_gen(context, cfg, entry, seed, event, prompt=""):
         seen["entry"] = entry
         seen["prompt"] = prompt
+        seen["cfg"] = cfg
         src = td2 / "fake_out.png"
-        Image.new("RGB", (700, 1200), (200, 120, 180)).save(src)
+        # v0.59.0：头像按方形直出；桩按 cfg 尺寸造图，验证方形请求能贯穿到落盘
+        sw = int(cfg.get("draw_width", 1024))
+        sh = int(cfg.get("draw_height", 1024))
+        Image.new("RGB", (sw, sh), (200, 120, 180)).save(src)
         return str(src), "ok", "", 0
 
     draw_mod.generate_portrait = fake_gen
@@ -161,8 +165,14 @@ with tempfile.TemporaryDirectory() as td2:
         check("apply=False 只落候选、不覆盖正式头像",
               rel.startswith("avatars/_pending_")
               and (td2 / rel).is_file()
-              and not (td2 / "avatars" / "c1.png").exists()
-              and (w, h) == (512, 512))
+              and not (td2 / "avatars" / "c1.png").exists())
+        # v0.59.0：头像按配置方形直出（默认 1024），不再竖图裁 512
+        check("头像按方形尺寸直出（默认 1024×1024，不裁）",
+              (w, h) == (1024, 1024)
+              and seen["cfg"]["draw_width"] == 1024
+              and seen["cfg"]["draw_height"] == 1024
+              and seen["entry"]["strategy"].get("width") == 1024
+              and seen["entry"]["strategy"].get("height") == 1024)
 
         entry2 = {"id": "c2", "name": "D", "tags_en": "cat ears",
                   "strategy_type": "img2img",
