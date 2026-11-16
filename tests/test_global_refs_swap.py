@@ -71,6 +71,16 @@ def main():
     check("编辑指令用 <image1> 画布 + <image2> 身份",
           "<image1>" in page and "<image2>" in page
           and "画布" in page and "身份" in page)
+    # v0.60.1：表情/神态必须跟随 <image2>。v0.56 原指令写「除人物身份外不做任何
+    # 其它改动」+「姿势一律不改」，模型把表情归进画布侧保留 → 换脸不换表情。
+    swap_inst = re.search(r'var SWAP_INSTRUCTION = "(.*?)";', page, re.S)
+    inst = swap_inst.group(1) if swap_inst else ""
+    check("编辑指令含表情跟随 image2 的明确措辞",
+          "表情" in inst and "神态" in inst and "<image2>" in inst
+          and "不要用 <image1> 的表情" in inst, inst)
+    check("编辑指令不用「除人物身份外不做任何其它改动」压制表情",
+          "除人物身份外不做任何其它改动" not in inst
+          and "除人物身份与表情外" in inst, inst)
     check("试画台 swap 提示词走固定指令",
           "tryPrompt.value = trySwapPrompt()" in page)
     check("角色详情 swap 提示词走固定指令",
