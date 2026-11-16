@@ -932,7 +932,11 @@ def _rewrite_path_refs(plugin, old: str, new: str) -> int:
 
 
 def _path_is_referenced(plugin, rel: str) -> bool:
-    """该路径是否仍被任何角色条目 / 作品封面引用（只读探测，不写回）。"""
+    """该路径是否仍被任何角色条目 / 作品封面引用（只读探测，不写回）。
+
+    v0.65.0：`strategy.refs_disabled`（已停用参考图）也算引用——图只是停用，
+    绑定还在，别处不能把它当孤儿 / 无引用文件清掉。
+    """
     target = _norm_ref(plugin, rel)
     found = False
 
@@ -940,7 +944,8 @@ def _path_is_referenced(plugin, rel: str) -> bool:
         nonlocal found
         st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
         vals = [st.get("ref"), st.get("draw_ref"), raw.get("cover")]
-        vals += list(st.get("refs") or []) if isinstance(st.get("refs"), list) else []
+        for key in ("refs", "refs_disabled"):
+            vals += list(st.get(key) or []) if isinstance(st.get(key), list) else []
         if any(_norm_ref(plugin, v) == target for v in vals):
             found = True
         return False
@@ -1805,7 +1810,11 @@ async def h_works_set_cover(plugin) -> dict:
 
 
 async def h_refs_list(plugin) -> dict:
-    """某角色的参考图库：strategy.refs 列表 + 主参考（strategy.ref）。"""
+    """某角色的参考图库：strategy.refs 列表 + 主参考（strategy.ref）。
+
+    v0.65.0：`refs_disabled`（已停用参考图）一并返回 —— `items` 仍只含启用中
+    的（抽屉 / 试画台等选图面自动不见停用图），停用清单走 `items_disabled`。
+    """
     body = await _body()
     cid = str(body.get("id") or _q("id", "") or "").strip()
     if not cid:
@@ -1814,26 +1823,35 @@ async def h_refs_list(plugin) -> dict:
     if entry is None:
         return err(f"角色库里找不到「{cid}」")
     st = entry.get("strategy") or {}
+
+    def build(paths) -> list:
+        items = []
+        for p in paths:
+            p = str(p or "").strip()
+            if not p:
+                continue
+            fp = _safe_data_file(plugin, p)
+            # 缩略 420（v0.6.2）：旧值 120 在参考图墙上放大约 2.5 倍，糊到没法看
+            items.append({
+                "path": p, "exists": fp is not None,
+                "thumb": _thumb_cached(fp, 420) if fp is not None else None,
+            })
+        return items
+
     refs = st.get("refs") if isinstance(st.get("refs"), list) else []
-    items = []
-    for p in refs:
-        p = str(p or "").strip()
-        if not p:
-            continue
-        fp = _safe_data_file(plugin, p)
-        # 缩略 420（v0.6.2）：旧值 120 在参考图墙上放大约 2.5 倍，糊到没法看
-        items.append({
-            "path": p, "exists": fp is not None,
-            "thumb": _thumb_cached(fp, 420) if fp is not None else None,
-        })
+    refs_dis = (st.get("refs_disabled")
+                if isinstance(st.get("refs_disabled"), list) else [])
+    items = build(refs)
+    items_disabled = build(refs_dis)
     # v0.20.0：生成信息随图返回（试画转入 / 立绘转入时有，手动上传为 null）
     metas = {}
-    if plugin._store and items:
+    if plugin._store and (items or items_disabled):
         try:
-            metas = plugin._store.get_ref_meta([it["path"] for it in items])
+            metas = plugin._store.get_ref_meta(
+                [it["path"] for it in items + items_disabled])
         except Exception:
             metas = {}
-    for it in items:
+    for it in items + items_disabled:
         m = metas.get(it["path"])
         it["meta"] = dict(m) if m else None
     # draw_ref 存的是归一后的相对路径；立绘卡用绝对路径比较，所以再给一份
@@ -1846,7 +1864,7 @@ async def h_refs_list(plugin) -> dict:
         else:
             fp = _safe_data_file(plugin, draw_raw)
             draw_abs = str(fp) if fp is not None else ""
-    return ok({"id": cid, "items": items,
+    return ok({"id": cid, "items": items, "items_disabled": items_disabled,
                "designated": str(st.get("ref") or ""),
                "draw_ref": draw_raw, "draw_ref_abs": draw_abs})
 
@@ -1897,7 +1915,10 @@ def _orphan_items(plugin) -> list:
     def probe(raw):
         st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
         vals = [st.get("ref"), st.get("draw_ref"), raw.get("cover")]
-        vals += list(st.get("refs") or []) if isinstance(st.get("refs"), list) else []
+        # v0.65.0：已停用参考图（refs_disabled）绑定还在，不能算孤儿——
+        # 否则停用一张，它会出现在「未绑定图片」里被二次物理删除。
+        for key in ("refs", "refs_disabled"):
+            vals += list(st.get(key) or []) if isinstance(st.get(key), list) else []
         for v in vals:
             n = _norm_ref(plugin, v)
             if n:
@@ -2039,6 +2060,174 @@ async def h_refs_unbind(plugin) -> dict:
                 removed_file = moved > 0
     return ok({"id": cid, "removed": path, "file_deleted": removed_file,
                "file_skipped": skipped})
+
+
+# ---------- 参考图停用 / 启用（v0.65.0：与立绘同款软删除口径） ----------
+# 旧「移除绑定」是硬语义：绑定一摘，图就从库面上消失（变成孤儿文件），
+# 试画台还带 delete_file 直接进回收站。用户口径改成与立绘一致：
+#   删除 = 停用（strategy.refs → refs_disabled，文件与绑定都保留，可恢复）；
+#   停用列表里才能「启用」（回到备选）与「彻底删除」（摘绑定 + 文件进回收站）。
+# refs_disabled 存在条目 strategy JSON 里——编辑表单 merge 只更新提交的键，
+# 该字段天然不会被「改个名字保存」冲掉（pool.merge_saved_entry）。
+
+def _disable_ref_core(plugin, cid: str, path: str) -> dict:
+    """停用参考图（软删除）。主参考 / 出卡源指向它时一并清空（与解绑同处理，
+    避免停用图仍被抽卡 / 图生图引用）。"""
+    norm = _norm_ref(plugin, path)
+    if not norm:
+        raise ValueError("路径无法归一化")
+
+    def mutate(e, raw):
+        st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
+        refs = [str(x) for x in (st.get("refs") or []) if str(x or "").strip()]
+        rest = [x for x in refs if _norm_ref(plugin, x) != norm]
+        if len(rest) == len(refs):
+            raise ValueError("这张图不在该角色的参考图库里")
+        dis = [str(x) for x in (st.get("refs_disabled") or [])
+               if str(x or "").strip()]
+        if norm not in [_norm_ref(plugin, x) for x in dis]:
+            dis.append(norm)
+        st["refs"] = rest
+        st["refs_disabled"] = dis
+        if _norm_ref(plugin, st.get("ref")) == norm:
+            st["ref"] = ""
+        if _norm_ref(plugin, st.get("draw_ref")) == norm:
+            st["draw_ref"] = ""
+        raw["strategy"] = st
+
+    pack_name = _set_entry_field(plugin, cid, mutate)
+    if pack_name is None:
+        raise ValueError(f"角色库里找不到 {cid}")
+    return {"id": cid, "disabled": norm, "pack": pack_name}
+
+
+def _enable_ref_core(plugin, cid: str, path: str) -> dict:
+    """恢复停用的参考图：refs_disabled → refs（回到备选，不自动还原主参考）。"""
+    norm = _norm_ref(plugin, path)
+    if not norm:
+        raise ValueError("路径无法归一化")
+
+    def mutate(e, raw):
+        st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
+        dis = [str(x) for x in (st.get("refs_disabled") or [])
+               if str(x or "").strip()]
+        rest = [x for x in dis if _norm_ref(plugin, x) != norm]
+        if len(rest) == len(dis):
+            raise ValueError("这张图不在该角色的已停用参考图里")
+        refs = [str(x) for x in (st.get("refs") or []) if str(x or "").strip()]
+        if norm not in [_norm_ref(plugin, x) for x in refs]:
+            refs.append(norm)
+        st["refs"] = refs
+        st["refs_disabled"] = rest
+        raw["strategy"] = st
+
+    pack_name = _set_entry_field(plugin, cid, mutate)
+    if pack_name is None:
+        raise ValueError(f"角色库里找不到 {cid}")
+    return {"id": cid, "enabled": norm, "pack": pack_name}
+
+
+def _delete_ref_hard_core(plugin, cid: str, path: str) -> dict:
+    """彻底删除已停用的参考图：先摘掉 refs_disabled 绑定，再把文件移入回收站。
+
+    与立绘彻底删除同口径：只对已停用的开放；摘完绑定后仍被其他角色 / 作品
+    封面引用时文件保留（v0.9.10 共用图守卫），只摘本角色的绑定。回收站 meta
+    记 char_id，回收站清单能显示归属；还原只是文件搬回 refs/（变孤儿，
+    工坊「未绑定图片」可重新绑定），与解绑后删除的还原路径一致。
+    """
+    norm = _norm_ref(plugin, path)
+    if not norm:
+        raise ValueError("路径无法归一化")
+
+    def mutate(e, raw):
+        st = raw.get("strategy") if isinstance(raw.get("strategy"), dict) else {}
+        dis = [str(x) for x in (st.get("refs_disabled") or [])
+               if str(x or "").strip()]
+        rest = [x for x in dis if _norm_ref(plugin, x) != norm]
+        if len(rest) == len(dis):
+            raise ValueError("只有已停用的参考图才能彻底删除：请先停用")
+        st["refs_disabled"] = rest
+        raw["strategy"] = st
+
+    pack_name = _set_entry_field(plugin, cid, mutate)
+    if pack_name is None:
+        raise ValueError(f"角色库里找不到 {cid}")
+
+    fp = _safe_data_file(plugin, path)
+    skipped = ""
+    moved, trash_dir = 0, ""
+    if fp is None:
+        skipped = "文件本就不存在（只摘了停用绑定）"
+    else:
+        try:
+            rel_s = fp.resolve().relative_to(
+                Path(plugin._data_dir).resolve()).as_posix()
+        except Exception:
+            rel_s = ""
+        if rel_s.startswith("portraits/"):
+            skipped = "立绘文件请到「立绘」页删除（会进回收站）"
+        elif _path_is_referenced(plugin, norm):
+            skipped = ("这张图仍被其他角色或作品封面引用，文件保留"
+                       "（只摘了本角色的停用绑定）")
+        else:
+            meta = {rel_s: {"char_id": cid, "kind": "ref"}} if rel_s else None
+            moved, trash_dir = _trash_files(plugin, [path], meta=meta)
+    return {"id": cid, "deleted": norm, "file_deleted": bool(moved),
+            "file_skipped": skipped, "trash": trash_dir}
+
+
+async def h_refs_disable(plugin) -> dict:
+    """停用参考图（软删除，v0.65.0）：refs → refs_disabled，可恢复。"""
+    body = await _body()
+    cid = str(body.get("id") or "").strip()
+    path = str(body.get("path") or "").strip()
+    if not cid or not path:
+        return err("缺少 id 或 path")
+    try:
+        res = await asyncio.to_thread(_disable_ref_core, plugin, cid, path)
+    except ValueError as exc:
+        return err(str(exc))
+    except Exception as exc:
+        logger.warning(f"[{PLUGIN_NAME}] 停用参考图失败\n{traceback.format_exc()}")
+        return err(f"停用失败：{exc}")
+    return ok(res)
+
+
+async def h_refs_enable(plugin) -> dict:
+    """恢复停用的参考图（v0.65.0）：refs_disabled → refs。"""
+    body = await _body()
+    cid = str(body.get("id") or "").strip()
+    path = str(body.get("path") or "").strip()
+    if not cid or not path:
+        return err("缺少 id 或 path")
+    try:
+        res = await asyncio.to_thread(_enable_ref_core, plugin, cid, path)
+    except ValueError as exc:
+        return err(str(exc))
+    except Exception as exc:
+        logger.warning(f"[{PLUGIN_NAME}] 恢复参考图失败\n{traceback.format_exc()}")
+        return err(f"恢复失败：{exc}")
+    return ok(res)
+
+
+async def h_refs_delete_hard(plugin) -> dict:
+    """彻底删除已停用的参考图（v0.65.0）：摘停用绑定 + 文件进回收站。
+    confirm 强校验对齐立绘彻底删除与调试区危险操作口径。"""
+    body = await _body()
+    if not body.get("confirm"):
+        return err("缺少 confirm=true（彻底删除是不可逆操作）")
+    cid = str(body.get("id") or "").strip()
+    path = str(body.get("path") or "").strip()
+    if not cid or not path:
+        return err("缺少 id 或 path")
+    try:
+        res = await asyncio.to_thread(_delete_ref_hard_core, plugin, cid, path)
+    except ValueError as exc:
+        return err(str(exc))
+    except Exception as exc:
+        logger.warning(f"[{PLUGIN_NAME}] 彻底删除参考图失败\n{traceback.format_exc()}")
+        return err(f"彻底删除失败：{exc}")
+    return ok(res)
 
 
 async def h_image_data(plugin) -> dict:
@@ -6242,6 +6431,10 @@ def register(plugin) -> None:
         ("/image/data", h_image_data, ["GET", "POST"]),
         ("/refs/bind", h_refs_bind, ["POST"]),
         ("/refs/unbind", h_refs_unbind, ["POST"]),
+        # v0.65.0：参考图软删除（与立绘同款停用 / 启用口径）
+        ("/refs/disable", h_refs_disable, ["POST"]),
+        ("/refs/enable", h_refs_enable, ["POST"]),
+        ("/refs/delete_hard", h_refs_delete_hard, ["POST"]),
         ("/pools/set_cover", h_set_cover, ["POST"]),
         ("/works/set_cover", h_works_set_cover, ["POST"]),
         ("/jobs/start", h_job_start, ["POST"]),

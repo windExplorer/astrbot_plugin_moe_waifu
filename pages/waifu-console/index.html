@@ -2145,7 +2145,7 @@
             <!-- 参考图区 -->
             <div v-else-if="galTab === 'refs'">
               <div class="sec-title">参考图
-                <span class="cnt">{{ galRefs.length }} 张{{ galMainRef ? " · 主参考已指定" : "" }}{{ galDrawRef ? " · 出卡源已指定" : " · 未指定出卡源（抽卡不会走图生图）" }} · 与立绘库互斥，可双向转移</span>
+                <span class="cnt">{{ galRefs.length }} 张{{ galRefsDisabled.length ? " · 已停用 " + galRefsDisabled.length : "" }}{{ galMainRef ? " · 主参考已指定" : "" }}{{ galDrawRef ? " · 出卡源已指定" : " · 未指定出卡源（抽卡不会走图生图）" }} · 与立绘库互斥，可双向转移</span>
                 <!-- v0.6.2：上传改弹窗（可拖拽可多选），不再是一颗孤零零的小按钮 -->
                 <n-button size="tiny" type="primary" secondary @click="galUploadOpen = true">上传</n-button>
               </div>
@@ -2153,6 +2153,8 @@
                 卡片右上角的<b>靶心</b>按钮 = 设为「出卡图生图源」（单张，/今日老婆 专用，再点一次取消）；
                 「生成立绘 → 图生图重绘」面板里点图才是「本次生成源」（可多选，供 Qwen 2.1 等多图工作流）。
                 参考图列表只是资料库，没指定出卡源时抽卡不会取用。
+                <b>删除 = 停用</b>（软删除：文件与绑定保留、不参与生成，可随时恢复，见下方「已停用参考图」）；
+                只有已停用的图才提供彻底删除（文件进回收站）。
               </div>
               <div v-if="galSwitching">
                 <div class="gal-loading">
@@ -2192,10 +2194,12 @@
                                   :tip="delArm === 'ref2port:' + r.path
                                         ? '再点一次确认转回立绘' : '转回立绘（从参考图库移走）'"
                                   @click.stop="moveRefToPortrait(r)"></w-icon-btn>
+                      <!-- v0.65.0：删除改软删除（停用），彻底删除只在已停用区开放 -->
                       <w-icon-btn icon="trash" size="tiny" type="error"
-                                  :armed="delArm === 'galref:' + r.path"
-                                  :tip="delArm === 'galref:' + r.path ? '再点一次确认移除' : '移除绑定'"
-                                  @click.stop="unbindGalRef(r)"></w-icon-btn>
+                                  :armed="delArm === 'galrefoff:' + r.path"
+                                  :tip="delArm === 'galrefoff:' + r.path
+                                        ? '再点一次确认停用' : '停用（软删除：不参与生成，文件与绑定保留，可随时恢复）'"
+                                  @click.stop="disableGalRef(r)"></w-icon-btn>
                     </div>
                     <div class="gal-meta">
                       {{ galMainRef === r.path ? "主参考" : "备选" }}{{ galDrawRef === r.path ? " · 出卡源" : "" }}{{ r.meta && r.meta.duration_ms > 0 ? " · 耗时 " + fmtDur(r.meta.duration_ms) : "" }}
@@ -2203,9 +2207,39 @@
                   </div>
                 </n-gi>
               </n-grid>
-              <div v-else class="dropzone" style="padding: 18px; text-align: center;">
+              <div v-else-if="galRefsDisabled.length === 0" class="dropzone" style="padding: 18px; text-align: center;">
                 <span class="bind-tip" style="margin-top: 0;">还没有绑定参考图：点「上传」或把图片直接拖进页面，会自动绑定到该角色</span>
               </div>
+              <!-- v0.65.0：已停用参考图（软删除，与立绘停用同口径）——置灰只读，
+                   只提供恢复启用与彻底删除（文件进回收站）；不参与任何生成 -->
+              <template v-if="galRefsDisabled.length > 0">
+                <div class="sec-title" style="margin-top: 14px;">已停用参考图
+                  <span class="cnt">{{ galRefsDisabled.length }} 张 · 停用 = 软删除（不参与生成，文件与绑定保留）；垃圾桶 = 彻底删除（文件进回收站，仅共用图被别人引用时文件保留）</span>
+                </div>
+                <n-grid :cols="6" :x-gap="8" :y-gap="8" style="margin-top: 8px;">
+                  <n-gi v-for="r in galRefsDisabled" :key="'off:' + r.path">
+                    <div class="gal-item is-disabled">
+                      <img v-if="r.thumb" :src="r.thumb" class="clickable-img"
+                           title="点击查看大图" alt="已停用参考图"
+                           @click.stop="openViewer(r.path, '参考图（已停用）')">
+                      <div v-else class="gal-meta">文件丢失</div>
+                      <div class="gal-ops">
+                        <w-icon-btn icon="refresh" size="tiny" type="success"
+                                    tip="恢复启用（回到备选参考图）"
+                                    @click.stop="enableGalRef(r)"></w-icon-btn>
+                        <w-icon-btn icon="trash" size="tiny" type="error"
+                                    :armed="delArm === 'galrefhard:' + r.path"
+                                    :tip="delArm === 'galrefhard:' + r.path
+                                          ? '再点一次确认彻底删除' : '彻底删除（摘停用绑定 + 文件进回收站）'"
+                                    @click.stop="deleteGalRefHard(r)"></w-icon-btn>
+                      </div>
+                      <div class="gal-meta">
+                        已停用{{ r.meta && r.meta.duration_ms > 0 ? " · 耗时 " + fmtDur(r.meta.duration_ms) : "" }}
+                      </div>
+                    </div>
+                  </n-gi>
+                </n-grid>
+              </template>
               <!-- v0.9.10：找回因编辑保存丢失绑定的孤儿图片（文件其实还在 data/refs/）
                    v0.12.7：默认折叠，并可物理删除（仍被引用的图后端会拒绝） -->
               <div v-if="galOrphans.length > 0" class="fold-bar"
@@ -6952,6 +6986,7 @@
       var galLoadSeq = 0;
       function clearGalRefsState() {
         galRefs.value = []; galMainRef.value = "";
+        galRefsDisabled.value = [];   // v0.65.0：停用清单一并清
         galDrawRef.value = ""; galDrawRefAbs.value = "";
         galSrcAutoPicked = "";   // 换角色/清空后重新交给自动选源
       }
@@ -7200,6 +7235,8 @@
       var galRefs = Vue.ref([]);
       var galRefsLoading = Vue.ref(false);
       var galMainRef = Vue.ref("");
+      // v0.65.0：已停用参考图（软删除，与立绘同口径）——refs/list 的 items_disabled
+      var galRefsDisabled = Vue.ref([]);
       // v0.43.1：记录「当前生成源是自动填的哪一张」。立绘列表与参考图是并行
       // 加载的（loadGallery 里 Promise.all），立绘索引通常先返回，自动选源会
       // 先塞一张立绘进去；若把「已有值」当成用户选择，参考图到齐后永远不纠正
@@ -7219,6 +7256,8 @@
           if (seq !== galLoadSeq) { return; }   // 期间已切走：丢弃过期响应
           // v0.12.0：后上传的排最前（strategy.refs 本身顺序不变，只影响展示）
           galRefs.value = ((res && res.items) || []).slice().reverse();
+          // v0.65.0：已停用参考图（软删除），同样后停用的排最前
+          galRefsDisabled.value = ((res && res.items_disabled) || []).slice().reverse();
           galMainRef.value = (res && res.designated) || "";
           galDrawRef.value = (res && res.draw_ref) || "";
           galDrawRefAbs.value = (res && res.draw_ref_abs) || "";
@@ -7235,6 +7274,8 @@
       var galDrawRefAbs = Vue.ref("");    // 绝对路径（立绘卡比较用）
       // v0.19.8：展示序——主参考第一、出卡源第二（同一张兼任时只排一次），其余保持原序。
       // 参考图网格与顶部「生成源」条共用这个序，原 galRefs 只作为数据源不再直接进模板。
+      // v0.65.0：已停用参考图（galRefsDisabled）**不进**这个序——生成源推导、
+      // 已选清理等下游都以「启用中」为准，停用图单独渲染在网格末尾。
       var galRefsView = Vue.computed(function () {
         var refs = galRefs.value;
         var first = refs.filter(function (r) { return r.path && r.path === galMainRef.value; });
@@ -7333,6 +7374,39 @@
           var _gi = galRefsSel.value.indexOf(r.path);
           if (_gi >= 0) { galRefsSel.value.splice(_gi, 1); }
           message.success("已移除参考图绑定" + (res && res.file_deleted ? "（文件已删）" : ""));
+          delArm.value = "";
+          await refreshAll();
+          await loadGalRefs();
+        } catch (e) { /* 已提示 */ }
+      }
+      // v0.65.0：参考图删除改软删除（与立绘同口径）——停用 → 恢复 / 彻底删除
+      async function disableGalRef(r) {
+        if (!armDelete("galrefoff:" + r.path)) return;
+        try {
+          await apiPost("refs/disable", { id: galCharId.value, path: r.path });
+          var _di = galRefsSel.value.indexOf(r.path);
+          if (_di >= 0) { galRefsSel.value.splice(_di, 1); }
+          message.success("已停用参考图（文件与绑定保留，可随时恢复）");
+          delArm.value = "";
+          await refreshAll();
+          await loadGalRefs();
+        } catch (e) { /* 已提示 */ }
+      }
+      async function enableGalRef(r) {
+        try {
+          await apiPost("refs/enable", { id: galCharId.value, path: r.path });
+          message.success("已恢复启用（回到备选参考图）");
+          await refreshAll();
+          await loadGalRefs();
+        } catch (e) { /* 已提示 */ }
+      }
+      async function deleteGalRefHard(r) {
+        if (!armDelete("galrefhard:" + r.path)) return;
+        try {
+          var res = await apiPost("refs/delete_hard",
+                                  { id: galCharId.value, path: r.path, confirm: true });
+          message.success("已彻底删除，文件已移入回收站"
+                          + (res && res.file_skipped ? "：" + res.file_skipped : ""));
           delArm.value = "";
           await refreshAll();
           await loadGalRefs();
@@ -11725,6 +11799,10 @@
         checkGalQuotes: checkGalQuotes, adoptQuote: adoptQuote,
         adoptAllQuotes: adoptAllQuotes, clearQuoteSuggest: clearQuoteSuggest,
         galRefs: galRefs, galRefsLoading: galRefsLoading, galMainRef: galMainRef,
+        // v0.65.0：参考图停用 / 启用 / 彻底删除（软删除，与立绘同口径）
+        galRefsDisabled: galRefsDisabled,
+        disableGalRef: disableGalRef, enableGalRef: enableGalRef,
+        deleteGalRefHard: deleteGalRefHard,
         galRefsView: galRefsView,
         galOrphans: galOrphans, bindOrphan: bindOrphan,
         galOrphansOpen: galOrphansOpen, deleteOrphan: deleteOrphan,
