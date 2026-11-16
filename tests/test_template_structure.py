@@ -124,6 +124,17 @@ def main():
     check("批量头像预览有覆盖开关",
           "galAvOverwrite" in page and "setAvOverwrite" in page)
 
+    # v0.59.3：试画台三步容器不得是 n-space。vendored naive 的 Space 给每个槽
+    # 子元素包 div 且 key 全是字面量 1，tryStep 1/2/3 反复切换时 keyed diff 错位，
+    # 实测第2步整块被复制 4 份。必须 div.stack（.stack > * + * 提供 12px 间距）。
+    try_seg = page.split('<!-- ============ 试画台', 1)[1]
+    try_seg = try_seg.split('<!-- ============ 角色详情', 1)[0]
+    check("试画台步骤容器不是 n-space（div.stack）",
+          '<n-space vertical size="medium">' not in try_seg
+          and '<div class="stack">' in try_seg)
+    check("试画台三个步骤分支都在",
+          all(f'v-if="tryStep === {n}"' in try_seg for n in (1, 2, 3)))
+
     if FAILURES:
         print(f"test_template_structure: {len(FAILURES)} FAILED")
         sys.exit(1)

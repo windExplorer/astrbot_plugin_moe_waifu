@@ -1380,9 +1380,13 @@
           </div>
 
           <!-- ============ 试画台（v0.5.9 三步流：选角色 → 确认提示词 → 生成） ============ -->
+          <!-- v0.59.3：步骤容器原是 n-space vertical——vendored naive 给每个槽子元素
+               包一层 div 且 key 全是字面量 1，tryStep 1/2/3 切换时 keyed diff 全撞同一
+               key → 错位补丁 → 第2步整块被复制多份（用户截图实证 4 份）。换 div.stack，
+               间距由 .stack > * + * 给，视觉一致且不再撞 key。 -->
           <div v-if="menu === 'try'">
             <n-card size="small" :bordered="true">
-              <n-space vertical size="medium">
+              <div class="stack">
                 <n-space align="center" :wrap="true" class="sticky-tools">
                   <n-button size="small" @click="backFromTry">← 返回</n-button>
                   <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
@@ -1615,7 +1619,7 @@
                     同角色同日同序号的种子恒定；改提示词 / 策略 / 参考图后再试会出新图。
                   </div>
                 </div>
-              </n-space>
+              </div>
             </n-card>
           </div>
 
