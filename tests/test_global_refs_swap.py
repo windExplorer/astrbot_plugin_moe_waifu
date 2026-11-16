@@ -43,6 +43,17 @@ def main():
               "set_global_ref_note", "delete_global_ref"):
         check(f"store 方法存在 {m}", f"def {m}(" in store)
 
+    # v0.64.0：高清封面 + 列数偏好（后端产出字段 / 前端接入）
+    check("全局图库返回 1000px 高清 cover", '"cover": _thumb_cached(fp, 1000)' in api)
+    check("ui_state GET 回传 gr_cols", '"gr_cols": gr_cols' in api)
+    check("ui_state POST 只改列数时 menu 可省",
+          '"gr_cols" not in body' in api and 'data["gr_cols"]' in api)
+    check("列数范围钳在 2~8（越界归 0=自适应）",
+          "2 <= cols <= 8" in api and "2 <= v <= 8" in api)
+    check("前端封面用高清 cover 回退 thumb", ':src="r.cover || r.thumb"' in page)
+    check("前端列数下拉挂载并暴露",
+          'v-model:value="grColsSel"' in page and "grColsSel: grColsSel" in page)
+
     # 2) 两处 swap 的 refs 顺序：[全局, 角色]，绝不能颠倒
     #    试画台 overrideOf 的 swap 分支
     ov = re.search(r'tryMode\.value === "swap"\) \{\s*var ov0 =.*?return ov0;', page, re.S)

@@ -258,18 +258,42 @@ if (tryBuilt.value.length !== 2) fail('试画台身份候选应=1参考图+1启�
 if (!tryBuilt.value.some(it => it.path === 'X:/data/portraits/c1/p2.png'
     && it.label.indexOf('立绘') >= 0)) fail('试画台立绘项 path/label 错');
 
-// v0.62.0：全局图库瀑布流 + 上传区固定 + 列数按数量
+// v0.62.0 / v0.64.0：全局图库瀑布流 + 上传区固定 + 列数可设 + 高清封面
 if (html.indexOf('.gr-waterfall { column-count: var(--gr-cols') < 0) fail('瀑布流 CSS 缺失');
 if (html.indexOf('.gr-toolbar { position: sticky; top: 0') < 0) fail('上传固定条 CSS 缺失');
 if (html.indexOf('class="gr-toolbar"') < 0) fail('上传区没进固定条');
-if (html.indexOf('class="gr-waterfall"') < 0) fail('卡片墙没用瀑布流容器');
+const gwPos = html.indexOf('class="gr-waterfall"');
+if (gwPos < 0) fail('卡片墙没用瀑布流容器');
+const grCardSeg = html.slice(gwPos, html.indexOf('class="gr-card-info"', gwPos));
+if (grCardSeg.indexOf(':src="r.cover || r.thumb"') < 0) fail('瀑布流封面没用高清 cover（仍发糊）');
+// 列数设置行须在固定条内，且偏好走 /ui_state（sandbox iframe 不能用 localStorage）
+if (html.indexOf('class="gr-colset"') < 0) fail('列数设置行没放进固定条');
+if (html.indexOf('v-model:value="grColsSel"') < 0 || html.indexOf(':options="grColOpts"') < 0) {
+  fail('列数下拉没绑 grColsSel / grColOpts');
+}
+if (!/grColsSel: grColsSel, grColOpts: grColOpts/.test(html)) fail('列数下拉没暴露给模板');
+if (html.indexOf('gr_cols: n') < 0) fail('列数偏好没写回 /ui_state');
+if (html.indexOf('res.gr_cols') < 0) fail('列数偏好没从 /ui_state 恢复');
 const gc = html.indexOf('var grCols = Vue.computed(function () {');
 if (gc < 0) fail('找不到 grCols');
-const gcSeg = html.slice(gc, gc + 500);
-if (!/n <= 4.*return 2/.test(gcSeg) || !/n <= 10.*return 3/.test(gcSeg)) {
-  fail('grCols 没按图库数量自适应列数');
+const gcSeg = html.slice(gc, gc + 700);
+if (!/forced >= 2/.test(gcSeg)) fail('grCols 没让手动列数优先');
+if (!/n <= 4.*return 2/.test(gcSeg) || !/n <= 10.*return 4/.test(gcSeg)) {
+  fail('grCols 自适应列数没上调（图多仍只有 3 列）');
 }
 if (!/grCols: grCols/.test(html)) fail('grCols 没暴露给模板');
+// 真跑 grCols：手动值优先；自适应按数量给 2 / 4 / 6
+const gcSrc = html.slice(gc, html.indexOf('\n      var grDeleteArm', gc));
+function makeGr(setting, count) {
+  return new Function('Vue', 'grColsSetting', 'globalRefs', gcSrc + '\nreturn grCols;')(
+    { computed: fn => ({ get value() { return typeof fn === 'function' ? fn() : fn.get(); } }) },
+    { value: setting },
+    { value: Array.apply(null, Array(count)).map((_, i) => ({ path: 'g' + i })) }
+  );
+}
+if (makeGr(6, 2).value !== 6) fail('手动 6 列没生效');
+if (makeGr(0, 8).value !== 4) fail('自适应 8 张应为 4 列');
+if (makeGr(0, 30).value !== 6) fail('自适应 30 张应为 6 列');
 // n-grid 定列网格应已从全局图库移除（避免瀑布流与定列并存）
 const grSeg = html.split("menu === 'global_refs'", 2)[1] || '';
 if (grSeg.indexOf('<n-grid') < 0 || grSeg.indexOf('<n-grid') > grSeg.indexOf('</n-card>')) {

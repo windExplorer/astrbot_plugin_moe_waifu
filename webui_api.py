@@ -1289,6 +1289,9 @@ async def h_global_refs_list(plugin) -> dict:
         items.append({
             "path": rel, "rel": rel, "exists": fp is not None,
             "thumb": _thumb_cached(fp, 420) if fp is not None else None,
+            # v0.64.0：瀑布流封面用——缩略 420px 在宽卡上发糊，单独给一份 1000px
+            # 的高清封面（带缓存，选择器仍用 420 的 thumb，不拖慢首屏）。
+            "cover": _thumb_cached(fp, 1000) if fp is not None else None,
             "sha256": row.get("sha256", ""), "note": row.get("note", ""),
             "width": int(row.get("width") or 0), "height": int(row.get("height") or 0),
             "created_at": row.get("created_at", ""),
@@ -3287,28 +3290,55 @@ def _ui_state_path(plugin) -> Path:
 
 async def h_ui_state_get(plugin) -> dict:
     menu = "overview"
+    gr_cols = 0   # 0 = 前端按数量自适应
     try:
         data = _json_load(_ui_state_path(plugin))
-        if isinstance(data, dict) and data.get("menu") in _UI_MENUS:
-            menu = data["menu"]
+        if isinstance(data, dict):
+            if data.get("menu") in _UI_MENUS:
+                menu = data["menu"]
+            # v0.64.0：全局图库瀑布流列数偏好（2~8，0=自适应）
+            try:
+                v = int(data.get("gr_cols", 0) or 0)
+                gr_cols = v if 2 <= v <= 8 else 0
+            except (TypeError, ValueError):
+                gr_cols = 0
     except FileNotFoundError:
         pass
     except Exception:
         logger.warning(f"[{PLUGIN_NAME}] ui_state 读取失败，回落默认页签\n{traceback.format_exc()}")
-    return ok({"menu": menu})
+    return ok({"menu": menu, "gr_cols": gr_cols})
 
 
 async def h_ui_state_set(plugin) -> dict:
     body = await _body()
     menu = body.get("menu")
-    if menu not in _UI_MENUS:
+    # v0.64.0：menu 可选（只改列数时前端不传 menu），兼容旧调用必传 menu。
+    # 两种都没给才算错，避免「调列数必须带 menu」的耦合。
+    if menu is None and "gr_cols" not in body:
+        return err(f"menu 必须是 {' / '.join(_UI_MENUS)} 之一")
+    if menu is not None and menu not in _UI_MENUS:
         return err(f"menu 必须是 {' / '.join(_UI_MENUS)} 之一")
     try:
-        _json_save(_ui_state_path(plugin), {"menu": menu})
+        data = _json_load(_ui_state_path(plugin))
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    if menu is not None:
+        data["menu"] = menu
+    if "gr_cols" in body:
+        try:
+            cols = int(body.get("gr_cols") or 0)
+        except (TypeError, ValueError):
+            cols = 0
+        data["gr_cols"] = cols if 2 <= cols <= 8 else 0
+    try:
+        _json_save(_ui_state_path(plugin), data)
     except Exception:
         logger.warning(f"[{PLUGIN_NAME}] ui_state 写盘失败\n{traceback.format_exc()}")
         return err("页签记忆写盘失败")
-    return ok({"menu": menu})
+    out = {"menu": data.get("menu", "overview"), "gr_cols": data.get("gr_cols", 0)}
+    return ok(out)
 
 
 async def h_overview(plugin) -> dict:

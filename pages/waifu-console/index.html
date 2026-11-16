@@ -719,7 +719,9 @@
     margin-bottom: 12px; background: var(--wf-surface);
     border-bottom: 1px solid var(--wf-line); }
   .gr-toolbar > * + * { margin-top: 10px; }
-  /* v0.62.0：瀑布流——CSS columns，列数由 grCols 按图库数量给（2~5）。
+  /* v0.64.0：列数设置行——放在固定条内，滚动卡片墙时一起固定 */
+  .gr-colset { display: flex; align-items: center; gap: 8px; }
+  /* v0.62.0：瀑布流——CSS columns，列数由 grCols 给（手动 2~8 / 自适应 2~6）。
      break-inside:avoid 保证一张卡不被拆到两列；封面按原图比例，长短图都紧密排。 */
   .gr-waterfall { column-count: var(--gr-cols, 3); column-gap: 12px; }
   .gr-card { break-inside: avoid; margin-bottom: 12px; display: inline-block; width: 100%;
@@ -1330,6 +1332,12 @@
                 <w-upload-panel :multiple="true"
                                 hint="支持 png / jpg / jpeg / webp / gif，可多选；单张不超过 15MB。同内容只存一份。"
                                 @files="onGlobalPanelFiles"></w-upload-panel>
+                <!-- v0.64.0：列数设置——默认按数量自适应，也可手动固定 2~8 列；偏好存服务端 -->
+                <div class="gr-colset">
+                  <span style="font-size: 12px; opacity: .6;">列数</span>
+                  <n-select v-model:value="grColsSel" :options="grColOpts" size="small"
+                            style="width: 104px;"></n-select>
+                </div>
               </div>
               <n-alert v-if="globalRefsLoading" type="info" :bordered="false">加载中…</n-alert>
               <!-- v0.62.0：瀑布流——CSS columns，列数按图库数量自适应（不做分页）。
@@ -1337,7 +1345,9 @@
               <div v-if="globalRefs.length > 0" class="gr-waterfall" :style="{ '--gr-cols': grCols }">
                 <div v-for="(r, ri) in globalRefs" :key="r.path" class="gr-card">
                   <div class="gr-card-cover" @click="openViewer(r.path, '全局参考图')">
-                    <img v-if="r.thumb" :src="r.thumb" alt="全局参考图" title="点击查看大图"
+                    <!-- v0.64.0：瀑布流封面用 1000px 高清 cover，回退 420px thumb；
+                         选择器弹窗仍用 thumb，避免首屏把每图 1000px 全拉一遍 -->
+                    <img v-if="r.thumb" :src="r.cover || r.thumb" alt="全局参考图" title="点击查看大图"
                          :style="r.width && r.height ? { aspectRatio: r.width + ' / ' + r.height } : null">
                     <div v-else class="picker-noimg">文件丢失</div>
                     <span class="gr-card-idx">{{ ri + 1 }}</span>
@@ -5456,6 +5466,9 @@
       // 「停在哪」的体验项，不值得弹错误提示打断切页）。
       var uiMenuKeys = menuOpts.map(function (o) { return o.key; });
       var menuTouched = false;
+      // v0.64.0：全局图库列数偏好（0=自适应、2~8 列），与页签记忆同走 /ui_state。
+      // 提前声明——下面 restoreUiMenu 的异步回调要用（回调执行时这里已初始化）。
+      var grColsSetting = Vue.ref(0);
       function saveUiMenu(key) {
         try {
           var p = bridge.apiPost("ui_state", { menu: key });
@@ -5474,6 +5487,13 @@
           var p = bridge.apiGet("ui_state");
           if (p && typeof p.then === "function") {
             p.then(function (res) {
+              // v0.64.0：列数偏好先恢复——即便页签已被用户手点过也不受影响。
+              // 用 !== undefined 判断，0（自适应）是有效值，不能被 || 吞掉。
+              var gc = res && (res.gr_cols !== undefined ? res.gr_cols
+                                                          : (res.data && res.data.gr_cols));
+              var gcn = Math.min(8, Math.max(0, Math.round(Number(gc) || 0)));
+              if (gcn && gcn < 2) { gcn = 0; }
+              grColsSetting.value = gcn;
               if (menuTouched) return;  // 恢复返回前用户已手点，别覆盖
               // 桥 SDK 已把 {status,data} 信封解包，返回的就是 data 本身。
               // 旧代码多取一层 .data 恒为 undefined → 刷新总是落回第一页。
@@ -5492,14 +5512,38 @@
       // ---- 全局参考图库（v0.56.0：角色替换的画布） ----
       var globalRefs = Vue.ref([]);          // [{path,rel,thumb,note,exists,width,height,...}]
       var globalRefsLoading = Vue.ref(false);
-      // v0.62.0：瀑布流列数按图库数量自适应（参考角色库卡片墙，不做分页）：
-      // ≤4 张 2 列、≤10 张 3 列、≤20 张 4 列，再多 5 列。窄屏 CSS 媒体查询再降。
+      // v0.64.0：列数可手动设（自适应 / 2~8 列），偏好即时写回 /ui_state。
+      // 与角色库「每行 N 张」同源思路，但不写插件配置——列数是视图偏好，走 ui_state。
+      var grColOpts = [{ label: "自适应", value: 0 }].concat(
+        Array.apply(null, Array(7)).map(function (_, i) {
+          return { label: (i + 2) + " 列", value: i + 2 };
+        })
+      );
+      function saveUiGrCols(n) {
+        try {
+          var p = bridge.apiPost("ui_state", { gr_cols: n });
+          if (p && typeof p.catch === "function") p.catch(function () { /* 静默 */ });
+        } catch (e) { /* 静默 */ }
+      }
+      var grColsSel = Vue.computed({
+        get: function () { return grColsSetting.value; },
+        set: function (v) {
+          var n = Math.min(8, Math.max(0, Math.round(Number(v) || 0)));
+          if (n && n < 2) { n = 0; }
+          grColsSetting.value = n;
+          saveUiGrCols(n);
+        }
+      });
+      // v0.64.0：手动值优先；自适应上限从 5 提到 6，图多时不再挤成一窄列。
+      // ≤4 张 2 列、≤10 张 4 列、≤20 张 5 列，再多 6 列。窄屏 CSS 媒体查询再降。
       var grCols = Vue.computed(function () {
+        var forced = grColsSetting.value;
+        if (forced >= 2) { return forced; }
         var n = (globalRefs.value || []).length;
         if (n <= 4) { return 2; }
-        if (n <= 10) { return 3; }
-        if (n <= 20) { return 4; }
-        return 5;
+        if (n <= 10) { return 4; }
+        if (n <= 20) { return 5; }
+        return 6;
       });
       var grDeleteArm = Vue.ref("");         // 两段确认：当前待删 path
       var grNoteEdit = Vue.ref(null);        // v0.59.1：正在编辑备注的行对象（弹窗里改，不撑卡片布局）
@@ -11529,6 +11573,8 @@
         doTry: doTry, doMarkVerified: doMarkVerified, doArchive: doArchive,
         // v0.56.0：全局图库 + 角色替换
         globalRefs: globalRefs, globalRefsLoading: globalRefsLoading, grCols: grCols,
+        // v0.64.0：瀑布流列数设置（下拉 + 偏好值）
+        grColsSel: grColsSel, grColOpts: grColOpts, grColsSetting: grColsSetting,
         globalRefOpts: globalRefOpts, loadGlobalRefs: loadGlobalRefs,
         onGlobalPanelFiles: onGlobalPanelFiles, grDeleteArm: grDeleteArm,
         grNoteEdit: grNoteEdit, grNoteText: grNoteText, grNoteOpen: grNoteOpen,
