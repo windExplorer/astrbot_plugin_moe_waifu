@@ -2,6 +2,26 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.60.2 (2026-11-16)
+
+**修：角色替换不再传「重绘强度」——Qwen Edit 双图编辑根本不支持这个参数。**
+
+- 背景：v0.60.1 修表情跟随时，我在发布说明里建议「表情仍偏画布就把重绘强度从
+  0.75 往上调」——这是错的。用户指出 Qwen Image 2.1 图片编辑工作流不支持
+  denoise，调它无效，这个建议会白费时间。
+- 根因：swap 模式强制 `strategy_type: "img2img"` 让萌绘走双图链路，但 override 里
+  仍按普通 img2img 的习惯塞了 `denoise`（试画台 `trySwapDenoise=0.75`、角色详情
+  `galDenoise=0.75`），界面上也摆着「重绘强度」输入框。Qwen Edit 工作流不读这个
+  参数，传了是被忽略的无效值；更糟的是它给人「调这个能改表情」的错误暗示。
+- 修复：① 试画台 swap 面板移除 `trySwapDenoise` 控件、overrideOf 的 swap 分支不再
+  注入 denoise；② 角色详情「重绘强度」控件改为仅 `galMode === 'img2img'` 显示、
+  swap override 不再注入 denoise；③ 两处 swap 面板补说明「走 Qwen Edit 双图编辑，
+  不支持重绘强度，改动范围由提示词指令控制」。普通 img2img 重绘的 denoise 不受影响。
+- 守卫：`tests/test_global_refs_swap.py` 新增——两处 swap override 不得含
+  `denoise`、swap 模式不得显示重绘强度控件。全局图替换 / 内联 JS / 模板编译 /
+  模板结构 / WebUI 契约 / 图片选择全过。
+- 版本 v0.60.1 -> v0.60.2。
+
 ## v0.60.1 (2026-11-16)
 
 **修：角色替换出图表情不跟随角色参考图。**

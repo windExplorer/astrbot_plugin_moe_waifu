@@ -66,6 +66,17 @@ def main():
               and refs.group(1).index("galSwapGlobal") < refs.group(1).index("galSwapChar"),
               refs.group(1) if refs else "")
         check("角色详情 swap 强制 img2img", "strategy_type: \"img2img\"" in blk)
+    # v0.60.2：Qwen Edit 双图编辑不支持 denoise——两处 swap override 都不能带它，
+    # 否则传一个被忽略的无效参数，界面还摆控件误导用户去调。
+    check("角色详情 swap override 不注入 denoise", "galDenoise.value" not in blk, blk)
+
+    ov_try = re.search(r'if \(tryMode\.value === "swap"\) \{.*?return ov0;', page, re.S)
+    ov_try_blk = ov_try.group(0) if ov_try else ""
+    check("试画台 swap override 不注入 denoise",
+          bool(ov_try_blk) and "trySwapDenoise.value" not in ov_try_blk, ov_try_blk[:120])
+    check("swap 模式不显示重绘强度控件",
+          'v-if="galMode === \'img2img\' || galMode === \'swap\'" v-model:value="galDenoise"' not in page
+          and 'v-model:value="trySwapDenoise"' not in page)
 
     # 3) 固定编辑指令：Qwen 双图标签，两处都用同一常量
     check("编辑指令用 <image1> 画布 + <image2> 身份",

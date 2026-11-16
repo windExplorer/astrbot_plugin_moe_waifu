@@ -1510,8 +1510,9 @@
                                     @click="openTrySwapCharPicker"></w-pick-thumb>
                       <n-select v-model:value="trySwapWf" :options="wfOpts('img')" filterable tag clearable
                                 placeholder="Qwen Edit 工作流（留空=萌绘默认）" style="width: 230px;"></n-select>
-                      <n-input-number v-model:value="trySwapDenoise" :step="0.05" :min="0.2" :max="0.95"
-                                      placeholder="重绘强度" style="width: 130px;"></n-input-number>
+                    </div>
+                    <div class="bind-tip" style="margin-top: 6px;">
+                      角色替换走 Qwen Edit 双图编辑，不支持「重绘强度」——改动范围由提示词指令控制。
                     </div>
                     <div class="bind-tip" style="margin-top: 6px;" v-if="!globalRefs.length">
                       全局图库为空：去侧栏「全局图库」上传几张精美图再来。
@@ -1856,7 +1857,7 @@
                   <n-select v-if="galMode === 'refill'" v-model:value="galWfAny"
                             :options="wfAllOpts" filterable tag clearable
                             placeholder="工作流（留空=跟随配置）" style="width: 200px;"></n-select>
-                  <n-input-number v-if="galMode === 'img2img' || galMode === 'swap'" v-model:value="galDenoise"
+                  <n-input-number v-if="galMode === 'img2img'" v-model:value="galDenoise"
                                   :step="0.05" :min="0.2" :max="0.95"
                                   placeholder="重绘强度" style="width: 120px;"></n-input-number>
                   <!-- v0.13.3：图生图显式尺寸（留空 = 配置 draw_width/height）——
@@ -1926,6 +1927,7 @@
                     选一张「全局参考图」当画布（保留构图 / 姿势 / 背景），再从下方选一张本角色的参考图提供身份——
                     出图把画布里的人物换成这个角色。顺序固定：全局图=图1、角色图=图2（不可颠倒）。
                     「宽/高」留空 = 用配置尺寸；带尺寸开关的 Qwen 2.1 Edit 工作流按此出图。
+                    角色替换走 Qwen Edit 双图编辑，不支持「重绘强度」——改动范围由提示词指令控制。
                   </div>
                   <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px;">
                     <w-pick-thumb :src="pickThumbOf(galSwapGlobal, [globalRefs, tryRefs])"
@@ -6480,9 +6482,8 @@
           if (String(trySwapWf.value || "").trim()) {
             ov0.img2img_workflow = String(trySwapWf.value).trim();
           }
-          if (trySwapDenoise.value !== null && trySwapDenoise.value !== undefined) {
-            ov0.denoise = trySwapDenoise.value;
-          }
+          // v0.60.2：Qwen Edit 双图编辑不支持 denoise——传了也是无效参数，
+          // 改动范围完全由 SWAP_INSTRUCTION 控制，不再注入 denoise。
           return ov0;
         }
         var ov = { strategy_type: tryMode.value };
@@ -7961,9 +7962,7 @@
           if (String(galWf.value || "").trim()) {
             ov2.img2img_workflow = String(galWf.value).trim();
           }
-          if (galDenoise.value !== null && galDenoise.value !== undefined) {
-            ov2.denoise = galDenoise.value;
-          }
+          // v0.60.2：角色替换走 Qwen Edit，不支持 denoise，不再注入无效参数。
           if (galWidth.value !== null && galWidth.value !== undefined
               && galHeight.value !== null && galHeight.value !== undefined) {
             ov2.width = galWidth.value;
