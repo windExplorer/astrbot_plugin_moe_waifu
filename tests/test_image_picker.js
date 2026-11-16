@@ -129,4 +129,68 @@ if (!built.a.value.length) fail('tryRefs 有数据但 tryRefPickerItems 为空')
 if (!built.b.value.length) fail('globalRefs 有数据但 trySwapGlobalPickerItems 为空');
 if (built.b.value[0].path !== 'global_refs/g1.webp') fail('picker item 丢 path');
 
+// 8) v0.60.0：选中后展示缩略图（WPickThumb），不再只显示文件名
+if (html.indexOf('var WPickThumb = {') < 0) fail('WPickThumb 未定义');
+if (html.indexOf('app.component("w-pick-thumb", WPickThumb)') < 0) fail('WPickThumb 未全局注册');
+if (html.indexOf('.pick-thumb-img') < 0) fail('缩略图样式缺失');
+const ts = html.indexOf('var WPickThumb = {');
+const te = html.indexOf('\n  };', ts);
+const thumbSrc = html.slice(ts, te + 5);
+let ThumbComp;
+try {
+  ThumbComp = (new Function('h', thumbSrc + '\nreturn WPickThumb;'))(h);
+} catch (e) { fail('WPickThumb eval 抛错: ' + e.message); }
+const thumbInst = { src: 'data:img', label: '① 画布：g.webp', sub: '图1', index: 0,
+                    active: true, $emit: function () {} };
+let thumbVnode;
+try { thumbVnode = ThumbComp.render.call(thumbInst); } catch (e) {
+  fail('WPickThumb render 抛错: ' + e.message);
+}
+if (!thumbVnode || thumbVnode.tag !== 'button') fail('WPickThumb 未渲染按钮');
+const thumbKids = thumbVnode.children || [];
+if (!thumbKids.some(k => k && k.props && k.props.class === 'pick-thumb-img')) {
+  fail('选中后没展示缩略图 img（仍只显示名字）');
+}
+// 试画台 swap / 角色详情 swap / img2img 已选条三处都必须用缩略图
+if ((html.match(/<w-pick-thumb /g) || []).length < 4) {
+  fail('缩略图按钮挂载点不足（试画台 swap + 角色详情 swap 共 4 处）');
+}
+if (html.indexOf('class="picker-strip-thumb"') < 0) fail('img2img 已选条没加缩略图');
+
+// 9) v0.60.0：角色详情 swap 也用图片弹窗，老文本下拉必须撤掉
+const galSeg = html.split('v-if="galMode === \'swap\'" class="swap-panel"', 2)[1] || '';
+if (!galSeg || galSeg.indexOf('</div>') < 0) fail('找不到角色详情 swap 面板');
+if (galSeg.indexOf('<n-select v-model:value="galSwapGlobal"') >= 0
+    || galSeg.indexOf('<n-select v-model:value="galSwapChar"') >= 0) {
+  fail('角色详情 swap 仍是老文本下拉');
+}
+for (const tag of ['galSwapGlobalPickerOpen', 'galSwapCharPickerOpen']) {
+  if (html.indexOf('v-model:show="' + tag + '"') < 0) fail('角色详情未挂 ' + tag);
+}
+if (!/var galSwapCharPickerItems = Vue\.computed/.test(html)) fail('角色详情身份图候选未定义');
+for (const key of ['galSwapGlobalPickerOpen', 'galSwapCharPickerOpen',
+                   'galSwapCharPickerItems', 'openGalSwapGlobalPicker',
+                   'openGalSwapCharPicker', 'onGalSwapGlobalConfirm',
+                   'onGalSwapCharConfirm', 'pickThumbOf']) {
+  if (!new RegExp('\\b' + key + ': ' + key + '[,}]').test(html)) {
+    fail('setup 未暴露 ' + key + '（模板取不到）');
+  }
+}
+// 角色详情身份图候选真跑：genSources 有 ref 数据时 picker items 非空
+const gs = html.indexOf('var galSwapCharPickerItems = Vue.computed(function () {');
+if (gs < 0) fail('找不到 galSwapCharPickerItems 定义');
+const ge = html.indexOf('\n      function openGalSwapGlobalPicker()', gs);
+let galBuilt;
+try {
+  galBuilt = new Function('Vue', 'genSources',
+    html.slice(gs, ge) + '\nreturn galSwapCharPickerItems;')(
+    fakeVue, { value: [
+      { kind: 'ref', path: 'refs/r1.png', thumb: 'data:r' },
+      { kind: 'portrait', path: 'portraits/c1/p1.png', thumb: 'data:p' }
+    ] });
+} catch (e) { fail('galSwapCharPickerItems 求值抛错: ' + e.message); }
+if (galBuilt.value.length !== 1 || galBuilt.value[0].path !== 'refs/r1.png') {
+  fail('角色详情身份图候选口径错（应只含 ref，不含立绘）');
+}
+
 console.log('test_image_picker: ALL OK');

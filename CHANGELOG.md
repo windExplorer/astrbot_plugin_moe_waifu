@@ -2,6 +2,29 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.60.0 (2026-11-16)
+
+**选完图片直接看到图；角色详情的角色替换也同步成图片弹窗，不再是老下拉。**
+
+- ① **选中后展示缩略图**：此前试画台 swap 的「① 画布 / ② 身份」和 img2img 已选条
+  只显示文件名，选完看不出选了哪张。新增全局组件 `WPickThumb`（缩略图 + 短标签 +
+  序号，点击重新选），三处共用：试画台 swap 两个按钮、角色详情 swap 两个按钮；
+  img2img 已选条每个 chip 也加缩略图。缩略图经 `pickThumbOf(path, lists)` 从
+  `globalRefs` / `tryRefs` / `genSources` 里按 `_samePath` 归一找（绝对 / 相对混存
+  也能命中），没有则显示占位「图」。
+- ② **角色详情同步图片弹窗**：角色详情「角色替换」原来是两个纯文本 `n-select`
+  （`galSwapGlobal` / `galSwapChar`），与试画台 v0.58 起的表情弹窗脱节。现在换成
+  两个 `WImagePicker` 弹窗（与试画台同款）：全局图候选复用 `trySwapGlobalPickerItems`，
+  角色身份候选新增 `galSwapCharPickerItems`（口径沿用原下拉——只取 `kind === "ref"`
+  的本角色参考图，不含立绘）。选中值仍回写同一对 ref，出图 override 与
+  `[全局, 角色]` 图序不变。
+- `tryNameOf` 同时覆盖 `genSources`（角色详情拿得到可读名），路径比较改 `_samePath`。
+- 守卫：`tests/test_image_picker.js` 新增——`WPickThumb` 真跑 render 校验缩略图 img
+  存在、四处挂载齐全、角色详情 swap 无残留老下拉、两个 picker 已挂、setup 已暴露
+  全部新键、`galSwapCharPickerItems` 口径只含 ref 不含立绘。前端 JS / HTML / 模板
+  编译 / 结构 / 契约 / 全局图替换 / schema 全过。
+- 版本 v0.59.3 -> v0.60.0。
+
 ## v0.59.3 (2026-11-16)
 
 **修：试画台「确认提示词」整块重复渲染多份（用户截图实测 4 份）。**

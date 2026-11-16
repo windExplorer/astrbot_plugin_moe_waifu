@@ -773,6 +773,25 @@
   .picker-strip-ord { flex: none; min-width: 17px; height: 17px; line-height: 17px; text-align: center;
     background: #ff7ab2; color: #fff; border-radius: 50%; font-size: 10px; font-weight: 700; }
   .picker-strip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .picker-strip-thumb { width: 22px; height: 22px; border-radius: 4px; object-fit: cover; flex: none;
+    background: rgba(128,128,128,.1); }
+  /* v0.60.0：已选图缩略图按钮——选完直接看到图，不再只显示文件名 */
+  .pick-thumb { display: inline-flex; align-items: center; gap: 8px; min-height: 46px;
+    max-width: 280px; padding: 4px 10px 4px 4px; border: 1px solid var(--wf-line);
+    border-radius: 10px; background: var(--wf-surface); color: inherit; cursor: pointer;
+    text-align: left; transition: border-color .15s, box-shadow .15s; }
+  .pick-thumb:hover { border-color: var(--wf-brand); }
+  .pick-thumb.on { border-color: var(--wf-brand); box-shadow: 0 0 0 2px rgba(214,51,132,.16); }
+  .pick-thumb-img { width: 38px; height: 38px; border-radius: 7px; object-fit: cover; flex: none;
+    background: rgba(128,128,128,.1); }
+  .pick-thumb-ph { width: 38px; height: 38px; border-radius: 7px; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(128,128,128,.12); font-size: 11px; opacity: .6; }
+  .pick-thumb-txt { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+  .pick-thumb-label { font-size: 12px; font-weight: 600; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .pick-thumb-sub { font-size: 10px; opacity: .55; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -1459,6 +1478,8 @@
                         <div v-for="(p, pi) in tryOverride.refs" :key="p" class="picker-strip-cell"
                              :title="'图' + (pi + 1) + '：' + p"
                              @click="openViewer(p, '参考图 图' + (pi + 1))">
+                          <img v-if="pickThumbOf(p, tryRefs)" class="picker-strip-thumb"
+                               :src="pickThumbOf(p, tryRefs)" alt="">
                           <span class="picker-strip-ord">{{ pi + 1 }}</span>
                           <span class="picker-strip-name">{{ p.split('/').pop() }}</span>
                         </div>
@@ -1477,12 +1498,16 @@
                       全局图库为空时先去侧栏「全局图库」上传。
                     </div>
                     <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px;">
-                      <n-button size="small" secondary @click="openTrySwapGlobalPicker">
-                        {{ trySwapGlobal ? "① 画布：" + tryNameOf(trySwapGlobal) : "① 点选全局参考图（画布）…" }}
-                      </n-button>
-                      <n-button size="small" secondary @click="openTrySwapCharPicker">
-                        {{ trySwapChar ? "② 身份：" + tryNameOf(trySwapChar) : "② 点选角色参考图（身份）…" }}
-                      </n-button>
+                      <w-pick-thumb :src="pickThumbOf(trySwapGlobal, [globalRefs, tryRefs])"
+                                    :label="trySwapGlobal ? '① 画布：' + tryNameOf(trySwapGlobal) : '① 点选全局参考图（画布）'"
+                                    :sub="trySwapGlobal ? '图1 · 点按钮可重新选' : '选后显示缩略图'"
+                                    :active="!!trySwapGlobal"
+                                    @click="openTrySwapGlobalPicker"></w-pick-thumb>
+                      <w-pick-thumb :src="pickThumbOf(trySwapChar, [tryRefs, globalRefs])"
+                                    :label="trySwapChar ? '② 身份：' + tryNameOf(trySwapChar) : '② 点选角色参考图（身份）'"
+                                    :sub="trySwapChar ? '图2 · 点按钮可重新选' : '选后显示缩略图'"
+                                    :active="!!trySwapChar"
+                                    @click="openTrySwapCharPicker"></w-pick-thumb>
                       <n-select v-model:value="trySwapWf" :options="wfOpts('img')" filterable tag clearable
                                 placeholder="Qwen Edit 工作流（留空=萌绘默认）" style="width: 230px;"></n-select>
                       <n-input-number v-model:value="trySwapDenoise" :step="0.05" :min="0.2" :max="0.95"
@@ -1903,10 +1928,16 @@
                     「宽/高」留空 = 用配置尺寸；带尺寸开关的 Qwen 2.1 Edit 工作流按此出图。
                   </div>
                   <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px;">
-                    <n-select v-model:value="galSwapGlobal" :options="globalRefOpts" filterable clearable
-                              placeholder="① 全局参考图（画布 · 图1）" style="width: 260px;"></n-select>
-                    <n-select v-model:value="galSwapChar" :options="galSwapCharOpts" filterable clearable
-                              placeholder="② 角色参考图（身份 · 图2）" style="width: 260px;"></n-select>
+                    <w-pick-thumb :src="pickThumbOf(galSwapGlobal, [globalRefs, tryRefs])"
+                                  :label="galSwapGlobal ? '① 画布：' + tryNameOf(galSwapGlobal) : '① 点选全局参考图（画布）'"
+                                  :sub="galSwapGlobal ? '图1 · 点按钮可重新选' : '选后显示缩略图'"
+                                  :active="!!galSwapGlobal"
+                                  @click="openGalSwapGlobalPicker"></w-pick-thumb>
+                    <w-pick-thumb :src="pickThumbOf(galSwapChar, genSources)"
+                                  :label="galSwapChar ? '② 身份：' + tryNameOf(galSwapChar) : '② 点选角色参考图（身份）'"
+                                  :sub="galSwapChar ? '图2 · 点按钮可重新选' : '选后显示缩略图'"
+                                  :active="!!galSwapChar"
+                                  @click="openGalSwapCharPicker"></w-pick-thumb>
                   </div>
                   <div class="bind-tip" style="margin-top: 6px;" v-if="!globalRefs.length">
                     全局图库为空：去侧栏「全局图库」上传几张精美图再来。
@@ -1914,6 +1945,21 @@
                   <div class="bind-tip" style="margin-top: 6px;" v-if="galSwapCharOpts.length === 0">
                     该角色还没有参考图：在「图生图重绘」里上传会自动绑定，之后这里就能选。
                   </div>
+                  <!-- v0.60.0：与试画台共用的图片选择弹窗，替换原来的两个文本下拉 -->
+                  <w-image-picker v-model:show="galSwapGlobalPickerOpen"
+                                  :items="trySwapGlobalPickerItems"
+                                  :value="galSwapGlobal ? [galSwapGlobal] : []" :multiple="false"
+                                  title="选择全局参考图（画布 · 图1）"
+                                  hint="选一张精美图当画布：构图 / 姿势 / 背景会保留，只把人物换成角色。可以在「全局图库」页上传更多。"
+                                  @update:value="onGalSwapGlobalConfirm"
+                                  @preview="onPickerPreview"></w-image-picker>
+                  <w-image-picker v-model:show="galSwapCharPickerOpen"
+                                  :items="galSwapCharPickerItems"
+                                  :value="galSwapChar ? [galSwapChar] : []" :multiple="false"
+                                  title="选择角色参考图（身份 · 图2）"
+                                  hint="选该角色的一张参考图提供身份：面部 / 发型发色 / 个人配饰会迁移到画布人物上。"
+                                  @update:value="onGalSwapCharConfirm"
+                                  @preview="onPickerPreview"></w-image-picker>
                 </div>
                 <n-alert v-if="refillError" type="error" :bordered="false">{{ refillError }}</n-alert>
                 <!-- v0.34.0：生图队列状态——提交即入队，可继续选主题 / 换角色提交 -->
@@ -5044,6 +5090,33 @@
     }
   };
 
+  // v0.60.0：已选图缩略图按钮——试画台 swap / 角色详情 swap / img2img 已选条共用。
+  // 选中后直接看到图（缩略图走后端 /image/data，与原缩略墙同源），不再只显示文件名。
+  var WPickThumb = {
+    name: "WPickThumb",
+    props: {
+      src: { type: String, default: "" },
+      label: { type: String, default: "" },
+      sub: { type: String, default: "" },
+      index: { type: Number, default: 0 },
+      active: { type: Boolean, default: false }
+    },
+    emits: ["click"],
+    render: function () {
+      var self = this;
+      var pic = this.src
+        ? h("img", { class: "pick-thumb-img", src: this.src, alt: "" })
+        : h("div", { class: "pick-thumb-ph" }, "图");
+      var txt = [];
+      if (this.index) txt.push(h("span", { class: "picker-strip-ord" }, String(this.index)));
+      txt.push(h("span", { class: "pick-thumb-label" }, String(this.label || "点选图片")));
+      if (this.sub) txt.push(h("span", { class: "pick-thumb-sub" }, String(this.sub)));
+      return h("button", { class: "pick-thumb" + (this.active ? " on" : ""),
+        type: "button", onClick: function () { self.$emit("click"); } },
+        [pic, h("div", { class: "pick-thumb-txt" }, txt)]);
+    }
+  };
+
   function bridgeCtx() {
     try { return bridge.getContext() || {}; } catch (e) { return {}; }
   }
@@ -6167,14 +6240,25 @@
       }
       // 按路径找可读名（优先全局图备注，其次角色参考图备注，最后文件名）
       function tryNameOf(path) {
-        var all = (globalRefs.value || []).concat(tryRefs.value || []);
+        var all = (globalRefs.value || []).concat(tryRefs.value || [], genSources.value || []);
         for (var i = 0; i < all.length; i++) {
-          if (all[i].path === path) {
+          if (_samePath(all[i].path, path)) {
             return (all[i].note ? all[i].note + " · " : "")
               + String((path || "").split("/").pop() || path);
           }
         }
         return String((path || "").split("/").pop() || path);
+      }
+      // v0.60.0：按路径从多份图源里找缩略图（绝对/相对混存走 _samePath 归一）
+      function pickThumbOf(path, lists) {
+        var arrs = Array.isArray(lists) ? lists : [lists];
+        for (var k = 0; k < arrs.length; k++) {
+          var list = arrs[k] || [];
+          for (var i = 0; i < list.length; i++) {
+            if (_samePath(list[i].path, path)) { return list[i].thumb || ""; }
+          }
+        }
+        return "";
       }
       function trySwapPrompt() { return SWAP_INSTRUCTION; }
       function tryHasSource() {
@@ -7059,6 +7143,25 @@
         return !!(String(galSwapGlobal.value || "").trim()
                   && String(galSwapChar.value || "").trim());
       }
+      // v0.60.0：角色详情也用图片选择弹窗（与试画台共用 WImagePicker），替换原文本下拉。
+      // 候选沿用原 galSwapCharOpts 的口径：只取 kind === "ref" 的本角色参考图，不含立绘。
+      var galSwapGlobalPickerOpen = Vue.ref(false);
+      var galSwapCharPickerOpen = Vue.ref(false);
+      var galSwapCharPickerItems = Vue.computed(function () {
+        var seen = {};
+        return (genSources.value || []).filter(function (g) {
+          if (!g.path || g.kind !== "ref" || seen[g.path]) { return false; }
+          seen[g.path] = 1; return true;
+        }).map(function (g, i) {
+          var nm = String((g.path || "").split("/").pop() || ("参考图 " + (i + 1)));
+          return { path: g.path, thumb: g.thumb || "", exists: true,
+                   label: "参考图 · " + nm, sub: "本角色已绑定" };
+        });
+      });
+      function openGalSwapGlobalPicker() { galSwapGlobalPickerOpen.value = true; }
+      function openGalSwapCharPicker() { galSwapCharPickerOpen.value = true; }
+      function onGalSwapGlobalConfirm(vals) { galSwapGlobal.value = (vals && vals[0]) || null; }
+      function onGalSwapCharConfirm(vals) { galSwapChar.value = (vals && vals[0]) || null; }
       // 最近一次「自动选定」的画法：当前值一旦与它不同，说明用户手动点过，
       // 之后数据再怎么变都不再替他改（比"标志位 + watch"更稳，不必猜调度顺序）
       var galModeAutoPick = "refill";
@@ -11293,6 +11396,15 @@
         // v0.56.0：角色详情角色替换
         galSwapGlobal: galSwapGlobal, galSwapChar: galSwapChar,
         galSwapCharOpts: galSwapCharOpts, galHasSwapSource: galHasSwapSource,
+        // v0.60.0：角色详情图片选择弹窗
+        galSwapGlobalPickerOpen: galSwapGlobalPickerOpen,
+        galSwapCharPickerOpen: galSwapCharPickerOpen,
+        galSwapCharPickerItems: galSwapCharPickerItems,
+        openGalSwapGlobalPicker: openGalSwapGlobalPicker,
+        openGalSwapCharPicker: openGalSwapCharPicker,
+        onGalSwapGlobalConfirm: onGalSwapGlobalConfirm,
+        onGalSwapCharConfirm: onGalSwapCharConfirm,
+        pickThumbOf: pickThumbOf,
         loadingGal: loadingGal, refillError: refillError,
         galQueueTip: galQueueTip, galSubmitting: galSubmitting,
         queueTopCount: queueTopCount, queueTopText: queueTopText,
@@ -11529,6 +11641,7 @@
   app.component("w-icon-btn", WIconBtn);
   app.component("w-upload-panel", WUploadPanel);
   app.component("w-image-picker", WImagePicker);
+  app.component("w-pick-thumb", WPickThumb);
   // 找到桥才挂载；4 秒等不到 = 不是从 Dashboard 插件拓展页打开，整页友好报错
   bridgeReady.then(function (b) {
     bridge = b;
