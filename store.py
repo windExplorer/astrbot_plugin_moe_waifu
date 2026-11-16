@@ -188,6 +188,16 @@ CREATE INDEX IF NOT EXISTS idx_draw_jobs_status ON draw_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_draw_events_user_date ON draw_events(user_id, date, id);
 CREATE INDEX IF NOT EXISTS idx_draw_events_date ON draw_events(date);
 CREATE INDEX IF NOT EXISTS idx_debug_history_kind ON debug_history(kind, id);
+-- v0.56.0：全局参考图库（角色替换的「画布」）。与角色 refs（身份来源）刻意分开：
+-- 没有 char_id 归属，全插件共用；路径相对 data 目录（global_refs/g_<sha16>.<ext>）。
+CREATE TABLE IF NOT EXISTS global_refs (
+  file       TEXT PRIMARY KEY,            -- global_refs/ 相对路径
+  sha256     TEXT NOT NULL DEFAULT '',
+  width      INTEGER NOT NULL DEFAULT 0,
+  height     INTEGER NOT NULL DEFAULT 0,
+  note       TEXT NOT NULL DEFAULT '',    -- 管理员备注（图的说明/用途）
+  created_at TEXT NOT NULL
+);
 """
 
 # 老库补列（PRAGMA 探测 → ALTER TABLE，绝不重建已有表）。
@@ -1019,6 +1029,45 @@ class Store:
                 f"SELECT * FROM ref_meta WHERE file IN ({q})", chunk).fetchall()
             out.update({r["file"]: dict(r) for r in rows})
         return out
+
+    # ---------- global_refs（v0.56.0：全局参考图库 / 角色替换画布） ----------
+
+    def add_global_ref(self, file: str, sha256: str = "", width: int = 0,
+                       height: int = 0, note: str = "") -> None:
+        """登记一张全局参考图（同路径重复登记覆盖元数据，不改 created_at）。"""
+        self._conn.execute(
+            "INSERT INTO global_refs (file, sha256, width, height, note, created_at)"
+            " VALUES (?,?,?,?,?,?)"
+            " ON CONFLICT(file) DO UPDATE SET sha256=excluded.sha256,"
+            " width=excluded.width, height=excluded.height, note=excluded.note",
+            (str(file or ""), str(sha256 or ""), int(width or 0), int(height or 0),
+             str(note or ""), _now()),
+        )
+        self._conn.commit()
+
+    def list_global_refs(self) -> list:
+        """全表按创建时间倒序（新上传在前）。"""
+        rows = self._conn.execute(
+            "SELECT * FROM global_refs ORDER BY created_at DESC, file DESC").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_global_ref(self, file: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM global_refs WHERE file=?", (str(file or ""),)).fetchone()
+        return dict(row) if row else None
+
+    def set_global_ref_note(self, file: str, note: str) -> bool:
+        cur = self._conn.execute(
+            "UPDATE global_refs SET note=? WHERE file=?",
+            (str(note or "")[:500], str(file or "")))
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    def delete_global_ref(self, file: str) -> bool:
+        cur = self._conn.execute(
+            "DELETE FROM global_refs WHERE file=?", (str(file or ""),))
+        self._conn.commit()
+        return cur.rowcount > 0
 
     def next_portrait_seq(self, char_id: str) -> int:
         """查询下一个可用 seq（**只读、不消耗**）：预览与实际生成同口径。

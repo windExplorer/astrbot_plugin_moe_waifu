@@ -158,8 +158,9 @@ def main():
     ui_block = re.search(r"_UI_MENUS = \((.*?)\)", api, re.S)
     check("后端存在 _UI_MENUS", ui_block is not None)
     back_keys = re.findall(r'"(\w+)"', ui_block.group(1)) if ui_block else []
+    # v0.56.0：新增「全局图库」页签 → 13 → 14
     check("页签前后一致（页签记忆不会写入被拒）",
-          front_keys == back_keys and len(front_keys) == 13
+          front_keys == back_keys and len(front_keys) == 14
           and front_keys[0] == "overview",
           f"front={front_keys} back={back_keys}")
     # v0.46.0：卡片调试页签（模拟抽卡直接出卡）

@@ -703,6 +703,9 @@
   .pi-tag.keep { opacity: .6; }
   .pi-tag.off { opacity: .32; text-decoration: line-through; }
   .pi-list { max-height: 300px; overflow-y: auto; padding-right: 4px; }
+  /* v0.56.0：全局图库备注编辑（普通 div，不用 n-space——v-if 兄弟节点撞 key 老坑） */
+  .gr-note-edit { display: flex; gap: 4px; align-items: center; margin-top: 4px; }
+  .swap-panel { display: block; }
 </style>
 </head>
 <body>
@@ -1208,6 +1211,49 @@
 
           </div>
 
+          <!-- ============ 全局参考图库（v0.56.0：角色替换的「画布」） ============ -->
+          <div v-if="menu === 'global_refs'">
+            <n-card size="small" :bordered="true" title="全局参考图库">
+              <n-space vertical size="medium">
+                <div class="bind-tip" style="margin-top: 0;">
+                  这里放「精美画布图」：单人、构图 / 姿势 / 背景明确的图最适合做角色替换。
+                  在试画台或角色详情选「角色替换」模式时，这里的图当画布（图1），
+                  再做身份来源的角色参考图当图2，把画布里的人物换成所选角色。
+                </div>
+                <w-upload-panel :multiple="true"
+                                hint="支持 png / jpg / jpeg / webp / gif，可多选；单张不超过 15MB。同内容只存一份。"
+                                @files="onGlobalPanelFiles"></w-upload-panel>
+                <n-alert v-if="globalRefsLoading" type="info" :bordered="false">加载中…</n-alert>
+                <n-grid v-if="globalRefs.length > 0" :cols="5" :x-gap="10" :y-gap="10">
+                  <n-gi v-for="r in globalRefs" :key="r.path">
+                    <div class="gal-item">
+                      <img v-if="r.thumb" :src="r.thumb" class="clickable-img"
+                           alt="全局参考图" title="点击查看大图"
+                           @click="openViewer(r.path, '全局参考图')">
+                      <div v-else class="gal-meta">文件丢失</div>
+                      <div class="gal-meta" style="overflow-wrap: anywhere;">{{ r.note || (r.width ? r.width + '×' + r.height : (r.path || '').split('/').pop()) }}</div>
+                      <div class="gal-ops">
+                        <w-icon-btn icon="edit" size="tiny"
+                                    :tip="'备注：' + (r.note || '未填')"
+                                    @click="beginGrNote(r)"></w-icon-btn>
+                        <w-icon-btn icon="trash" size="tiny" type="error"
+                                    :armed="grDeleteArm === r.path"
+                                    :tip="grDeleteArm === r.path ? '再点一次确认删除' : '删除全局参考图'"
+                                    @click="deleteGlobalRef(r)"></w-icon-btn>
+                      </div>
+                      <div v-if="grNoteEdit === r.path" class="gr-note-edit">
+                        <n-input v-model:value="grNoteText" size="tiny" placeholder="这张图适合做什么角色替换"></n-input>
+                        <n-button size="tiny" type="primary" @click="saveGlobalRefNote(r)">保存</n-button>
+                        <n-button size="tiny" @click="grNoteEdit = ''">取消</n-button>
+                      </div>
+                    </div>
+                  </n-gi>
+                </n-grid>
+                <n-empty v-else description="全局图库还是空的：上传几张精美图，就能在角色替换里当画布"></n-empty>
+              </n-space>
+            </n-card>
+          </div>
+
           <!-- ============ 试画台（v0.5.9 三步流：选角色 → 确认提示词 → 生成） ============ -->
           <div v-if="menu === 'try'">
             <n-card size="small" :bordered="true">
@@ -1233,6 +1279,7 @@
                       <n-radio-button value="base">base 直出</n-radio-button>
                       <n-radio-button value="lora">lora</n-radio-button>
                       <n-radio-button value="img2img">图生图重绘</n-radio-button>
+                      <n-radio-button value="swap">角色替换（全局图→角色）</n-radio-button>
                     </n-radio-group>
                     <span class="bind-tip" v-if="tryMode === 'entry' && tryEntry">
                       {{ stratLabel(tryEntry) }}
@@ -1296,6 +1343,30 @@
                     <div class="bind-tip" v-if="tryRefsLoading">参考图加载中…</div>
                     <div class="bind-tip" v-if="tryRefs.length === 0 && !tryRefsLoading">
                       该角色还没有绑定参考图：上传/拖入后会自动绑定并存起来，之后随时选用。
+                    </div>
+                  </div>
+                  <!-- v0.56.0：角色替换（Qwen-Image-2.1 双图编辑）——全局图当画布(图1)、角色参考图当身份(图2) -->
+                  <div v-if="tryMode === 'swap'" style="margin-top: 10px;">
+                    <div class="bind-tip" style="margin-top: 0;">
+                      选一张「全局参考图」当画布（保留构图 / 姿势 / 背景），再选该角色的参考图提供身份——
+                      出图会把画布里的人物换成这个角色。顺序固定：全局图=图1、角色图=图2（不可颠倒）。
+                      全局图库为空时先去侧栏「全局图库」上传。
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px;">
+                      <n-select v-model:value="trySwapGlobal" :options="globalRefOpts" filterable clearable
+                                placeholder="① 全局参考图（画布 · 图1）" style="width: 260px;"></n-select>
+                      <n-select v-model:value="trySwapChar" :options="trySwapCharOpts" filterable clearable
+                                placeholder="② 角色参考图（身份 · 图2）" style="width: 260px;"></n-select>
+                      <n-select v-model:value="trySwapWf" :options="wfOpts('img')" filterable tag clearable
+                                placeholder="Qwen Edit 工作流（留空=萌绘默认）" style="width: 230px;"></n-select>
+                      <n-input-number v-model:value="trySwapDenoise" :step="0.05" :min="0.2" :max="0.95"
+                                      placeholder="重绘强度" style="width: 130px;"></n-input-number>
+                    </div>
+                    <div class="bind-tip" style="margin-top: 6px;" v-if="!globalRefs.length">
+                      全局图库为空：去侧栏「全局图库」上传几张精美图再来。
+                    </div>
+                    <div class="bind-tip" style="margin-top: 6px;" v-if="tryRefs.length === 0">
+                      该角色还没有参考图：在「图生图重绘」里上传会自动绑定，之后这里就能选。
                     </div>
                   </div>
                   <div v-if="tryMode === 'lora'" style="margin-top: 10px;">
@@ -1602,16 +1673,17 @@
                   <n-radio-group v-model:value="galMode" size="small">
                     <n-radio-button value="refill">补一张（跟随条目画法）</n-radio-button>
                     <n-radio-button value="img2img">图生图重绘</n-radio-button>
+                    <n-radio-button value="swap">角色替换（全局图→角色）</n-radio-button>
                   </n-radio-group>
-                  <n-select v-if="galMode === 'img2img'" v-model:value="galWf"
+                  <n-select v-if="galMode === 'img2img' || galMode === 'swap'" v-model:value="galWf"
                             :options="wfOpts('img')" filterable tag clearable
-                            placeholder="工作流（留空=全局配置）" style="width: 200px;"></n-select>
+                            placeholder="Qwen Edit 工作流（留空=萌绘默认）" style="width: 220px;"></n-select>
                   <!-- v0.7.2：补一张也可指定工作流（txt+img 合并下拉；base/lora→workflow、
                        img2img 条目→img2img_workflow，留空跟随配置） -->
                   <n-select v-if="galMode === 'refill'" v-model:value="galWfAny"
                             :options="wfAllOpts" filterable tag clearable
                             placeholder="工作流（留空=跟随配置）" style="width: 200px;"></n-select>
-                  <n-input-number v-if="galMode === 'img2img'" v-model:value="galDenoise"
+                  <n-input-number v-if="galMode === 'img2img' || galMode === 'swap'" v-model:value="galDenoise"
                                   :step="0.05" :min="0.2" :max="0.95"
                                   placeholder="重绘强度" style="width: 120px;"></n-input-number>
                   <!-- v0.13.3：图生图显式尺寸（留空 = 配置 draw_width/height）——
@@ -1629,7 +1701,7 @@
                             @update:value="galPromptConfirmed = false"></n-select>
                   <n-button type="primary" size="small"
                             :disabled="!galCharId" @click="openPromptModal">
-                    {{ galMode === "img2img" ? "按所选图生成…" : "开始补图…" }}
+                    {{ galMode === "img2img" ? "按所选图生成…" : (galMode === "swap" ? "角色替换生成…" : "开始补图…") }}
                   </n-button>
                 </div>
                 <div v-if="galMode === 'img2img'">
@@ -1674,6 +1746,26 @@
                 </div>
                 <div class="bind-tip" style="margin-top: 0;" v-else>
                   按条目画法自动生成一张新立绘并入库{{ detailEntry ? "（" + stratLabel(detailEntry) + "）" : "" }}。
+                </div>
+                <!-- v0.56.0：角色替换双选择器（全局图=画布/图1，角色参考图=身份/图2） -->
+                <div v-if="galMode === 'swap'" class="swap-panel">
+                  <div class="bind-tip" style="margin-top: 0;">
+                    选一张「全局参考图」当画布（保留构图 / 姿势 / 背景），再从下方选一张本角色的参考图提供身份——
+                    出图把画布里的人物换成这个角色。顺序固定：全局图=图1、角色图=图2（不可颠倒）。
+                    「宽/高」留空 = 用配置尺寸；带尺寸开关的 Qwen 2.1 Edit 工作流按此出图。
+                  </div>
+                  <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px;">
+                    <n-select v-model:value="galSwapGlobal" :options="globalRefOpts" filterable clearable
+                              placeholder="① 全局参考图（画布 · 图1）" style="width: 260px;"></n-select>
+                    <n-select v-model:value="galSwapChar" :options="galSwapCharOpts" filterable clearable
+                              placeholder="② 角色参考图（身份 · 图2）" style="width: 260px;"></n-select>
+                  </div>
+                  <div class="bind-tip" style="margin-top: 6px;" v-if="!globalRefs.length">
+                    全局图库为空：去侧栏「全局图库」上传几张精美图再来。
+                  </div>
+                  <div class="bind-tip" style="margin-top: 6px;" v-if="galSwapCharOpts.length === 0">
+                    该角色还没有参考图：在「图生图重绘」里上传会自动绑定，之后这里就能选。
+                  </div>
                 </div>
                 <n-alert v-if="refillError" type="error" :bordered="false">{{ refillError }}</n-alert>
                 <!-- v0.34.0：生图队列状态——提交即入队，可继续选主题 / 换角色提交 -->
@@ -4693,6 +4785,15 @@
   // （v0.2.3 真机「整页都是代码」的根因），tests/test_html_integrity.py 有守卫。
   var bridge = null;
 
+  // v0.56.0：角色替换的固定编辑指令（Qwen-Image-2.1 图像编辑规范）。
+  // <image1> = 全局参考图（画布，构图/姿势/背景/画风保留）；<image2> = 角色参考图（身份来源）。
+  // 本插件出图 raw_prompt=True 跳过萌绘 LLM 润色，这条指令原样送进工作流，
+  // 所以必须自己写全；放模块顶层，试画台与角色详情两处共用。
+  var SWAP_INSTRUCTION = "<image1> 是画布：完整保留其构图、人物姿势、背景、光线、" +
+    "镜头视角与画风，一律不改。将 <image1> 中人物的身份替换为 <image2> 中的人物——" +
+    "面部特征、五官、发型发色及可辨识的个人配饰都与 <image2> 一致。" +
+    "除人物身份外不做任何其它改动。";
+
   function bridgeCtx() {
     try { return bridge.getContext() || {}; } catch (e) { return {}; }
   }
@@ -4728,11 +4829,13 @@
       throw e;
     }
   }
-  async function apiUpload(file) {
+  async function apiUpload(file, endpoint) {
     // 文件上传走桥的 upload 通道（Dashboard 以 multipart 转发到插件端点）
+    // v0.56.0：endpoint 可指定（全局图库走 global_refs/upload）；旧调用不传 → refs/upload
+    var ep = String(endpoint || "refs/upload");
     if (bridge && typeof bridge.upload === "function") {
       try {
-        return await bridge.upload("refs/upload", file);
+        return await bridge.upload(ep, file);
       } catch (e) {
         message.error(String((e && e.message) || e));
         throw e;
@@ -4930,6 +5033,7 @@
         { label: "卡片调试", key: "carddbg" },
         { label: "分群绑定", key: "bind" },
         { label: "素材库", key: "presets" },
+        { label: "全局图库", key: "global_refs" },
         { label: "帮助", key: "help" },
         { label: "配置", key: "config" }
       ];
@@ -4952,6 +5056,7 @@
         menuTouched = true;
         saveUiMenu(key);
         if (key === "overview") loadOverview();
+        if (key === "global_refs") { loadGlobalRefs(); }
       }
       (function restoreUiMenu() {
         try {
@@ -4972,6 +5077,63 @@
         } catch (e) { /* 静默 */ }
       })();
       function onMenu(key) { setMenu(key); }
+
+      // ---- 全局参考图库（v0.56.0：角色替换的画布） ----
+      var globalRefs = Vue.ref([]);          // [{path,rel,thumb,note,exists,width,height,...}]
+      var globalRefsLoading = Vue.ref(false);
+      var grDeleteArm = Vue.ref("");         // 两段确认：当前待删 path
+      var grNoteEdit = Vue.ref("");          // 正在编辑备注的 path
+      var grNoteText = Vue.ref("");
+      var globalRefOpts = Vue.computed(function () {
+        return (globalRefs.value || []).filter(function (r) { return r.exists !== false; })
+          .map(function (r) {
+            var nm = String((r.path || "").split("/").pop() || r.path || "");
+            return { label: (r.note ? r.note + " · " : "") + nm, value: r.path };
+          });
+      });
+      async function loadGlobalRefs() {
+        globalRefsLoading.value = true;
+        try {
+          var res = await apiGet("global_refs/list");
+          globalRefs.value = (res && res.items) || [];
+        } catch (e) { /* 已提示 */ } finally { globalRefsLoading.value = false; }
+      }
+      async function onGlobalPanelFiles(files) {
+        var list = Array.prototype.slice.call(files || []);
+        if (!list.length) return;
+        uploading.value = true;
+        var okN = 0;
+        for (var i = 0; i < list.length; i++) {
+          try {
+            await apiUpload(list[i], "global_refs/upload");
+            okN += 1;
+          } catch (e) { /* 单张失败不挡后续 */ }
+        }
+        uploading.value = false;
+        if (okN) { message.success("已加入全局图库 " + okN + " 张"); await loadGlobalRefs(); }
+      }
+      async function saveGlobalRefNote(r) {
+        try {
+          await apiPost("global_refs/note", { path: r.path, note: grNoteText.value });
+          r.note = grNoteText.value;
+          grNoteEdit.value = "";
+          message.success("备注已保存");
+        } catch (e) { /* 已提示 */ }
+      }
+      function beginGrNote(r) { grNoteEdit.value = r.path; grNoteText.value = r.note || ""; }
+      async function deleteGlobalRef(r) {
+        if (grDeleteArm.value !== r.path) {
+          grDeleteArm.value = r.path;
+          message.info("再点一次「删除」确认移除全局参考图");
+          return;
+        }
+        grDeleteArm.value = "";
+        try {
+          await apiPost("global_refs/delete", { path: r.path, confirm: true });
+          message.success("已从全局图库移除（文件在回收站可找回）");
+          await loadGlobalRefs();
+        } catch (e) { /* 已提示 */ }
+      }
 
       // ---- 总览（v0.10.0，第一栏）----
       var ov = Vue.ref({
@@ -5668,6 +5830,23 @@
       // v0.13.3：width/height = 本次图生图显式尺寸（留空 = 配置；不随「按本次参数保存」固化）
       var tryOverride = Vue.ref({ ref: "", refs: [], denoise: null, loras: "",
                                   width: null, height: null });
+      // v0.56.0：角色替换——全局图(画布/图1) + 角色参考图(身份/图2)
+      var trySwapGlobal = Vue.ref(null);
+      var trySwapChar = Vue.ref(null);
+      var trySwapWf = Vue.ref(null);
+      var trySwapDenoise = Vue.ref(0.75);
+      var trySwapCharOpts = Vue.computed(function () {
+        return (tryRefs.value || []).filter(function (r) { return r.exists !== false; })
+          .map(function (r, i) {
+            var nm = String((r.path || "").split("/").pop() || ("参考图 " + (i + 1)));
+            return { label: (r.note ? r.note + " · " : "") + nm, value: r.path };
+          });
+      });
+      function tryHasSwapSource() {
+        return !!(String(trySwapGlobal.value || "").trim()
+                  && String(trySwapChar.value || "").trim());
+      }
+      function trySwapPrompt() { return SWAP_INSTRUCTION; }
       function tryHasSource() {
         // 本次多选、手动填的单张、或条目自带的主参考/多图源，任一存在即可
         var ov = tryOverride.value || {};
@@ -5728,6 +5907,15 @@
         if (!tryCharId.value) return;
         tryPromptLoading.value = true;
         tryArtistMade.value = false;   // v0.40.0：重新走池子预览 = 不再是画师产出
+        // v0.56.0 角色替换：提示词是固定的 Qwen 双图编辑指令，不经过 prompt_gen
+        // （manual 直通）；这里直接把指令填进确认框，用户仍可手动改。
+        if (tryMode.value === "swap") {
+          tryPrompt.value = trySwapPrompt();
+          tryPromptSource.value = "角色替换 · Qwen 双图编辑指令（可手动改）";
+          tryDims.value = []; tryBodyZh.value = ""; tryStyle.value = "";
+          tryPromptLoading.value = false;
+          return;
+        }
         try {
           var res = await apiPost("prompt/preview", {
             id: tryCharId.value,
@@ -5772,6 +5960,10 @@
       }
       function gotoStep2() {
         if (!tryCharId.value) return;
+        if (tryMode.value === "swap" && !tryHasSwapSource()) {
+          message.error("角色替换需要两张图：先选「全局参考图（画布）」和该角色的「参考图（身份）」");
+          return;
+        }
         if (tryMode.value === "img2img" && !tryHasSource()) {
           message.error("图生图重绘需要参考图：先点选下方参考图（可多选），或给条目指定主参考");
           return;
@@ -5849,6 +6041,21 @@
       function overrideOf() {
         // tryMode → jobs/start 的 override（entry 模式不带 override）
         if (tryMode.value === "entry") return null;
+        // v0.56.0 角色替换：强制走 img2img，refs 严格 [全局图, 角色参考图]——
+        // 顺序即 <image1> 画布 / <image2> 身份，绝对不能颠倒
+        if (tryMode.value === "swap") {
+          var ov0 = { strategy_type: "img2img",
+                      ref: String(trySwapGlobal.value || ""),
+                      refs: [String(trySwapGlobal.value || ""),
+                             String(trySwapChar.value || "")] };
+          if (String(trySwapWf.value || "").trim()) {
+            ov0.img2img_workflow = String(trySwapWf.value).trim();
+          }
+          if (trySwapDenoise.value !== null && trySwapDenoise.value !== undefined) {
+            ov0.denoise = trySwapDenoise.value;
+          }
+          return ov0;
+        }
         var ov = { strategy_type: tryMode.value };
         if (tryMode.value === "img2img") {
           // v0.11.0：多图参考——refs 按点选顺序；ref 仍传第一张兼容旧链路
@@ -5896,6 +6103,19 @@
       }
       async function doTry() {
         if (!tryCharId.value || tryRunning.value) return;
+        if (tryMode.value === "swap") {
+          if (!tryHasSwapSource()) {
+            message.error("角色替换需要两张图：全局参考图（画布）+ 角色参考图（身份）");
+            return;
+          }
+          // 防止选图后又被清空（删图/换角色）：提交前再核一次源仍可用
+          var _ov = overrideOf();
+          if (!_ov || !Array.isArray(_ov.refs) || _ov.refs.length < 2
+              || !String(_ov.refs[0] || "").trim() || !String(_ov.refs[1] || "").trim()) {
+            message.error("角色替换的画布图或角色参考图已失效，请重新选择");
+            return;
+          }
+        }
         if (tryMode.value === "img2img" && !tryHasSource()) {
           message.error("图生图重绘需要参考图：先点选下方参考图（可多选），或给条目指定主参考");
           return;
@@ -6474,6 +6694,23 @@
       // 比「跟随条目画法」更符合预期（用户口径）。没有可用生成源的角色仍回落
       // 「补一张」，否则会对着空生成源点不出图。用户手动切过画法后不再自动改。
       var galMode = Vue.ref("refill");
+      // v0.56.0：角色替换（全局图=画布/图1，角色参考图=身份/图2）
+      var galSwapGlobal = Vue.ref(null);
+      var galSwapChar = Vue.ref(null);
+      var galSwapCharOpts = Vue.computed(function () {
+        var seen = {};
+        return (genSources.value || []).filter(function (g) {
+          if (!g.path || g.kind !== "ref" || seen[g.path]) { return false; }
+          seen[g.path] = 1; return true;
+        }).map(function (g) {
+          var nm = String((g.path || "").split("/").pop() || "参考图");
+          return { label: "参考图 · " + nm, value: g.path };
+        });
+      });
+      function galHasSwapSource() {
+        return !!(String(galSwapGlobal.value || "").trim()
+                  && String(galSwapChar.value || "").trim());
+      }
       // 最近一次「自动选定」的画法：当前值一旦与它不同，说明用户手动点过，
       // 之后数据再怎么变都不再替他改（比"标志位 + watch"更稳，不必猜调度顺序）
       var galModeAutoPick = "refill";
@@ -7143,6 +7380,15 @@
         if (!galCharId.value) return;
         galPromptLoading.value = true;
         galArtistMade.value = false;   // v0.40.0：重新走池子预览 = 不再是画师产出
+        // v0.56.0 角色替换：固定 Qwen 双图编辑指令，不经过 prompt_gen（manual 直通）
+        if (galMode.value === "swap") {
+          galPrompt.value = SWAP_INSTRUCTION;
+          galPromptSource.value = "角色替换 · Qwen 双图编辑指令（可手动改）";
+          galDims.value = []; galThemeResolved.value = null;
+          galPromptKey = galPromptKeyNow();
+          galPromptLoading.value = false;
+          return;
+        }
         try {
           var res = await apiPost("prompt/preview", {
             id: galCharId.value, theme: galTheme.value, outfit: galOutfit.value,
@@ -7186,6 +7432,12 @@
       }
       function openPromptModal() {
         if (!galCharId.value) return;
+        if (galMode.value === "swap") {
+          if (!galHasSwapSource()) {
+            message.error("角色替换需要两张图：先选「全局参考图（画布）」和本角色的「参考图（身份）」");
+            return;
+          }
+        }
         // v0.42.0：开面板即保证图生图有一张默认源，不再让用户对着空选择发懵
         ensureDefaultGenSource();
         galPromptOpen.value = true;
@@ -7208,6 +7460,10 @@
             message.error("图生图重绘需要先准备一张参考图或立绘");
             return;
           }
+        }
+        if (galMode.value === "swap" && !galHasSwapSource()) {
+          message.error("角色替换的画布图或角色参考图缺失，请重新选择");
+          return;
         }
         galPromptConfirmed.value = true;
         galPromptOpen.value = false;
@@ -7241,6 +7497,27 @@
             ov.height = galHeight.value;
           }
           payload.override = ov;
+        } else if (galMode.value === "swap") {
+          // v0.56.0：角色替换——强制 img2img，refs 严格 [全局画布, 角色身份]
+          if (!galHasSwapSource()) {
+            message.error("角色替换需要两张图：全局参考图（画布）+ 本角色参考图（身份）");
+            return;
+          }
+          var ov2 = { strategy_type: "img2img",
+                      ref: String(galSwapGlobal.value),
+                      refs: [String(galSwapGlobal.value), String(galSwapChar.value)] };
+          if (String(galWf.value || "").trim()) {
+            ov2.img2img_workflow = String(galWf.value).trim();
+          }
+          if (galDenoise.value !== null && galDenoise.value !== undefined) {
+            ov2.denoise = galDenoise.value;
+          }
+          if (galWidth.value !== null && galWidth.value !== undefined
+              && galHeight.value !== null && galHeight.value !== undefined) {
+            ov2.width = galWidth.value;
+            ov2.height = galHeight.value;
+          }
+          payload.override = ov2;
         } else if (String(galWfAny.value || "").trim()) {
           // v0.7.2：补一张选了工作流 → 按条目画法透传（base/lora→workflow、
           // img2img 条目→img2img_workflow；不带 strategy_type 即不强制改画法）
@@ -7249,8 +7526,15 @@
             img2img_workflow: String(galWfAny.value).trim()
           };
         }
-        // 提示词：确认过的直通；没确认过就按当前主题/附加要求现生成一版（一键直出）
-        if (galPromptConfirmed.value && String(galPrompt.value || "").trim()) {
+        // 提示词：角色替换固定用 Qwen 双图指令（用户在面板里改过则用改后的），
+        // 绝不用补一张/图生图遗留的旧提示词
+        if (galMode.value === "swap") {
+          var sp = String(galPrompt.value || "").trim();
+          payload.prompt = sp && sp !== SWAP_INSTRUCTION
+            ? sp   // 用户在提示词面板手改过，尊重其修改
+            : SWAP_INSTRUCTION;
+          payload.dims = "[]";
+        } else if (galPromptConfirmed.value && String(galPrompt.value || "").trim()) {
           payload.prompt = String(galPrompt.value).trim();
         } else {
           galAttempt.value = 0;
@@ -10501,6 +10785,8 @@
           await Promise.all([
             fetchPools(), loadWorks(), loadGallery(), loadGalRefs(),
             loadTryRefs(), loadDrawerRefs(), loadOverview(),
+            // v0.56.0：全局图库随刷新拉一次（试画台/详情的角色替换选择器要用）
+            loadGlobalRefs(),
             // v0.25.6：刷新/切页签时也拉一次补图进度，后台队列不会「看不见」
             pollBatch()
           ]);
@@ -10591,6 +10877,16 @@
         tryArchived: tryArchived, tryEntryVerified: tryEntryVerified,
         tryToRefed: tryToRefed, doTryToRef: doTryToRef,
         doTry: doTry, doMarkVerified: doMarkVerified, doArchive: doArchive,
+        // v0.56.0：全局图库 + 角色替换
+        globalRefs: globalRefs, globalRefsLoading: globalRefsLoading,
+        globalRefOpts: globalRefOpts, loadGlobalRefs: loadGlobalRefs,
+        onGlobalPanelFiles: onGlobalPanelFiles, grDeleteArm: grDeleteArm,
+        grNoteEdit: grNoteEdit, grNoteText: grNoteText,
+        saveGlobalRefNote: saveGlobalRefNote, beginGrNote: beginGrNote,
+        deleteGlobalRef: deleteGlobalRef,
+        trySwapGlobal: trySwapGlobal, trySwapChar: trySwapChar,
+        trySwapWf: trySwapWf, trySwapDenoise: trySwapDenoise,
+        trySwapCharOpts: trySwapCharOpts, tryHasSwapSource: tryHasSwapSource,
         tryMode: tryMode, tryOverride: tryOverride, tryElapsed: tryElapsed,
         tryStep: tryStep, tryTheme: tryTheme, themeOpts: themeOpts,
         tryOutfit: tryOutfit,
@@ -10617,6 +10913,9 @@
         workCoverCandidates: workCoverCandidates, openWorkCover: openWorkCover,
         setWorkCover: setWorkCover,
         galCharId: galCharId, galCharOpts: galCharOpts, galItems: galItems,
+        // v0.56.0：角色详情角色替换
+        galSwapGlobal: galSwapGlobal, galSwapChar: galSwapChar,
+        galSwapCharOpts: galSwapCharOpts, galHasSwapSource: galHasSwapSource,
         loadingGal: loadingGal, refillError: refillError,
         galQueueTip: galQueueTip, galSubmitting: galSubmitting,
         queueTopCount: queueTopCount, queueTopText: queueTopText,

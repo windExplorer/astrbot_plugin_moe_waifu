@@ -1262,6 +1262,98 @@ async def h_refs_upload(plugin) -> dict:
                "size": len(raw), "name": fname})
 
 
+# ---------- 全局参考图库（v0.56.0：角色替换的「画布」） ----------
+
+def _image_dims(path: Path) -> tuple:
+    """读图片尺寸 (w,h)；失败 (0,0)（与 draw.image_size 同口径，延迟导入 Pillow）。"""
+    try:
+        from PIL import Image
+        with Image.open(str(path)) as im:
+            return int(im.width), int(im.height)
+    except Exception:
+        return 0, 0
+
+
+async def h_global_refs_list(plugin) -> dict:
+    """全局参考图列表（带缩略 / 存在性），供图库页与两个「角色替换」选择器用。"""
+    if not plugin._store:
+        return err("插件未初始化完成")
+    items = []
+    for row in plugin._store.list_global_refs():
+        rel = str(row.get("file") or "")
+        fp = _safe_data_file(plugin, rel)
+        items.append({
+            "path": rel, "rel": rel, "exists": fp is not None,
+            "thumb": _thumb_cached(fp, 420) if fp is not None else None,
+            "sha256": row.get("sha256", ""), "note": row.get("note", ""),
+            "width": int(row.get("width") or 0), "height": int(row.get("height") or 0),
+            "created_at": row.get("created_at", ""),
+        })
+    return ok({"items": items, "total": len(items)})
+
+
+async def h_global_refs_upload(plugin) -> dict:
+    """上传全局参考图到 data/global_refs/，sha256 内容寻址（同内容不重复堆文件）。"""
+    if request is None:
+        return err("无请求上下文")
+    if not plugin._store:
+        return err("插件未初始化完成")
+    try:
+        files = await request.files
+    except Exception:
+        files = getattr(request, "files", None)
+    f = files.get("file") if files else None
+    if f is None:
+        return err("缺少 file 字段（multipart）")
+    suffix = Path(f.filename or "").suffix.lower()
+    if suffix not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        return err("仅支持 png/jpg/jpeg/webp/gif")
+    raw = f.read()
+    if not raw:
+        return err("空文件")
+    if len(raw) > 15 * 1024 * 1024:
+        return err("图片超过 15MB 上限")
+    digest = hashlib.sha256(raw).hexdigest()[:16]
+    gr_dir = Path(plugin._data_dir) / "global_refs"
+    gr_dir.mkdir(parents=True, exist_ok=True)
+    dest = gr_dir / f"g_{digest}{suffix}"
+    if not dest.is_file():
+        dest.write_bytes(raw)
+    w, h = _image_dims(dest)
+    rel = f"global_refs/{dest.name}"
+    plugin._store.add_global_ref(rel, digest, w, h)
+    return ok({"path": rel, "rel": rel, "size": len(raw),
+               "name": dest.name, "sha256": digest, "width": w, "height": h})
+
+
+async def h_global_refs_note(plugin) -> dict:
+    """改全局参考图备注（只写 note 列，不碰其它字段）。"""
+    body = await _body()
+    rel = str(body.get("path") or "").strip()
+    if not rel:
+        return err("缺少 path")
+    if not plugin._store or not plugin._store.get_global_ref(rel):
+        return err("图库里没有这张图")
+    plugin._store.set_global_ref_note(rel, str(body.get("note") or ""))
+    return ok({"path": rel, "note": str(body.get("note") or "")[:500]})
+
+
+async def h_global_refs_delete(plugin) -> dict:
+    """删全局参考图：两段确认，文件移回收站，删行（可手动搬回）。"""
+    body = await _body()
+    if not bool(body.get("confirm")):
+        return err("请二次确认删除")
+    rel = str(body.get("path") or "").strip()
+    if not rel:
+        return err("缺少 path")
+    if not plugin._store or not plugin._store.get_global_ref(rel):
+        return err("图库里没有这张图")
+    row = plugin._store.get_global_ref(rel)
+    _trash_files(plugin, [rel], meta={rel.replace("\\", "/"): dict(row)})
+    plugin._store.delete_global_ref(rel)
+    return ok({"path": rel, "deleted": True})
+
+
 async def h_job_start(plugin) -> dict:
     body = await _body()
     kind = str(body.get("kind") or "try").strip()
@@ -3176,8 +3268,10 @@ async def h_config_set(plugin) -> dict:
 # v0.43.0：新增「素材库」页签（主题 / 模板 / 场景 / 维度词表增删改）
 # v0.44.0：新增「帮助」页签（导入格式等文档；放在「配置」之前）
 # v0.46.0：新增「卡片调试」页签（网页里模拟抽卡直接出卡；放在「调试工具」之后）
+# v0.56.0：新增「全局图库」页签（角色替换的画布管理）
 _UI_MENUS = ("overview", "chars", "works", "try", "records", "stats",
-             "users", "debug", "carddbg", "bind", "presets", "help", "config")
+             "users", "debug", "carddbg", "bind", "presets", "global_refs",
+             "help", "config")
 
 
 def _ui_state_path(plugin) -> Path:
@@ -6091,6 +6185,11 @@ def register(plugin) -> None:
         ("/portraits/move_to_ref", h_portrait_move_to_ref, ["POST"]),
         ("/refs/move_to_portrait", h_ref_move_to_portrait, ["POST"]),
         ("/refs/upload", h_refs_upload, ["POST"]),
+        # v0.56.0：全局参考图库（角色替换的画布，与角色 refs 身份来源分开）
+        ("/global_refs/list", h_global_refs_list, ["GET", "POST"]),
+        ("/global_refs/upload", h_global_refs_upload, ["POST"]),
+        ("/global_refs/note", h_global_refs_note, ["POST"]),
+        ("/global_refs/delete", h_global_refs_delete, ["POST"]),
         ("/refs/list", h_refs_list, ["GET", "POST"]),
         ("/refs/orphans", h_refs_orphans, ["GET", "POST"]),
         ("/refs/orphan_delete", h_refs_orphan_delete, ["POST"]),

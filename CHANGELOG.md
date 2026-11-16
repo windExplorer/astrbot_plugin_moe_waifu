@@ -2,6 +2,31 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.56.0 (2026-11-16)
+
+**新增「全局参考图库 + 角色替换」：把画布图里的人物换成所选角色（Qwen-Image-2.1 双图编辑）。**
+
+- 用户手上有一批精美图片想当「画布」，选一张 + 某个角色的参考图，把图里的人物换成该角色，
+  构图 / 姿势 / 背景 / 画风保留。试画台和角色详情「生成立绘」两处都能用。
+- **不造新出图链路**：复用现有 `img2img` 多图 + `jobs/start` 串行队列。萌绘侧
+  `comfyui_img2img` 的 `images` 按「`image` 在前、依次在后」并入（见萌绘 `llm_img2img`），
+  即 `refs[0] → <image1>`（画布）、`refs[1] → <image2>`（身份）。所以**全局图必须 refs[0]、角色图 refs[1]**，
+  顺序写反功能全废——`tests/test_global_refs_swap.py` 两处 override 分支都守着这个顺序。
+- 提示词是固定 Qwen 双图编辑指令（`<image1>` 画布保留、` <image2>` 身份替换），本插件
+  `raw_prompt=True` 跳过萌绘 LLM 润色，指令必须自己写全；因两处都走 manual 直通
+  （`_run_job` 的 `prompt_override`），改 `prompt_gen` 无效，指令在前端预览框注入、可手改。
+- 后端：`store.py` 新增 `global_refs` 表（file / sha256 / w / h / note）+ 五个 CRUD 方法；
+  `webui_api.py` 新增 `/global_refs/list|upload|delete|note` 四条路由，上传 sha256 内容寻址
+  到 `data/global_refs/`，删除两段确认 + 走回收站。
+- 前端：新增一级页签「全局图库」（上传 / 备注 / 删除），与后端 `_UI_MENUS`、契约测试
+  页数 13→14 同步；`apiUpload(file, endpoint)` 支持自定义端点，旧调用保持 `refs/upload` 不变。
+  试画台新画法「角色替换」、角色详情生成面板新同模式，各有全局图 + 角色图两个选择器
+  （顺序固定），工作流可临时选 Qwen Edit。
+- 测试：新增 `test_global_refs_swap.py`（路由 / 表 / 方法 / refs 顺序 / 指令 / store 真库 CRUD），
+  `test_webui_contract` 页签数 13→14；前端 JS / HTML / 模板编译 / 契约 / schema / store
+  自检全过。
+- 版本 v0.55.0 -> v0.56.0。
+
 ## v0.55.0 (2026-11-16)
 
 **新增「签到联动」：一条 `签到` 串起今日老婆 + 星语签，不用再逐条发三条指令。**
