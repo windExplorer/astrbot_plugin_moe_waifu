@@ -81,7 +81,11 @@ good = {"id": "x", "name": "名", "tags_en": "t", "strategy": {"type": "LORA"}, 
 n = pool.normalize_entry(good, "p")
 check("normalize_entry 保留合法条目", n is not None)
 check("strategy 大写转小写", n["strategy_type"] == "lora")
-check("未知分类落 other", n["category"] == "other")
+check("未知分类原样透传（类型注册表校验在上游）", n["category"] == "xxx")
+check("gal 归并到游戏", pool.normalize_entry(
+    dict(good, category="gal"), "p")["category"] == "game")
+check("空分类落 other", pool.normalize_entry(
+    dict(good, category=""), "p")["category"] == "other")
 check("缺 tags 拒收", pool.normalize_entry({"id": "x", "name": "名"}, "p") is None)
 check("缺 id 拒收", pool.normalize_entry({"name": "名", "tags_en": "t"}, "p") is None)
 

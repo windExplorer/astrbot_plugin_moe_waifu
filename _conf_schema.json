@@ -179,6 +179,12 @@
     "type": "string",
     "default": ""
   },
+  "disabled_user_tags": {
+    "description": "停用的标签",
+    "hint": "逗号分隔；命中任一标签的角色不参与抽卡（标签在编辑抽屉里给角色填写，如：测试, 未完工）",
+    "type": "string",
+    "default": ""
+  },
   "img2img_denoise": {
     "description": "重绘强度（参考图模式）",
     "hint": "img2img 策略的降噪值，0.5~0.7 之间保脸保配色；过高会丢特征",

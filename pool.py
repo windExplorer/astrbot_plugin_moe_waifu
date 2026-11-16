@@ -26,6 +26,33 @@ CATEGORY_LABELS = {
     "other": "其他",
 }
 
+# v0.68.0：类型（category）改为用户可自定义（工坊「类型管理」），枚举不再是
+# 写死的四类——normalize 只做归一（gal 一次性并入游戏、空值落 other），不再
+# 把「注册表里没有的类型」重置掉。内置三个类型卷：anime / game / other。
+CANONICAL_BUILTIN_TYPES = ("anime", "game", "other")
+
+
+def normalize_category(value) -> str:
+    """条目 category 归一：gal 一次性并入游戏（用户口径）；空值落 other。"""
+    cat = str(value or "").strip().lower()
+    if cat == "gal":
+        cat = "game"
+    return cat or "other"
+
+
+def parse_user_tags(value) -> list:
+    """条目 user_tags 归一：list / 逗号分隔字符串 → 去重有序列表。"""
+    if isinstance(value, list):
+        parts = value
+    else:
+        parts = str(value or "").split(",")
+    out: list = []
+    for p in parts:
+        s = str(p or "").strip()
+        if s and s not in out:
+            out.append(s)
+    return out
+
 
 # ---------- 种子派生 ----------
 
@@ -354,6 +381,15 @@ def install_seed_pool(pools_dir: Path, bundled_json: Path, logger=None) -> list:
         name = str(pack.get("pack") or "").strip()
         if not name or not isinstance(pack.get("entries"), list):
             continue
+        # v0.68.0：gal 类型并入游戏（用户口径「gal 就属于游戏」）——种子的
+        # gal 卷直接装进游戏卷（条目 category 一次性改写），不再落地 gal.json；
+        # 否则每次启动都会「种子重建 gal 卷 → 卷收敛合并进游戏卷 → 进回收站」，
+        # 白白制造回收站垃圾
+        if name == "gal":
+            name = "game"
+            for raw in pack["entries"]:
+                if isinstance(raw, dict):
+                    raw["category"] = "game"
         _hygiene_pack(pack)
         target = pools_dir / f"{name}.json"
         if not target.exists():
@@ -435,7 +471,10 @@ def normalize_entry(entry: dict, pack_name: str) -> dict | None:
         "name": name,
         "series": str(entry.get("series") or "").strip(),
         "pack": str(entry.get("pack") or pack_name),
-        "category": str(entry.get("category") or "other").strip().lower(),
+        # v0.68.0：类型归一（gal→game、空→other），不再校验枚举——类型由
+        # 工坊「类型管理」自定义，注册表之外的非法值由上游（导入 / 保存）
+        # 落到 other 卷，normalize 不拦
+        "category": normalize_category(entry.get("category")),
         "tier": str(entry.get("tier") or "").strip().upper()[:2],
         "strategy": strategy,
         "strategy_type": stype,
@@ -460,8 +499,9 @@ def normalize_entry(entry: dict, pack_name: str) -> dict | None:
         "keep_headwear": bool(entry.get("keep_headwear", True)),
         "keep_outerwear": bool(entry.get("keep_outerwear", False)),
     }
-    if out["category"] not in CATEGORY_LABELS:
-        out["category"] = "other"
+    # v0.68.0：user_tags（用户标签，逗号分隔 / list）随条目透传——新表经
+    # extra_json overlay 往返，不占固定列
+    out["user_tags"] = parse_user_tags(entry.get("user_tags"))
     return out
 
 
@@ -646,14 +686,18 @@ def candidates_for(
     group_id: str = "",
     group_pools_text: str = "",
     allow_unverified: bool = False,
+    disabled_tags=None,
 ) -> list:
     """某群当前可抽的候选：启用卷（+ 群绑定作品过滤）∩ verified（可放宽）→ 排序。
 
     群绑定按「作品（series）」维度：绑定了作品的群只抽到对应 series 的角色，
     未绑定的群 / 私聊用全部启用卷。排序键 (pack, id)：同一天内库不变则结果恒定。
+    v0.68.0：`disabled_tags`（集合）——命中任一停用标签（条目 user_tags）的
+    角色不入候选（用户口径：标签替代卷的启停粒度）。
     """
     bound = parse_group_pools(group_pools_text)
     want = series_for_group(bound, group_id)  # 作品集合或 None
+    disabled = set(disabled_tags or [])
     out: list = []
     seen_ids: set = set()
     for pack in packs:
@@ -664,6 +708,8 @@ def candidates_for(
             if entry is None:
                 continue
             if not allow_unverified and not entry["verified"]:
+                continue
+            if disabled and (set(entry.get("user_tags") or []) & disabled):
                 continue
             if want is not None and (entry.get("series") or "") not in want:
                 continue

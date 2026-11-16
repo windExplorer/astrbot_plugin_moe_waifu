@@ -1095,6 +1095,8 @@
               </n-radio-group>
               <n-button type="primary" size="small" @click="openNew">新增角色</n-button>
               <n-button size="small" @click="openImport">导入角色</n-button>
+              <!-- v0.68.0：类型管理（卷收敛后 卷=类型，可自定义添加） -->
+              <n-button size="small" @click="typesOpen = true">类型管理</n-button>
               <!-- v0.44.0：只补资料（简介/生日/声优/印象语…），与「导入角色」分开 -->
               <n-button size="small" @click="openProfileImport()">导入资料</n-button>
               <n-button size="small" @click="openDedupe">重复角色</n-button>
@@ -4407,17 +4409,8 @@
         <!-- v0.9.7：同页面容器——抽屉表单里有 v-if 直邻子元素（lora 输入框/img2img
              参数块随画法策略切换），n-space 槽 key 全 1 会错位补丁，换 div.stack -->
         <div class="stack">
-          <n-grid :cols="2" :x-gap="10">
-            <n-gi>
-              <n-input v-model:value="form.id" :disabled="!isNew" placeholder="id（英文唯一标识）"></n-input>
-            </n-gi>
-            <n-gi>
-              <n-select v-model:value="form.pack" :options="drawerPackOpts"
-                        placeholder="所在卷"></n-select>
-              <!-- v0.67.0：改卷=跨卷移动（旧版会被「id 与卷 X 重复」拦死） -->
-              <div class="bind-tip" style="margin-top: 2px;">改选其他卷并保存 = 把角色<b>移动</b>到该卷（参考图 / 立绘 / 记录都跟着走）</div>
-            </n-gi>
-          </n-grid>
+          <n-input v-model:value="form.id" :disabled="!isNew"
+                   placeholder="id（英文唯一标识）"></n-input>
           <n-grid :cols="2" :x-gap="10">
             <n-gi>
               <n-input v-model:value="form.name" placeholder="角色名（必填）"></n-input>
@@ -4428,7 +4421,9 @@
           </n-grid>
           <n-grid :cols="3" :x-gap="10">
             <n-gi>
-              <n-select v-model:value="form.category" :options="catOpts"></n-select>
+              <!-- v0.68.0：卷收敛后 卷=类型，改类型 = 移动到对应卷（走合并保资产） -->
+              <n-select v-model:value="form.category" :options="catPickOpts"></n-select>
+              <div class="bind-tip" style="margin-top: 2px;">改类型会把这个角色<b>移动</b>到对应卷（参考图 / 立绘 / 记录都跟着走）</div>
             </n-gi>
             <n-gi>
               <n-select v-model:value="form.tier" :options="tierOpts"></n-select>
@@ -4490,6 +4485,9 @@
           </div>
           <n-input v-model:value="form.tags_en" type="textarea" :rows="4"
                    placeholder="英文 danbooru 角色 tag（必填）。角色 tag + 系列 tag + 稳定外观特征；括号写成 \\( \\) 转义，如 rem \\(re:zero\\)"></n-input>
+          <!-- v0.68.0：用户标签（替代卷的启停粒度）——命中「停用标签」的角色不入抽卡 -->
+          <n-input v-model:value="form.user_tags"
+                   placeholder="标签（可选；逗号分隔，如：测试, 未完工）——命中配置页「停用标签」的角色不参与抽卡"></n-input>
           <n-input v-model:value="form.quote" type="textarea" :rows="3"
                    placeholder="角色印象语（可选，显示在卡片上）：每行一句，可写多条——卡片会按抽签随机显示其中一句；只写一句则固定显示"></n-input>
           <n-space align="center">
@@ -4544,16 +4542,12 @@
             <a style="cursor:pointer; color: var(--wf-brand);"
                @click="gotoHelp('import_char')">帮助 → 角色导入</a></div>
         </n-alert>
-        <!-- v0.29.0：作品页批量导入时预填，导入的条目统一归到这个作品 -->
-        <!-- v0.67.0：类型 / 目标卷下拉（用户口径：类型就动漫/游戏两大类；
-             未选卷并入其他卷，未填作品并入其他作品） -->
+        <!-- v0.68.0：卷收敛后无「目标卷」——类型决定落卷（未选类型按条目自带，
+             条目没写 → 其他卷）；类型可在「类型管理」自定义 -->
         <n-space align="center" :wrap="true">
           <span style="font-size:13px;">类型：</span>
           <n-select v-model:value="importCategory" :options="importCatOpts"
                     style="width: 180px;"></n-select>
-          <span style="font-size:13px;">目标卷：</span>
-          <n-select v-model:value="importPack" :options="importPackOpts"
-                    style="width: 280px;"></n-select>
         </n-space>
         <n-input v-model:value="importSeries"
                  placeholder="作品名（可选；留空并入「其他」作品；填了则导入的角色统一归到该作品）"></n-input>
@@ -4577,6 +4571,44 @@
       <template #action>
         <n-button @click="importOpen=false">关闭</n-button>
         <n-button type="primary" :loading="importing" @click="doImport">导入</n-button>
+      </template>
+    </n-modal>
+
+    <!-- ============ 类型管理（v0.68.0：卷收敛后 卷=类型，可自定义添加） ============ -->
+    <n-modal v-model:show="typesOpen" preset="dialog" title="类型管理" style="width: 560px;">
+      <div class="stack">
+        <n-alert type="info" :show-icon="false">
+          类型 = 角色的归卷维度（每个类型一个卷，也是抽卡启用的开关单位）。
+          可自定义添加；<b>删除仅限空类型</b>；内置类型（动漫 / 游戏 / 其他）不可改删。
+          作品与类型无关：任何新作品都自动进作品库，不用在这里建。
+        </n-alert>
+        <div v-for="t in (meta.categories || [])" :key="t.key" class="quote-row"
+             style="align-items: center;">
+          <b>{{ t.title }}</b>
+          <n-tag size="tiny" :bordered="false" v-if="t.builtin">内置</n-tag>
+          <span class="cnt">{{ typeCounts[t.key] || 0 }} 个角色</span>
+          <span style="flex: 1;"></span>
+          <template v-if="renameKey === t.key">
+            <n-input v-model:value="renameText" size="small" style="width: 140px;"
+                     placeholder="新类型名"></n-input>
+            <n-button size="tiny" type="primary" @click="doRenameType(t)">保存</n-button>
+            <n-button size="tiny" @click="renameKey = ''">取消</n-button>
+          </template>
+          <template v-else>
+            <n-button size="tiny" :disabled="t.builtin" @click="startRenameType(t)">改名</n-button>
+            <n-button size="tiny" type="error"
+                      :disabled="t.builtin || (typeCounts[t.key] || 0) > 0"
+                      @click="deleteType(t)">删除</n-button>
+          </template>
+        </div>
+        <n-space align="center" :wrap="true">
+          <n-input v-model:value="newTypeName" placeholder="新类型名（如：小说）"
+                   style="width: 200px;" @keyup.enter="addType"></n-input>
+          <n-button type="primary" size="small" @click="addType">添加类型</n-button>
+        </n-space>
+      </div>
+      <template #action>
+        <n-button @click="typesOpen = false">关闭</n-button>
       </template>
     </n-modal>
 
@@ -5326,6 +5358,8 @@
     })();
   });
 
+  // v0.68.0：类型可自定义（工坊「类型管理」），内置映射仅作注册表加载前的
+  // 展示兜底（gal 为历史遗留，迁移后归入游戏）
   var CAT_LABELS = { anime: "动漫", gal: "galgame", game: "游戏", other: "其他" };
 
   var app = Vue.createApp({
@@ -5761,13 +5795,6 @@
         });
         return opts;
       });
-      var catOpts = [
-        { label: "全部分类", value: "" },
-        { label: "动漫", value: "anime" },
-        { label: "galgame", value: "gal" },
-        { label: "游戏", value: "game" },
-        { label: "其他", value: "other" }
-      ];
       var verifiedOpts = [
         { label: "全部", value: "" },
         { label: "已验证", value: "yes" },
@@ -5820,7 +5847,31 @@
         });
       });
       function portraitCount(id) { return meta.value.counts[id] || 0; }
-      function catLabel(c) { return CAT_LABELS[c] || "其他"; }
+      // v0.68.0：类型注册表来自 /pools 的 categories（内置 + 自定义），不再是
+      // 写死枚举；meta 未加载时回落内置映射
+      var catLabelMap = Vue.computed(function () {
+        var m = {};
+        ((meta.value && meta.value.categories) || []).forEach(function (t) {
+          m[t.key] = t.title;
+        });
+        return m;
+      });
+      function catLabel(c) {
+        return catLabelMap.value[c] || CAT_LABELS[c] || "其他";
+      }
+      var catOpts = Vue.computed(function () {
+        var out = [{ label: "全部分类", value: "" }];
+        ((meta.value && meta.value.categories) || []).forEach(function (t) {
+          out.push({ label: t.title, value: t.key });
+        });
+        return out;
+      });
+      // 抽屉 / 导入的「选类型」下拉（没有「全部」项）
+      var catPickOpts = Vue.computed(function () {
+        return ((meta.value && meta.value.categories) || []).map(function (t) {
+          return { label: t.title, value: t.key };
+        });
+      });
       function stratLabel(e) {
         var t = e.strategy_type || "base";
         if (t === "lora") return "lora";
@@ -5901,24 +5952,15 @@
       // ---- 导入角色 ----
       var importOpen = Vue.ref(false);
       var importText = Vue.ref("");
-      // v0.67.0：卷改下拉（默认其他卷；「跟随 JSON」才用 JSON 自带 pack），新增类型选择
-      var importPack = Vue.ref("other");
+      // v0.68.0：卷收敛后无目标卷——类型下拉读注册表（"" = 按条目自带）
       var importCategory = Vue.ref("");
       var importSeries = Vue.ref("");   // v0.29.0：作品页导入时预填，统一归入该作品
-      var importCatOpts = [
-        { label: "按条目自带（不指定）", value: "" },
-        { label: "动漫", value: "anime" },
-        { label: "游戏", value: "game" }
-      ];
-      var importPackOpts = Vue.computed(function () {
-        var opts = [{ label: "其他卷（默认：未选卷并入这里）", value: "other" }];
-        (meta.value.packs || []).forEach(function (p) {
-          if (p.pack === "other") { return; }
-          opts.push({ label: (p.title || p.pack) + "（" + (p.entries || []).length + " 条）",
-                      value: p.pack });
+      var importCatOpts = Vue.computed(function () {
+        var out = [{ label: "按条目自带（不指定）", value: "" }];
+        ((meta.value && meta.value.categories) || []).forEach(function (t) {
+          out.push({ label: t.title, value: t.key });
         });
-        opts.push({ label: "跟随 JSON 自带卷（不推荐）", value: "__json__" });
-        return opts;
+        return out;
       });
       var importing = Vue.ref(false);
       var importResult = Vue.ref(null);
@@ -6019,11 +6061,12 @@
       }
       var emptyForm = function () {
         return {
-          id: "", name: "", series: "", pack: (meta.value.packs[0] || {}).pack || "",
+          // v0.68.0：卷收敛后 卷=类型，pack 随 category 走，表单不再带 pack
+          id: "", name: "", series: "",
           category: "anime", tier: "S", strategy_type: "base",
           strategy_loras: "", strategy_ref: "", strategy_img2img_workflow: null,
           strategy_denoise: null,
-          tags_en: "", quote: "", color: "#E8B4C8", verified: false,
+          tags_en: "", user_tags: "", quote: "", color: "#E8B4C8", verified: false,
           // v0.54.8：头饰默认固定（帽类外观多为角色特征，默认不摘换）
           keep_footwear: false, keep_headwear: true, keep_outerwear: false
         };
@@ -6034,12 +6077,6 @@
         { label: "S", value: "S" }, { label: "A", value: "A" },
         { label: "B", value: "B" }, { label: "（不显示）", value: "" }
       ];
-      var drawerPackOpts = Vue.computed(function () {
-        return (meta.value.packs || []).map(function (p) {
-          return { label: p.title || p.pack, value: p.pack };
-        });
-      });
-
       function formToEntry(f) {
         var strategy = { type: f.strategy_type };
         if (f.strategy_type === "lora") {
@@ -6062,6 +6099,9 @@
           series: String(f.series || "").trim(), category: f.category,
           tier: f.tier || "", strategy: strategy,
           tags_en: String(f.tags_en || "").trim(),
+          // v0.68.0：用户标签（逗号分隔）——可被「停用标签」整体排除出抽卡
+          user_tags: String(f.user_tags || "").split(/[,，]+/)
+            .map(function (s) { return s.trim(); }).filter(Boolean),
           quote: quotes[0] || "",
           quotes: quotes,
           color: f.color || "#E8B4C8", verified: !!f.verified,
@@ -6080,6 +6120,8 @@
           strategy_img2img_workflow: st.img2img_workflow || null,
           strategy_denoise: (st.denoise !== undefined && st.denoise !== null) ? Number(st.denoise) : null,
           tags_en: e.tags_en || "",
+          // v0.68.0：用户标签回填（list → 逗号分隔文本）
+          user_tags: Array.isArray(e.user_tags) ? e.user_tags.join(", ") : (e.user_tags || ""),
           quote: (Array.isArray(e.quotes) && e.quotes.length ? e.quotes.join("\n") : (e.quote || "")),
           color: e.color || "#E8B4C8", verified: !!e.verified,
           keep_footwear: !!e.keep_footwear,
@@ -6098,7 +6140,6 @@
       function openImport() {
         importResult.value = null;
         importSeries.value = "";
-        importPack.value = "other";
         importCategory.value = "";
         importOpen.value = true;
       }
@@ -6123,9 +6164,7 @@
         try {
           var res = await apiPost("pools/import", {
             text: text,
-            // v0.67.0：「跟随 JSON 自带卷」= 不传 pack（后端用 JSON 的 pack，
-            // 没写也并入其他卷）；选了其他卷 / 现有卷则按所选落卷
-            pack: importPack.value === "__json__" ? "" : String(importPack.value || "other"),
+            // v0.68.0：卷收敛后无目标卷——类型决定落卷（"" = 按条目自带）
             series: String(importSeries.value || "").trim(),
             category: String(importCategory.value || ""),
             overwrite: !!importOverwrite.value
@@ -6139,6 +6178,46 @@
         } catch (e) { /* 已提示 */ } finally {
           importing.value = false;
         }
+      }
+      // ---- 类型管理（v0.68.0：卷收敛后 卷=类型，可自定义添加） ----
+      var typesOpen = Vue.ref(false);
+      var newTypeName = Vue.ref("");
+      var renameKey = Vue.ref("");
+      var renameText = Vue.ref("");
+      var typeCounts = Vue.computed(function () {
+        var out = {};
+        (meta.value.packs || []).forEach(function (p) {
+          out[p.pack] = (p.entries || []).length;
+        });
+        return out;
+      });
+      async function addType() {
+        var name = String(newTypeName.value || "").trim();
+        if (!name) { message.error("先填类型名"); return; }
+        try {
+          await apiPost("categories/add", { name: name });
+          message.success("类型已添加：" + name);
+          newTypeName.value = "";
+          await refreshAll();
+        } catch (e) { /* 已提示 */ }
+      }
+      function startRenameType(t) { renameKey.value = t.key; renameText.value = t.title; }
+      async function doRenameType(t) {
+        var name = String(renameText.value || "").trim();
+        if (!name) { message.error("先填新类型名"); return; }
+        try {
+          await apiPost("categories/rename", { key: t.key, name: name });
+          message.success("已改名：" + t.title + " → " + name);
+          renameKey.value = "";
+          await refreshAll();
+        } catch (e) { /* 已提示 */ }
+      }
+      async function deleteType(t) {
+        try {
+          await apiPost("categories/delete", { key: t.key });
+          message.success("已删除空类型：" + t.title);
+          await refreshAll();
+        } catch (e) { /* 已提示 */ }
       }
       function openNewForWork(series) {
         // 作品详情「添加角色」：直接新建一个属于该作品的角色（大概率角色库里
@@ -6164,7 +6243,8 @@
         }
         saving.value = true;
         try {
-          await apiPost("pools/save_entry", { pack: f.pack, entry: formToEntry(f) });
+          // v0.68.0：卷收敛后 pack = 类型（改类型 = 移动到对应卷）
+          await apiPost("pools/save_entry", { pack: f.category, entry: formToEntry(f) });
           message.success("已保存：" + f.name);
           showDrawer.value = false;
           await refreshAll();
@@ -11334,8 +11414,9 @@
         { title: "卡面", keys: ["card_scrim", "card_seal_pos"] },
         // v0.48.0：抽卡公平性（避开最近抽到的角色 / 立绘按用户遍历）
         // v0.54.2：same_stat_scope = 卡面统计口径（所有群共用 / 仅当前群）
+        // v0.68.0：disabled_user_tags = 停用标签（替代卷的启停粒度）
         { title: "抽卡规则", keys: ["draw_recency", "prefer_unused_portrait",
-                                    "same_stat_scope"] },
+                                    "same_stat_scope", "disabled_user_tags"] },
         // v0.55.0：签到联动（一条「签到」串起今日老婆 + 星语，仅当日首签才发）
         { title: "签到联动", keys: ["checkin_link_enabled", "checkin_link_only_first",
                                     "checkin_link_include_star", "checkin_link_require_wake",
@@ -11643,19 +11724,23 @@
         gotoGallery: gotoGallery,
         filterPack: filterPack, filterCat: filterCat, filterSeries: filterSeries,
         seriesOpts: seriesOpts, filterVerified: filterVerified,
+        // v0.68.0：catPickOpts（抽屉/导入选类型）、类型管理弹窗绑定
         keyword: keyword, packOpts: packOpts, catOpts: catOpts, verifiedOpts: verifiedOpts,
+        catPickOpts: catPickOpts,
+        typesOpen: typesOpen, newTypeName: newTypeName, typeCounts: typeCounts,
+        addType: addType, renameKey: renameKey, renameText: renameText,
+        startRenameType: startRenameType, doRenameType: doRenameType, deleteType: deleteType,
         filteredEntries: filteredEntries, entryCols: entryCols,
         showDrawer: showDrawer, drawerTitle: drawerTitle, isNew: isNew,
-        form: form, saving: saving, tierOpts: tierOpts, drawerPackOpts: drawerPackOpts,
+        form: form, saving: saving, tierOpts: tierOpts,
         quoteGenLoading: quoteGenLoading, doQuoteGen: doQuoteGen,
         openNew: openNew, openEdit: openEdit, saveForm: saveForm,
         doDeleteEntry: doDeleteEntry, doToggleVerified: doToggleVerified, togglePack: togglePack,
         drawerRefs: drawerRefs, drawerRefsLoading: drawerRefsLoading,
         onDrawerPanelFiles: onDrawerPanelFiles,
         designateRef: designateRef, disableDrawerRef: disableDrawerRef,
-        importOpen: importOpen, importText: importText, importPack: importPack,
+        importOpen: importOpen, importText: importText,
         importCategory: importCategory, importCatOpts: importCatOpts,
-        importPackOpts: importPackOpts,
         importSeries: importSeries,
         importing: importing, importResult: importResult,
         importOverwrite: importOverwrite,

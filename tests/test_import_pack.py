@@ -54,6 +54,11 @@ def ids_of(path: Path) -> list:
     return [e.get("id") for e in read(path).get("entries", [])]
 
 
+def cat_of(path: Path, cid: str):
+    return next((e.get("category") for e in read(path).get("entries", [])
+                 if e.get("id") == cid), None)
+
+
 async def call(handler, payload):
     async def fake_body():
         return payload
@@ -188,27 +193,30 @@ def test_import_defaults(td: Path):
                  "category": "game", "strategy": {}},
                 {"id": "a2", "name": "角色B", "tags_en": "1girl", "strategy": {}},
             ], ensure_ascii=False)}
-        # 未选卷（pack 留空）、JSON 是数组没有 pack → 并入其他卷；空 series → 其他
+        # v0.68.0：无目标卷——类型路由：a1 自带 game → 游戏卷；a2 无类型 → 其他卷
         res = asyncio.run(call(api.h_import_pack, dict(payload)))
-        check("无 pack 导入成功", res["status"] == "ok", str(res))
-        check("落到其他卷", res["data"]["pack"] == "other", str(res["data"]))
+        check("无类型参数导入成功", res["status"] == "ok", str(res))
+        check("返回落卷类型标题", res["data"]["pack"] == "游戏、其他",
+              str(res["data"]))
+        game = pools / "game.json"
         other = pools / "other.json"
-        check("其他卷文件已创建且标题正确",
-              other.is_file() and read(other).get("title") == "其他卷",
-              str(read(other))[:120])
+        check("自带类型条目路由到对应卷",
+              "a1" in ids_of(game) and cat_of(game, "a1") == "game")
+        check("无类型条目落入其他卷",
+              "a2" in ids_of(other) and cat_of(other, "a2") == "other")
         check("空 series 并入「其他」作品",
               next(e for e in read(other)["entries"]
                    if e["id"] == "a2")["series"] == "其他")
         check("自带 series 保留",
-              next(e for e in read(other)["entries"]
+              next(e for e in read(game)["entries"]
                    if e["id"] == "a1")["series"] == "某作")
 
-        # 类型选择：category=anime 覆盖条目自带 game
+        # 类型选择：category=anime 指定类型；a1 已存在 game 卷 → 跨类型跳过
         res2 = asyncio.run(call(api.h_import_pack, dict(
             payload, category="anime", overwrite=True)))
-        check("类型覆盖生效",
-              next(e for e in read(other)["entries"]
-                   if e["id"] == "a1")["category"] == "anime", str(res2))
+        check("跨类型已存在跳过并提示改类型",
+              any("改类型请用编辑抽屉" in sk.get("reason", "")
+                  for sk in res2["data"]["skipped"]), str(res2["data"]))
         check("结果带回类型", res2["data"].get("category") == "anime", str(res2))
     finally:
         st.close()
@@ -222,29 +230,31 @@ def test_import_pack_selection(td: Path):
                 {"id": "new8_1", "name": "新角色", "series": "鸣潮",
                  "category": "game", "tags_en": "1girl", "strategy": {}}]},
                 ensure_ascii=False)}
-        # 指定现有卷：并入该卷文件，不新建卷
-        res = asyncio.run(call(api.h_import_pack, dict(payload, pack="game")))
-        check("指定现有卷导入成功", res["data"]["pack"] == "game", str(res))
-        check("角色并入所选卷文件", "new8_1" in ids_of(pools / "game.json"))
+        # v0.68.0：指定类型 = 落该类型卷；JSON 自带 pack 字段不再生效
+        res = asyncio.run(call(api.h_import_pack, dict(payload, category="game")))
+        check("指定类型导入成功", res["data"]["pack"] == "游戏", str(res))
+        check("角色并入类型卷文件", "new8_1" in ids_of(pools / "game.json"))
 
-        # 跟随 JSON 自带卷（pack 留空 → 用 JSON 的 wuthering_waves）
+        # JSON 自带 pack 字段不再生效——按条目类型路由，不会创建一次性卷
         res2 = asyncio.run(call(api.h_import_pack, {
             "text": json.dumps({"pack": "wuthering_waves", "title": "鸣潮", "entries": [
                 {"id": "new8_2", "name": "新角色2", "series": "鸣潮",
                  "category": "game", "tags_en": "1girl", "strategy": {}}]},
                 ensure_ascii=False)}))
-        check("整卷对象 pack 为空时跟随 JSON 自带卷",
-              res2["data"]["pack"] == "wuthering_waves", str(res2))
-        check("自带卷文件追加成功", "new8_2" in ids_of(pools / "wuthering_waves.json"))
+        check("JSON 自带 pack 不再生效（按类型落卷）",
+              res2["data"]["pack"] == "游戏", str(res2))
+        check("角色并入类型卷文件", "new8_2" in ids_of(pools / "game.json"))
+        check("JSON 自带卷没有被追加角色",
+              "new8_2" not in ids_of(pools / "wuthering_waves.json"))
 
-        # pack 留空 + 数组 JSON（没有 pack 字段）→ 默认其他卷
+        # 条目自带 category（game）→ 路由到游戏卷；真正无类型的才落 other
         res3 = asyncio.run(call(api.h_import_pack, {
             "text": json.dumps([
                 {"id": "new8_3", "name": "新角色3", "series": "鸣潮",
                  "category": "game", "tags_en": "1girl", "strategy": {}}],
                 ensure_ascii=False)}))
-        check("pack 留空默认其他卷", res3["data"]["pack"] == "other", str(res3))
-        check("其他卷追加成功", "new8_3" in ids_of(pools / "other.json"))
+        check("条目自带类型路由到对应卷", res3["data"]["pack"] == "游戏", str(res3))
+        check("角色并入类型卷文件", "new8_3" in ids_of(pools / "game.json"))
     finally:
         st.close()
 

@@ -758,18 +758,18 @@ class Store:
                            series_scope=None, logger=None) -> dict:
         """幂等迁移：卷 JSON → packs/works/characters，图片 → assets。
 
-        只纳入 `series ∈ series_scope`（默认原神 / 鸣潮 / 异环），其余作品留在
-        JSON 里不删，等稳定后再纳入。重复启动不产生重复行，新表可随时重建。
-        阶段 1 不改任何现有读写路径 —— JSON 仍是真源，抽卡 / 工坊行为不变。
+        v0.68.0 起**纳入全部作品**——「只认原神/鸣潮/异环」的 scope 门禁移除
+        （用户口径：以后有其他作品不能看不见；scope 外作品此前整卷在读路径
+        消失）。重复启动不产生重复行，新表可随时重建。JSON 仍是真源。
+        `series_scope` 参数保留兼容旧调用，已不再生效。
         """
-        scope = self.series_scope(series_scope)
         pools_dir, data_dir = Path(pools_dir), Path(data_dir)
-        stats = {"scope": sorted(scope), "skipped": 0}
+        stats = {"scope": ["all"], "skipped": 0}
         # 1) 卷 / 作品 / 角色：统一走 sync_pack_file（同一套 upsert + 清理逻辑，
         #    确保「启动迁移」与「工坊写完同步」不会出现两套口径）
         for path in (sorted(pools_dir.glob("*.json"))
                      if pools_dir.is_dir() else []):
-            res = self.sync_pack_file(path, series_scope=scope)
+            res = self.sync_pack_file(path)
             stats["skipped"] += int(res.get("skipped") or 0)
         self._conn.commit()
         # 2) 立绘行：登记并回填 asset_id
@@ -807,22 +807,18 @@ class Store:
             logger.info(f"[moe_waifu] 关系模型迁移（阶段 1）：{stats}")
         return stats
 
-    _SERIES_SCOPE = ("原神", "鸣潮", "异环")
+    def _upsert_character(self, raw, pack_id: int, scope=None) -> str:
+        """upsert 单条角色（含作品），返回 char_id；不合法 → ""。
 
-    @classmethod
-    def series_scope(cls, scope=None) -> set:
-        """首版纳入新模型的作品集合（用户口径：先只做这三个，稳定后再加）。"""
-        return {str(s).strip() for s in
-                (scope or cls._SERIES_SCOPE) if str(s).strip()}
-
-    def _upsert_character(self, raw, pack_id: int, scope: set) -> str:
-        """upsert 单条角色（含作品），返回 char_id；不合法 / 不在 scope → ""。"""
+        v0.68.0：作品 scope 门禁移除——所有作品的角色都入新表（`scope` 参数
+        保留兼容旧调用，已不生效）。
+        """
         if not isinstance(raw, dict):
             return ""
         cid = str(raw.get("id") or "").strip()
         name = str(raw.get("name") or "").strip()
         series = str(raw.get("series") or "").strip()
-        if not cid or not name or series not in scope:
+        if not cid or not name:
             return ""
         self._conn.execute(
             "INSERT OR IGNORE INTO works(name, category, color, created_at) "
@@ -878,9 +874,9 @@ class Store:
 
         v0.25.0 切读路径后，工坊所有写操作仍落 JSON（真源不动），写完经
         `webui_api._json_save` 钩子调这里，读路径立刻能看到改动。
-        非 scope 角色不纳入（首版只有三游戏），也**不会删除其它卷的数据**。
+        v0.68.0：作品 scope 门禁移除，全部角色入表（`series_scope` 参数保留
+        兼容旧调用，已不生效）。
         """
-        scope = self.series_scope(series_scope)
         path = Path(path)
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -904,7 +900,7 @@ class Store:
         pack_id = int(prow["id"]) if prow else 0
         kept, skipped = set(), 0
         for raw in data["entries"]:
-            cid = self._upsert_character(raw, pack_id, scope)
+            cid = self._upsert_character(raw, pack_id)
             if cid:
                 kept.add(cid)
             else:
@@ -914,20 +910,61 @@ class Store:
         gone = existing - kept
         for cid in gone:
             self._conn.execute("DELETE FROM characters WHERE char_id=?", (cid,))
-        # v0.25.2：该卷没有任何「已纳入」角色（v0.22.0 遗留的 genshin/nte/
-        # wuthering_waves 旧卷、或只有非 scope 角色的卷）→ 删掉 packs 记录，
-        # 前端卷筛选不再出现一堆 0 条目的空卷。**卷 JSON 文件保持不动**，
-        # 将来把作品加回 series_scope 后重新迁移就会自动恢复。
+        # v0.25.2：该卷没有任何合法角色（空卷 / 全是脏条目）→ 删掉 packs 记录，
+        # 前端卷筛选不再出现一堆 0 条目的空卷。**卷 JSON 文件保持不动**。
         if not kept:
             self._conn.execute("DELETE FROM packs WHERE id=?", (pack_id,))
         self._conn.commit()
         return {"pack": pack_name, "kept": len(kept), "skipped": skipped,
                 "removed": len(gone), "pack_dropped": not kept}
 
+    def rename_pack(self, old_name: str, new_name: str, title: str = "") -> dict:
+        """重命名卷（v0.68.0 类型改名用）：packs 行原位改名，characters 的
+        pack_id 指向不变。只改 DB；卷 JSON 文件的改名由调用方负责。"""
+        old_name, new_name = str(old_name).strip(), str(new_name).strip()
+        if not old_name or not new_name or old_name == new_name:
+            return {"error": "name"}
+        row = self._conn.execute(
+            "SELECT 1 FROM packs WHERE name=?", (new_name,)).fetchone()
+        if row:
+            return {"error": "exists"}
+        self._conn.execute(
+            "UPDATE packs SET name=?, title=CASE WHEN ?='' THEN title ELSE ? END"
+            " WHERE name=?", (new_name, str(title or ""), str(title or ""),
+                              old_name))
+        self._conn.commit()
+        return {"renamed": old_name, "to": new_name}
+
+    def delete_pack(self, name: str) -> dict:
+        """删除空卷的 packs 记录（v0.68.0 类型删除用；调用方须先确认卷内
+        无角色，角色行不会由此删除）。"""
+        self._conn.execute("DELETE FROM packs WHERE name=?", (str(name).strip(),))
+        self._conn.commit()
+        return {"deleted": str(name).strip()}
+
+    def prune_packs(self, keep_names: set) -> dict:
+        """删除不在 keep 集合里的卷记录及其角色行（v0.68.0 卷收敛用）。
+
+        调用方须保证这些卷的 JSON 已并入 keep 对应的卷——角色行删除后，
+        随后的 sync/迁移会按合并后的卷文件以新卷归属重建。
+        """
+        removed = []
+        for r in self._conn.execute(
+                "SELECT id, name FROM packs").fetchall():
+            if r["name"] in keep_names:
+                continue
+            self._conn.execute(
+                "DELETE FROM characters WHERE pack_id=?", (r["id"],))
+            self._conn.execute("DELETE FROM packs WHERE id=?", (r["id"],))
+            removed.append(r["name"])
+        if removed:
+            self._conn.commit()
+        return {"removed": removed}
+
     def load_packs(self) -> list:
         """按 `pool.load_packs` 同构返回：卷 → 条目（原始形状，供 normalize_entry）。
 
-        只含已纳入新表的角色（首版 = 原神 / 鸣潮 / 异环）；空库返回 []，调用方
+        v0.68.0 起包含全部作品的角色（scope 门禁移除）；空库返回 []，调用方
         据此回退 JSON。字段与卷 JSON 一一对应，工坊 / 抽卡代码零改动。
         """
         out = []

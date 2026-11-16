@@ -84,6 +84,11 @@ def _pools_dir(plugin) -> Path:
     return Path(plugin._data_dir) / "pools"
 
 
+def _disabled_tags_of(plugin) -> set:
+    """停用标签集合（配置 disabled_user_tags，逗号分隔）——抽卡候选过滤用。"""
+    return set(pool.parse_user_tags(str(plugin._cfg("disabled_user_tags", "") or "")))
+
+
 def _load_pack_file(plugin, pack_name: str) -> tuple | None:
     """按卷名读原始卷文件，返回 (path, data)；不存在返回 None。"""
     path = _pools_dir(plugin) / f"{pack_name}.json"
@@ -125,6 +130,159 @@ def _json_save(path: Path, data) -> None:
         except Exception:
             logger.warning(f"[{PLUGIN_NAME}] 卷同步新表失败 {path.name}\n"
                            f"{traceback.format_exc()}")
+
+
+# ---------- 类型注册表与卷收敛（v0.68.0） ----------
+# 用户口径：卷收敛为「类型」——类型可自定义添加（内置 动漫/游戏/其他），
+# 每个类型一个卷文件（pools/<类型key>.json），卷对用户不可见，心智只剩
+# 「类型 + 作品」两层。作品（series）仍是自由文本，不受任何限制。
+
+def _types_path(plugin) -> Path:
+    return Path(plugin._data_dir) / "category_types.json"
+
+
+def safe_type_key(name: str) -> str:
+    """类型名 → 卷 key / 文件名（去文件系统非法字符，限长 24）。"""
+    s = re.sub(r'[\\/:*?"<>|\r\n\t]', "", str(name or "")).strip()[:24]
+    return s
+
+
+def _builtin_types() -> list:
+    return [{"key": "anime", "title": "动漫", "builtin": True},
+            {"key": "game", "title": "游戏", "builtin": True},
+            {"key": "other", "title": "其他", "builtin": True}]
+
+
+def load_type_registry(plugin) -> list:
+    """类型注册表：内置三类型 + 用户自定义（category_types.json 的 custom 列表）。
+
+    key 全局唯一、title 也不得与现有 key/title 重名（避免「游戏」出现两份）。
+    """
+    types = _builtin_types()
+    keys = {t["key"] for t in types}
+    titles = {t["title"] for t in types}
+    try:
+        data = _json_load(_types_path(plugin))
+        for t in (data.get("custom") or []):
+            if not isinstance(t, dict):
+                continue
+            k = str(t.get("key") or "").strip()
+            title = str(t.get("title") or "").strip()
+            if not k or k in keys or title in titles:
+                continue
+            types.append({"key": k, "title": title or k, "builtin": False})
+            keys.add(k)
+            titles.add(title or k)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        logger.warning(f"[{PLUGIN_NAME}] 类型注册表读取失败，只用内置类型\n"
+                       f"{traceback.format_exc()}")
+    return types
+
+
+def _save_type_registry(plugin, custom: list) -> None:
+    _types_path(plugin).write_text(
+        json.dumps({"custom": custom}, ensure_ascii=False, indent=2),
+        encoding="utf-8")
+
+
+def _rename_pack_file(plugin, old_key: str, new_key: str, title: str) -> None:
+    """卷文件改键名：pools/<old>.json → pools/<new>.json（旧文件进回收站）。"""
+    old_fp = Path(plugin._data_dir) / "pools" / f"{old_key}.json"
+    if not old_fp.is_file():
+        return
+    data = _json_load(old_fp)
+    data["pack"] = new_key
+    data["title"] = title
+    _json_save(Path(plugin._data_dir) / "pools" / f"{new_key}.json", data)
+    _trash_files(plugin, [f"pools/{old_key}.json"])
+
+
+def migrate_pack_collapse(plugin) -> dict:
+    """卷收敛迁移（v0.68.0，启动时跑一次、幂等，JSON 层）。
+
+    非标准卷（历史导入的 wuthering_waves / gal / demo / imported…）按条目
+    类型并入固定类型卷（anime/game/other + 自定义类型）；gal 一次性并入游戏；
+    同 id 冲突保留资产分高的一份；原卷文件整体移入 data/_trash/<时间戳>/
+    备份后从 pools/ 消失。只动 JSON——随后的 migrate_relational 会按合并后
+    的文件重建新表（stale 卷记录由 main 侧 prune_packs 清理）。
+    """
+    pools_dir = _pools_dir(plugin)
+    if not pools_dir.is_dir():
+        return {"merged": 0, "removed_packs": []}
+    types = load_type_registry(plugin)
+    canonical = {t["key"] for t in types}
+    titles = {t["key"]: t["title"] for t in types}
+    files: dict = {}
+    for f in sorted(pools_dir.glob("*.json")):
+        try:
+            d = _json_load(f)
+        except Exception:
+            continue
+        if not isinstance(d, dict) or not isinstance(d.get("entries"), list):
+            continue
+        key = str(d.get("pack") or f.stem).strip()
+        files[key] = (f, d)
+    merged_total, removed_packs = 0, []
+    # 1) 标准卷内的 gal → game 重写（normalize 也会兜，历史文件就地归一）
+    for key in list(files.keys()):
+        if key not in canonical:
+            continue
+        f, d = files[key]
+        changed = False
+        for raw in d["entries"]:
+            if isinstance(raw, dict) and str(raw.get("category") or "").strip().lower() == "gal":
+                raw["category"] = "game"
+                changed = True
+        if changed:
+            _json_save(f, d)
+    # 2) 非标准卷 → 按条目类型并入标准卷
+    for key in list(files.keys()):
+        if key in canonical:
+            continue
+        f, d = files[key]
+        if not d.get("enabled", True):
+            logger.info(f"[{PLUGIN_NAME}] 卷收敛：停用卷 {key} 的角色一并并入"
+                        "（如需排除请用标签或关闭 verified）")
+        for raw in d["entries"]:
+            if not isinstance(raw, dict):
+                continue
+            cat = pool.normalize_category(raw.get("category"))
+            if cat not in canonical:
+                cat = "other"
+            raw["category"] = cat
+            if cat not in files:
+                files[cat] = (pools_dir / f"{cat}.json", {
+                    "pack": cat, "title": titles.get(cat, cat),
+                    "enabled": True, "entries": []})
+            target = files[cat][1]
+            cid = str(raw.get("id") or "").strip()
+            dup_idx = next((i for i, r in enumerate(target["entries"])
+                            if isinstance(r, dict)
+                            and str(r.get("id") or "").strip() == cid), None) if cid else None
+            if dup_idx is not None:
+                # 同 id 冲突（理论不会有，全库唯一）：保留资产分高的一份
+                if pool.asset_score(raw, 0) > pool.asset_score(
+                        target["entries"][dup_idx], 0):
+                    target["entries"][dup_idx] = raw
+                continue
+            target["entries"].append(raw)
+            merged_total += 1
+        removed_packs.append(key)
+    # 3) 写回标准卷（只在动过时）+ 原卷文件进回收站
+    for key in canonical:
+        if key not in files:
+            continue
+        f, d = files[key]
+        _json_save(f, d)
+    for key in removed_packs:
+        f, _d = files[key]
+        _trash_files(plugin, [f"pools/{f.name}"])
+    if removed_packs:
+        logger.info(f"[{PLUGIN_NAME}] 卷收敛完成：并入 {merged_total} 个角色，"
+                    f"移除卷 {removed_packs}（原文件在回收站）")
+    return {"merged": merged_total, "removed_packs": removed_packs}
 
 
 def _version_of() -> str:
@@ -358,6 +516,8 @@ async def h_pools(plugin) -> dict:
         "cover_paths": cover_paths,
         "version": _version_of(),
         "anima_ready": anima_ready,
+        # v0.68.0：类型注册表（内置 + 自定义），前端下拉 / 筛选全读它
+        "categories": load_type_registry(plugin),
         "quota": int(plugin._cfg("portraits_per_char", 5)),
         "draw_timeout": int(plugin._cfg("draw_timeout", 120)),
         "allow_unverified": bool(plugin._cfg("allow_unverified", False)),
@@ -370,6 +530,10 @@ async def h_save_entry(plugin) -> dict:
     entry = body.get("entry")
     if not pack_name or not isinstance(entry, dict):
         return err("缺少 pack 或 entry 字段")
+    # v0.68.0：卷收敛后 pack = 类型（key），只接受类型注册表里的值——堵住
+    # 「随手 POST 一个新卷名」再造出一次性卷的口子
+    if pack_name not in {t["key"] for t in load_type_registry(plugin)}:
+        return err(f"未知类型：{pack_name}（请先在「类型管理」里添加）")
     normalized = pool.normalize_entry(entry, pack_name)
     if normalized is None:
         return err("条目不完整：id / name / tags_en 必填")
@@ -448,37 +612,39 @@ async def h_save_entry(plugin) -> dict:
 
 
 async def h_import_pack(plugin) -> dict:
-    """批量导入角色：把粘贴/上传的 JSON 落成一卷（新建或按 id 合并进已有卷）。
+    """批量导入角色：把粘贴/上传的 JSON 按类型落卷（卷收敛后无「目标卷」）。
 
     接受两种 JSON 形态：
       - 整卷对象：{"pack": "卷名", "title": "...", "entries": [ {...}, ... ]}
-      - 纯数组：[{...}, ...]  → 用请求里的 pack 字段（或默认 "imported"）当卷名
+      - 纯数组：[{...}, ...]
     每条需含 id / name / tags_en（走 normalize_entry 校验，不合格整条跳过）。
 
-    v0.23.0：查重范围从「目标卷」扩到**全库**——同 id 在别的卷已存在也算
-    重复（导入的旧卷后来并进新卷，界面上就会一人两份）。overwrite 默认关闭，
-    已存在一律跳过；开启时只用导入内容更新基础字段（name/series/tags 等），
-    `strategy` / `cover` / `verified` / `id` / `pack` 全部保留本地值，参考图
-    绑定与封面不会丢。同名同作品但 id 不同的不自动合并，交给「重复角色」
-    工具处理，避免误把两个不同角色并成一条。
+    v0.23.0：查重范围扩到**全库**——同 id 已存在算重复；overwrite 开启时只用
+    导入内容更新基础字段，`strategy` / `cover` / `verified` 全部保留本地值。
+    同名同作品但 id 不同的不自动合并，交给「重复角色」工具处理。
 
-    v0.29.0：新增可选 `series`——「作品库 → 批量导入」从这里进来时带上当前
-    作品名，导入的条目**统一归到该作品**（JSON 里写错作品名的也一并纠正），
-    留空则完全按条目自带的 series 走（角色库的普通导入行为不变）。
+    v0.29.0：可选 `series`——导入的条目统一归到该作品，留空按条目自带。
 
-    v0.67.0（用户口径）：①新增可选 `category`（anime=动漫 / game=游戏，留空 =
-    按条目自带）——导入时可选类型；②未选卷（pack 留空且 JSON 没写 pack）不再
-    落到 imported 卷，而是并入「其他卷」（key=other，自动创建）；③条目没写
-    series 且未指定作品 → 并入「其他」作品。避免导入随手造出一堆一次性卷。
+    v0.67.0：新增可选 `category`（导入时可选类型）；条目没写 series → 并入
+    「其他」作品。
+
+    v0.68.0：卷收敛——**pack 由条目类型决定，不再有目标卷 / JSON 自带 pack**：
+    选了类型 = 全部落该类型卷；未选 = 按条目自带 category（gal→game），条目
+    没写 → other 卷。跨类型覆盖不再生效（同 id 已存在于其他类型时跳过并提示
+    用编辑抽屉改类型——那是移动语义，走合并保资产）。
     """
     body = await _body()
     text = str(body.get("text") or "").strip()
-    pack_override = str(body.get("pack") or "").strip()
     series_override = str(body.get("series") or "").strip()[:60]
     overwrite = bool(body.get("overwrite", False))
     category = str(body.get("category") or "").strip().lower()
-    if category and category not in pool.CATEGORY_LABELS:
-        category = ""   # 非法枚举按未指定处理（按条目自带）
+    if category == "gal":
+        category = "game"
+    types = load_type_registry(plugin)
+    type_keys = {t["key"] for t in types}
+    type_titles = {t["key"]: t["title"] for t in types}
+    if category and category not in type_keys:
+        return err(f"未知类型：{category}（请先在「类型管理」里添加）")
     if not text:
         return err("请粘贴或上传 JSON 文本")
     try:
@@ -486,29 +652,26 @@ async def h_import_pack(plugin) -> dict:
     except Exception as exc:
         return err("JSON 解析失败：" + str(exc)[:120])
     if isinstance(obj, dict):
-        pack_name = pack_override or str(obj.get("pack") or "").strip() or "other"
-        # key=other 的卷统一标题「其他卷」（新建时；已有卷保留原标题不动）
-        title = ("其他卷" if pack_name == "other"
-                 else str(obj.get("title") or pack_name or "导入卷"))
         entries = obj.get("entries")
     elif isinstance(obj, list):
-        pack_name = pack_override or "other"
-        title = "其他卷" if pack_name == "other" else (pack_override or "导入卷")
         entries = obj
     else:
         return err("JSON 需为「角色数组」或「{pack, entries}」对象")
-    if not pack_name:
-        return err("缺少卷名：请在 JSON 里给 pack 字段，或填写卷名输入框")
     if not isinstance(entries, list) or not entries:
         return err("entries 为空或非数组")
     good, skipped = [], []
     for raw in entries:
-        e = pool.normalize_entry(raw, pack_name)
+        e = pool.normalize_entry(raw, "other")
         if e:
+            # 类型路由：选了类型 = 全部落该类型；未选 = 按条目自带（gal→game），
+            # 条目没写 → other。注册表之外的类型落 other。
+            cat = category or pool.normalize_category(raw.get("category"))
+            if cat not in type_keys:
+                cat = "other"
+            e["category"] = cat
+            e["pack"] = cat
             if series_override:
                 e["series"] = series_override
-            if category:
-                e["category"] = category
             if not str(e["series"] or "").strip():
                 e["series"] = "其他"   # 未选作品且条目没写 → 并入「其他」作品
             good.append(e)
@@ -546,68 +709,175 @@ async def h_import_pack(plugin) -> dict:
             if ns[0]:
                 by_ns.setdefault(ns, (p["pack"], idx))
 
-    target_path = pools_dir / f"{pack_name}.json"
-    created = not target_path.exists()
-    if pack_name not in pack_data:
-        pack_data[pack_name] = (target_path, {
-            "pack": pack_name, "title": title, "enabled": True, "entries": []})
-    _, target_data = pack_data[pack_name]
-    if not isinstance(target_data.get("entries"), list):
-        target_data["entries"] = []
-    target_data["pack"] = pack_name
-    target_data["title"] = target_data.get("title") or title
-    target_data["enabled"] = bool(target_data.get("enabled", True))
-
     added = updated = dup_skipped = 0
     dirty: set = set()
+    touched: list = []
+    created = False
+    # 按（最终）类型分组写回：每类一个卷文件（v0.68.0：卷=类型）
+    groups: dict = {}
     for e in good:
-        cid = e["id"]
-        ns = (str(e["name"]).strip().lower(),
-              str(e["series"] or "").strip().lower())
-        if cid in by_id:
-            loc = by_id[cid]
-            if overwrite and loc[0] in pack_data:
-                _, data = pack_data[loc[0]]
-                lst = data["entries"]
-                if 0 <= loc[1] < len(lst):
-                    cur_e = pool.normalize_entry(lst[loc[1]], loc[0])
-                    # 索引可能因脏数据（非 dict 条目被装载层过滤）错位，
-                    # 写回前再对一次 id，绝不误改别的角色。
-                    if cur_e and cur_e["id"] == cid:
-                        lst[loc[1]] = pool.merge_imported_entry(lst[loc[1]], e)
-                        updated += 1
-                        dirty.add(loc[0])
-                        continue
-            dup_skipped += 1
-            skipped.append({"id": cid, "reason": "全库已存在"
-                            + ("" if overwrite else "（未开启覆盖）")})
-            continue
-        if ns[0] and ns in by_ns:
-            dup_skipped += 1
-            skipped.append({"id": cid,
-                            "reason": "同名同作品已存在（请用重复角色工具处理）"})
-            continue
-        # v0.31.0：入库日期随新建条目记录（导入的覆盖更新不动旧值）
-        try:
-            e["added_at"] = plugin._today()
-        except Exception:
-            e["added_at"] = time.strftime("%Y-%m-%d")
-        target_data["entries"].append(e)
-        idx = len(target_data["entries"]) - 1
-        by_id[cid] = (pack_name, idx)
-        if ns[0]:
-            by_ns.setdefault(ns, (pack_name, idx))
-        added += 1
-        dirty.add(pack_name)
+        groups.setdefault(e["pack"], []).append(e)
+    for pack_name in sorted(groups):
+        target_path = pools_dir / f"{pack_name}.json"
+        if pack_name not in pack_data:
+            created = True
+            pack_data[pack_name] = (target_path, {
+                "pack": pack_name,
+                "title": type_titles.get(pack_name, pack_name),
+                "enabled": True, "entries": []})
+        _, target_data = pack_data[pack_name]
+        if not isinstance(target_data.get("entries"), list):
+            target_data["entries"] = []
+        target_data["pack"] = pack_name
+        target_data["title"] = (target_data.get("title")
+                                or type_titles.get(pack_name, pack_name))
+        target_data["enabled"] = bool(target_data.get("enabled", True))
+        touched.append(pack_name)
+        for e in groups[pack_name]:
+            cid = e["id"]
+            ns = (str(e["name"]).strip().lower(),
+                  str(e["series"] or "").strip().lower())
+            if cid in by_id:
+                loc = by_id[cid]
+                if overwrite and loc[0] == pack_name and loc[0] in pack_data:
+                    _, data = pack_data[loc[0]]
+                    lst = data["entries"]
+                    if 0 <= loc[1] < len(lst):
+                        cur_e = pool.normalize_entry(lst[loc[1]], loc[0])
+                        # 索引可能因脏数据（非 dict 条目被装载层过滤）错位，
+                        # 写回前再对一次 id，绝不误改别的角色。
+                        if cur_e and cur_e["id"] == cid:
+                            lst[loc[1]] = pool.merge_imported_entry(lst[loc[1]], e)
+                            updated += 1
+                            dirty.add(loc[0])
+                            continue
+                reason = "全库已存在" + ("" if overwrite else "（未开启覆盖）")
+                if overwrite and loc[0] != pack_name:
+                    reason = (f"已存在于类型「{type_titles.get(loc[0], loc[0])}」"
+                              "（改类型请用编辑抽屉，移动会保留参考图等资产）")
+                dup_skipped += 1
+                skipped.append({"id": cid, "reason": reason})
+                continue
+            if ns[0] and ns in by_ns:
+                dup_skipped += 1
+                skipped.append({"id": cid,
+                                "reason": "同名同作品已存在（请用重复角色工具处理）"})
+                continue
+            # v0.31.0：入库日期随新建条目记录（导入的覆盖更新不动旧值）
+            try:
+                e["added_at"] = plugin._today()
+            except Exception:
+                e["added_at"] = time.strftime("%Y-%m-%d")
+            target_data["entries"].append(e)
+            idx = len(target_data["entries"]) - 1
+            by_id[cid] = (pack_name, idx)
+            if ns[0]:
+                by_ns.setdefault(ns, (pack_name, idx))
+            added += 1
+            dirty.add(pack_name)
     for name in dirty:
         path, data = pack_data[name]
         _json_save(path, data)
     return ok({
-        "pack": pack_name, "created": created, "series": series_override,
+        "pack": "、".join(type_titles.get(t, t) for t in touched),
+        "created": created, "series": series_override,
         "category": category,
         "imported": added, "updated": updated, "duplicates": dup_skipped,
         "total": len(good), "skipped": skipped, "overwrite": overwrite,
     })
+
+
+async def h_categories(plugin) -> dict:
+    """类型注册表清单（内置 动漫/游戏/其他 + 用户自定义）。"""
+    return ok({"items": load_type_registry(plugin)})
+
+
+async def h_category_add(plugin) -> dict:
+    """添加自定义类型（即建一个同名的类型卷；有角色落入时才真正落盘）。"""
+    body = await _body()
+    name = str(body.get("name") or "").strip()
+    key = safe_type_key(name)
+    if not name or not key:
+        return err("类型名不能为空（且需含合法字符）")
+    types = load_type_registry(plugin)
+    if key in {t["key"] for t in types} or name in {t["title"] for t in types}:
+        return err(f"类型已存在：{name}")
+    try:
+        custom = _json_load(_types_path(plugin)).get("custom") or []
+    except Exception:
+        custom = []
+    custom = [t for t in custom if isinstance(t, dict)]
+    custom.append({"key": key, "title": name})
+    _save_type_registry(plugin, custom)
+    return ok({"items": load_type_registry(plugin), "added": key})
+
+
+async def h_category_rename(plugin) -> dict:
+    """类型改名：注册表、卷文件、新表 packs 行三处一起改（内置类型拒绝）。
+
+    新表侧 packs 行原位改名（characters 的 pack_id 指向不变，不存在行时是
+    0 行更新、无害）；卷文件改名走回收站备份。
+    """
+    body = await _body()
+    key = str(body.get("key") or "").strip()
+    name = str(body.get("name") or "").strip()
+    new_key = safe_type_key(name)
+    if not name or not new_key:
+        return err("类型名不能为空（且需含合法字符）")
+    types = load_type_registry(plugin)
+    cur = next((t for t in types if t["key"] == key), None)
+    if cur is None:
+        return err(f"类型不存在：{key}")
+    if cur.get("builtin"):
+        return err("内置类型（动漫 / 游戏 / 其他）不能改名")
+    if new_key in {t["key"] for t in types if t["key"] != key} \
+            or name in {t["title"] for t in types if t["key"] != key}:
+        return err(f"类型已存在：{name}")
+    try:
+        custom = _json_load(_types_path(plugin)).get("custom") or []
+    except Exception:
+        custom = []
+    custom = [t for t in custom if isinstance(t, dict)]
+    for t in custom:
+        if t.get("key") == key:
+            t["key"], t["title"] = new_key, name
+    _save_type_registry(plugin, custom)
+    _rename_pack_file(plugin, key, new_key, name)
+    if plugin._store:
+        plugin._store.rename_pack(key, new_key, name)
+    return ok({"items": load_type_registry(plugin), "renamed": new_key})
+
+
+async def h_category_delete(plugin) -> dict:
+    """删除自定义类型：仅限空类型（卷内还有角色时拒绝）。内置类型拒绝。"""
+    body = await _body()
+    key = str(body.get("key") or "").strip()
+    types = load_type_registry(plugin)
+    cur = next((t for t in types if t["key"] == key), None)
+    if cur is None:
+        return err(f"类型不存在：{key}")
+    if cur.get("builtin"):
+        return err("内置类型（动漫 / 游戏 / 其他）不能删除")
+    count = 0
+    for pack in pool.load_packs(_pools_dir(plugin), logger):
+        if pack["pack"] == key:
+            count = len(pack["entries"])
+            break
+    if count:
+        return err(f"类型「{cur['title']}」还有 {count} 个角色，"
+                   "请先在编辑抽屉里改类型移走后再删除")
+    try:
+        custom = _json_load(_types_path(plugin)).get("custom") or []
+    except Exception:
+        custom = []
+    custom = [t for t in custom if isinstance(t, dict) and t.get("key") != key]
+    _save_type_registry(plugin, custom)
+    fp = Path(plugin._data_dir) / "pools" / f"{key}.json"
+    if fp.is_file():
+        _trash_files(plugin, [f"pools/{key}.json"])
+    if plugin._store:
+        plugin._store.delete_pack(key)
+    return ok({"items": load_type_registry(plugin), "deleted": key})
 
 
 async def h_delete_entry(plugin) -> dict:
@@ -4084,6 +4354,7 @@ async def h_debug_force_reroll(plugin) -> dict:
         plugin._load_packs(), str(row.get("group_id") or ""),
         str(plugin._cfg("group_pools", "") or ""),
         bool(plugin._cfg("allow_unverified", False)),
+        disabled_tags=_disabled_tags_of(plugin),
     )
     reassigned = ""
     if candidates:
@@ -4299,7 +4570,8 @@ def _debug_state_core(plugin, uid: str) -> dict:
     packs = pool.load_packs(_pools_dir(plugin), logger)
     group_pools = str(plugin._cfg("group_pools", "") or "")
     allow_unverified = bool(plugin._cfg("allow_unverified", False))
-    candidates = pool.candidates_for(packs, "", group_pools, allow_unverified)
+    candidates = pool.candidates_for(packs, "", group_pools, allow_unverified,
+                                _disabled_tags_of(plugin))
     portraits = s.count_portraits(row["char_id"]) if row else 0
     return {
         "user_id": uid, "today": today,
@@ -4373,7 +4645,8 @@ def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
     packs = pool.load_packs(_pools_dir(plugin), logger)
     group_pools = str(plugin._cfg("group_pools", "") or "")
     allow_unverified = bool(plugin._cfg("allow_unverified", False))
-    candidates = pool.candidates_for(packs, group_id, group_pools, allow_unverified)
+    candidates = pool.candidates_for(packs, group_id, group_pools, allow_unverified,
+                                _disabled_tags_of(plugin))
     # 把「该群绑定作品 ∩ verified」这条规则的实际生效范围一并返回，
     # 前端才说得清为什么候选是 N 位（群号留空时 = 全部启用卷）。
     bound = pool.parse_group_pools(group_pools)
@@ -4967,7 +5240,8 @@ def _card_debug_core(plugin, body: dict) -> dict:
     else:
         candidates = pool.candidates_for(
             packs, gid, str(plugin._cfg("group_pools", "") or ""),
-            bool(plugin._cfg("allow_unverified", False)))
+            bool(plugin._cfg("allow_unverified", False)),
+            disabled_tags=_disabled_tags_of(plugin))
         if not candidates:
             return {"ok": False, "mode": mode,
                     "reason": "候选角色为空：检查卷是否启用、群绑定与 verified 标记"}
@@ -6476,6 +6750,11 @@ def register(plugin) -> None:
         # v0.32.2：补齐配额预览（逐张主题序列，弹窗可换随机后确认）
         ("/batch/char_preview", h_batch_char_preview, ["POST"]),
         ("/pools/save_entry", h_save_entry, ["POST"]),
+        # v0.68.0：类型注册表管理（卷收敛后 卷=类型，可自定义添加）
+        ("/categories", h_categories, ["GET", "POST"]),
+        ("/categories/add", h_category_add, ["POST"]),
+        ("/categories/rename", h_category_rename, ["POST"]),
+        ("/categories/delete", h_category_delete, ["POST"]),
         ("/pools/import", h_import_pack, ["POST"]),
         # v0.29.0：角色详情页印象语——只改 quote/quotes 的轻量保存 + 逐句校对
         ("/pools/quote_save", h_quote_save, ["POST"]),

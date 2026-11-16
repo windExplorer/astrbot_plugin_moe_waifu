@@ -172,10 +172,10 @@ with tempfile.TemporaryDirectory() as td:
     st.add_portrait("b2", "portraits/b2/0.png", 1, "2026-11-13", 0, "base")
 
     # 5.1 默认导入：全库跨卷按 id 去重
-    payload = json.dumps([E("a", "角色甲NEW", "作品A-NEW"),
-                          E("new1", "新角色", "作品C")], ensure_ascii=False)
+    payload = json.dumps([E("a", "角色甲NEW", "作品A-NEW", category="game"),
+                          E("new1", "新角色", "作品C", category="game")], ensure_ascii=False)
     r1 = asyncio.run(_call(webui_api.h_import_pack, plugin,
-                           {"text": payload, "pack": "imported"}))
+                           {"text": payload}))
     d1 = r1["data"]
     check("导入跳过跨卷已存在的 id",
           d1["imported"] == 1 and d1["duplicates"] == 1, str(d1))
@@ -184,10 +184,9 @@ with tempfile.TemporaryDirectory() as td:
 
     # 5.2 开启覆盖：只改基础字段，参考图/封面/验证状态全留
     payload2 = json.dumps([E("a", "角色甲NEW", "作品A-NEW", verified=False,
-                             strategy={"type": "base"})], ensure_ascii=False)
+                             category="game", strategy={"type": "base"})], ensure_ascii=False)
     d2 = asyncio.run(_call(webui_api.h_import_pack, plugin,
-                           {"text": payload2, "pack": "imported",
-                            "overwrite": True}))["data"]
+                           {"text": payload2, "overwrite": True}))["data"]
     check("覆盖返回 updated=1", d2["updated"] == 1, str(d2))
     a_new = next(e for e in _load(pools / "game.json")["entries"] if e["id"] == "a")
     check("覆盖更新基础信息", a_new["name"] == "角色甲NEW"

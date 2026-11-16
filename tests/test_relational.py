@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """关系模型阶段 1 自检（可直接运行，退出码即结论；不联网、不依赖 astrbot）。
 
-守卫点：四张主键表存在、迁移只纳入三游戏、幂等、全部图片拿到全局 asset_id、
+守卫点：四张主键表存在、迁移纳入全部作品（v0.68.0 scope 门禁移除）、幂等、
+全部图片拿到全局 asset_id、
 语义化 char_id 保留、老库就地补列、状态接口可用。
 """
 import asyncio
@@ -89,11 +90,10 @@ with tempfile.TemporaryDirectory() as td:
 
     # 3) 迁移：只纳入三游戏，幂等
     r1 = st.migrate_relational(pools, root)
-    check("首版只纳入三游戏 128 口径下的 4 条", r1["characters"] == 4, str(r1))
-    check("只建立 3 个作品", r1["works"] == 3, str(r1))
-    check("只有含三游戏角色的卷入库（空卷 / 纯非范围卷不留记录）",
-          r1["packs"] == 1, str(r1))
-    check("非范围作品被跳过", r1["skipped"] == 2, str(r1))
+    check("scope 门禁移除后全部角色入库", r1["characters"] == 6, str(r1))
+    check("作品全量聚合（5 部）", r1["works"] == 5, str(r1))
+    check("有合法角色的卷都入库", r1["packs"] == 2, str(r1))
+    check("没有条目被跳过", r1["skipped"] == 0, str(r1))
     r2 = st.migrate_relational(pools, root)
     check("重复迁移幂等（数量不变）",
           all(r2[k] == r1[k] for k in ("assets", "packs", "works", "characters")),
@@ -120,12 +120,14 @@ with tempfile.TemporaryDirectory() as td:
     ids = {c["char_id"] for c in chars}
     check("保留语义化 char_id", "ganyu" in ids and "nanally_nte" in ids,
           str(ids))
-    check("非范围角色没混进来",
-          "march_7th" not in ids and "hatsune_miku" not in ids, str(ids))
+    check("scope 外角色也入库（门禁已移除）",
+          "march_7th" in ids and "hatsune_miku" in ids, str(ids))
     check("角色都挂了作品 / 卷外键",
           all(c["work_id"] and c["pack_id"] for c in chars), str(chars))
     wnames = {r["name"] for r in st._conn.execute("SELECT name FROM works")}
-    check("作品名即自然键", wnames == {"原神", "鸣潮", "异环"}, str(wnames))
+    check("作品名即自然键",
+          wnames == {"原神", "鸣潮", "异环", "崩坏：星穹铁道", "VOCALOID"},
+          str(wnames))
 
     # 6) 状态接口
     class P:
@@ -182,12 +184,14 @@ with tempfile.TemporaryDirectory() as td:
     finally:
         pool.set_packs_provider(None)
 
-    # 10) 抽卡候选：切读后只含三游戏
+    # 10) 抽卡候选：切读后含全部 verified 角色（scope 门禁已移除）
     cands = pool.candidates_for(st.load_packs(), "", "", True)
-    check("候选只剩三游戏 4 位",
-          len(cands) == 4
-          and all(c["series"] in {"原神", "鸣潮", "异环"} for c in cands),
-          str([c["id"] for c in cands]))
+    check("候选含全部 verified 角色 6 位",
+          len(cands) == 6, str([c["id"] for c in cands]))
+    cands2 = pool.candidates_for(st.load_packs(), "", "", True,
+                                 disabled_tags={"测试"})
+    check("candidates_for 支持 disabled_tags 过滤（空表无影响）",
+          len(cands2) == 6, str(len(cands2)))
 
     # 11) 单卷同步：改字段 + 删除卷里已消失的角色
     dump(pools / "game.json", "game", [
@@ -205,13 +209,10 @@ with tempfile.TemporaryDirectory() as td:
     check("同步删除了卷里已消失的角色",
           st._conn.execute(
               "SELECT 1 FROM characters WHERE char_id='keqing'").fetchone() is None)
-    check("同步返回 kept / removed", rs["kept"] == 3 and rs["removed"] == 1,
+    check("同步返回 kept / removed", rs["kept"] == 3 and rs["removed"] == 2,
           str(rs))
-    check("非 scope 角色始终不入库",
-          st._conn.execute(
-              "SELECT 1 FROM characters WHERE char_id='march_7th'").fetchone() is None)
-    check("读路径立刻看到改动",
-          len([e for p in st.load_packs() for e in p["entries"]]) == 3)
+    check("读路径立刻看到改动（含全部作品）",
+          len([e for p in st.load_packs() for e in p["entries"]]) == 4)
 
     # 12) 跨卷重复 id：先同步的卷胜，遗留卷不能把角色抢过去
     dump(pools / "zolddup.json", "zolddup", [
@@ -231,8 +232,8 @@ with tempfile.TemporaryDirectory() as td:
               "SELECT COUNT(*) AS n FROM characters c JOIN packs p ON p.id=c.pack_id"
               " WHERE p.name='zolddup'").fetchone()["n"] == 0)
 
-    # 13) 空卷（遗留 / 只有非 scope 角色）不保留卷记录，读路径也不返回
-    dump(pools / "zempty.json", "zempty", [E("outsider", "外人", "VOCALOID")])
+    # 13) 空卷（没有任何合法条目）不保留卷记录，读路径也不返回
+    dump(pools / "zempty.json", "zempty", [])
     rs2 = st.sync_pack_file(pools / "zempty.json")
     check("空卷同步后不留 packs 记录",
           st._conn.execute(

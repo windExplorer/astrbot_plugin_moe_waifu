@@ -107,15 +107,36 @@ class MoeWaifuPlugin(Star):
             self._data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
             bundled = Path(__file__).resolve().parent / "seed_pool.json"
             pool.install_seed_pool(self._data_dir / "pools", bundled, logger)
+            # v0.68.0：卷收敛（JSON 层，先于 Store 迁移）——非标准卷按条目类型
+            # 并入固定类型卷（anime/game/other + 自定义），原卷文件进回收站备份；
+            # stale 卷记录在 migrate_relational 之后 prune_packs 清理。
+            try:
+                from . import webui_api as _wa
+                res = _wa.migrate_pack_collapse(self)
+                if res.get("removed_packs"):
+                    logger.info(f"[{PLUGIN_NAME}] 卷收敛完成：并入 "
+                                f"{res.get('merged')} 个角色，移除卷 "
+                                f"{res.get('removed_packs')}（原文件在回收站）")
+            except Exception:
+                logger.error(f"[{PLUGIN_NAME}] 卷收敛迁移失败\n{traceback.format_exc()}")
             self._store = store.Store(self._data_dir / "waifu.db")
-            # v0.24.0 关系模型阶段 1：幂等迁移（只纳入三游戏）。表已由
+            # v0.24.0 关系模型迁移：幂等（v0.68.0 起纳入全部作品）。表已由
             # Store.__init__ 建好；地基失败不能阻塞插件启动。
             try:
                 self._store.migrate_relational(
                     self._data_dir / "pools", self._data_dir, logger=logger)
             except Exception:
-                logger.error(f"[{PLUGIN_NAME}] 关系模型迁移失败\n"
-                             f"{traceback.format_exc()}")
+                logger.error(f"[{PLUGIN_NAME}] 关系模型迁移失败\n{traceback.format_exc()}")
+            # v0.68.0：卷收敛后清理不再存在的卷记录（其角色已随合并迁到类型卷，
+            # migrate_relational 刚按新卷重建过，这里只删 stale packs 行）。
+            try:
+                from . import webui_api as _wa
+                keep = {t["key"] for t in _wa.load_type_registry(self)}
+                pruned = self._store.prune_packs(keep)
+                if pruned.get("removed"):
+                    logger.info(f"[{PLUGIN_NAME}] 卷收敛清理旧卷记录：{pruned['removed']}")
+            except Exception:
+                logger.warning(f"[{PLUGIN_NAME}] stale 卷记录清理失败（忽略）\n{traceback.format_exc()}")
             # v0.25.0：读路径切到新表（空表 / 异常时 pool 内部自动回退 JSON）
             try:
                 pool.set_packs_provider(self._store.load_packs)
@@ -517,6 +538,8 @@ class MoeWaifuPlugin(Star):
         candidates = pool.candidates_for(
             packs, gid, str(self._cfg("group_pools", "") or ""),
             bool(self._cfg("allow_unverified", False)),
+            disabled_tags=set(pool.parse_user_tags(
+                str(self._cfg("disabled_user_tags", "") or ""))),
         )
         if not candidates:
             logger.warning(
@@ -570,6 +593,8 @@ class MoeWaifuPlugin(Star):
         candidates = pool.candidates_for(
             packs, gid, str(self._cfg("group_pools", "") or ""),
             bool(self._cfg("allow_unverified", False)),
+            disabled_tags=set(pool.parse_user_tags(
+                str(self._cfg("disabled_user_tags", "") or ""))),
         )
         if not candidates:
             logger.warning(f"[{PLUGIN_NAME}] 重抽失败：没有可抽角色")
