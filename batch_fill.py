@@ -330,9 +330,15 @@ class BatchRunner:
                     if not prompt_text:
                         prompt_text, _src = await prompt_gen.build_generation_prompt(
                             plugin.context, draw_cfg, entry, seed_int, theme_id)
+                    # v0.66.0：萌绘忙时 generate_portrait 内部先排队等空闲
+                    # （不占单张超时、不进耗时统计），等待状态写 note 字段展示——
+                    # ⚠️ 不动 status：snapshot 的 done/failed 都按 status 统计，
+                    # 造新状态值会被当成失败计进进度
                     src, status, err, _dur = await draw.generate_portrait(
                         plugin.context, draw_cfg, entry, seed_int,
-                        _synthetic_event(), prompt=prompt_text)
+                        _synthetic_event(), prompt=prompt_text,
+                        progress=lambda note, _it=item: _it.update(
+                            {"note": str(note)}))
                     if status == "ok" and src:
                         rel = draw.archive_portrait(src, plugin._data_dir,
                                                     cid, date, seq, seed_int)
@@ -353,19 +359,23 @@ class BatchRunner:
                                 duration_ms=_dur)
                         item["status"] = "ok"
                         item["error"] = ""
+                        item["note"] = ""   # v0.66.0：排队等待提示随结果清掉
                         item["file"] = rel
                     elif status == "skipped_no_anima":
                         item["status"] = "skipped"
                         item["error"] = "萌绘未就绪"
+                        item["note"] = ""
                         logger.warning("[moe_waifu] 批量补图跳过 %s：萌绘未就绪", cid)
                     else:
                         item["status"] = "failed"
                         item["error"] = str(err or status or "生成失败")[:120]
+                        item["note"] = ""
                         logger.warning("[moe_waifu] 批量补图失败 %s#%s：%s",
                                        cid, seq, item["error"])
                 except Exception as e:  # 单张任何异常都不允许卡死队列
                     item["status"] = "failed"
                     item["error"] = str(e)[:120]
+                    item["note"] = ""
                     logger.error("[moe_waifu] 批量补图异常 %s：%s", cid, e,
                                  exc_info=True)
             self.running = False

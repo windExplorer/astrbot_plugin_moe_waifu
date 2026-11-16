@@ -1589,8 +1589,8 @@
                 <!-- v0.58.0：图片选择弹窗（三处共用的全局组件） -->
                 <w-image-picker v-model:show="tryRefPickerOpen" :items="tryRefPickerItems"
                                 :value="tryOverride.refs || []" multiple title="选择本次参考图"
-                                hint="从该角色已绑定的参考图里点选；点图看大图，点卡片选中，顺序即图1/图2/图3。删除在卡片下方（两段确认）。"
-                                :deletable="true"
+                                hint="从该角色已绑定的参考图里点选；点图看大图，点卡片选中，顺序即图1/图2/图3。停用（软删除）在卡片下方两段确认，恢复到角色详情的参考图页签。"
+                                :deletable="true" del-label="停用"
                                 @update:value="onTryRefPickerConfirm"
                                 @preview="onPickerPreview"
                                 @delete="onTryRefPickerDelete"></w-image-picker>
@@ -4054,7 +4054,7 @@
                 {{ it.status === "ok" ? "成功" : (it.status === "skipped" ? "跳过" : (it.status ? "失败" : "待生成")) }}
               </n-tag>
               <span class="bind-tip" style="margin-top: 0;">
-                {{ it.name || it.char_id }} · {{ it.theme_label || "" }}{{ it.error ? " · " + it.error : "" }}
+                {{ it.name || it.char_id }} · {{ it.theme_label || "" }}{{ it.note ? " · " + it.note : "" }}{{ it.error ? " · " + it.error : "" }}
               </span>
             </div>
           </div>
@@ -4471,8 +4471,10 @@
                                 @click.stop="designateRef(r.path)"></w-icon-btn>
                     <w-icon-btn icon="trash" size="tiny" type="error"
                                 :armed="delArm === 'drawer:' + r.path"
-                                :tip="delArm === 'drawer:' + r.path ? '再点一次确认移除' : '移除绑定'"
-                                @click.stop="unbindDrawerRef(r.path)"></w-icon-btn>
+                                :tip="delArm === 'drawer:' + r.path
+                                      ? '再点一次确认停用'
+                                      : '停用（软删除：不参与生成，可到角色详情恢复）'"
+                                @click.stop="disableDrawerRef(r.path)"></w-icon-btn>
                   </div>
                   <div class="gal-meta">{{ form.strategy_ref === r.path ? "主参考" : "备选" }}</div>
                 </div>
@@ -5125,7 +5127,9 @@
       title: { type: String, default: "选择图片" },
       hint: { type: String, default: "" },
       max: { type: Number, default: 0 },        // 0 = 不限
-      deletable: { type: Boolean, default: false }
+      deletable: { type: Boolean, default: false },
+      // v0.66.0：删除角标文案可定制——参考图选图弹窗统一停用口径后显示「停用」
+      delLabel: { type: String, default: "删除" }
     },
     emits: ["update:show", "update:value", "preview", "delete"],
     data: function () { return { draft: [], armedDel: "" }; },
@@ -5176,7 +5180,7 @@
             kids.push(h("div", {
               class: "picker-del" + (armed ? " armed" : ""),
               onClick: function (e) { e.stopPropagation(); self.doDelete(it); }
-            }, armed ? "确认删除" : "删除"));
+            }, armed ? ("确认" + self.delLabel) : self.delLabel));
           }
           cells.push(h("div", { class: cls, key: it.path,
             onClick: function () { self.toggle(it); } }, kids));
@@ -6214,12 +6218,13 @@
         form.value.strategy_ref = path;
         message.success("已设为主参考（保存条目后生效）");
       }
-      async function unbindDrawerRef(path) {
+      // v0.66.0：删除口径与角色详情统一——停用（软删除），恢复入口在角色详情
+      async function disableDrawerRef(path) {
         if (!armDelete("drawer:" + path)) return;
         try {
-          var res = await apiPost("refs/unbind", { id: form.value.id, path: path });
+          await apiPost("refs/disable", { id: form.value.id, path: path });
           if (form.value.strategy_ref === path) { form.value.strategy_ref = ""; }
-          message.success("已移除参考图" + (res && res.file_deleted ? "（文件已删）" : ""));
+          message.success("已停用参考图（文件与绑定保留，可到角色详情恢复）");
           delArm.value = "";
           await refreshAll();
         } catch (e) { /* 已提示 */ }
@@ -6436,16 +6441,16 @@
         trySwapCharThumb.value = pickItemThumb(trySwapCharPickerItems.value, trySwapChar.value);
       }
       function onPickerPreview(path, title) { openViewer(path, title); }
-      // 弹窗内删除参考图：复用现有解绑逻辑，但弹窗组件已做两段确认，这里直接删
+      // v0.66.0：弹窗内「删除」统一停用口径（软删除，恢复入口在角色详情）；
+      // 弹窗组件已做两段确认，这里直接调停用
       async function onTryRefPickerDelete(it) {
         try {
-          var res = await apiPost("refs/unbind",
-            { id: tryCharId.value, path: it.path, delete_file: true });
+          await apiPost("refs/disable", { id: tryCharId.value, path: it.path });
           var arr = (tryOverride.value.refs || []).filter(function (p) { return p !== it.path; });
           tryOverride.value.refs = arr;
           if (tryOverride.value.ref === it.path) { tryOverride.value.ref = ""; }
           if (trySwapChar.value === it.path) { trySwapChar.value = null; }
-          message.success("已删除参考图" + (res && res.file_deleted ? "（文件已删）" : ""));
+          message.success("已停用参考图（文件与绑定保留，可到角色详情恢复）");
           await refreshAll();
         } catch (e) { /* 已提示 */ }
       }
@@ -6904,16 +6909,16 @@
         }
         tryOverride.value.refs = arr;
       }
+      // v0.66.0：与全站统一停用口径（当前模板已由选图弹窗接管，此函数保留兼容）
       async function deleteTryRef(r) {
         if (!armDelete(r.path)) return;
         try {
-          var res = await apiPost("refs/unbind",
-            { id: tryCharId.value, path: r.path, delete_file: true });
+          await apiPost("refs/disable", { id: tryCharId.value, path: r.path });
           var _ra = (tryOverride.value.refs || []).slice();
           var _ri = _ra.indexOf(r.path);
           if (_ri >= 0) { _ra.splice(_ri, 1); tryOverride.value.refs = _ra; }
           if (tryOverride.value.ref === r.path) { tryOverride.value.ref = ""; }
-          message.success("已删除参考图" + (res && res.file_deleted ? "（文件已删）" : ""));
+          message.success("已停用参考图（文件与绑定保留，可到角色详情恢复）");
           delArm.value = "";
           await refreshAll();
         } catch (e) { /* 已提示 */ }
@@ -7367,18 +7372,8 @@
           await loadGalRefs();
         } catch (err2) { /* 已提示 */ }
       }
-      async function unbindGalRef(r) {
-        if (!armDelete("galref:" + r.path)) return;
-        try {
-          var res = await apiPost("refs/unbind", { id: galCharId.value, path: r.path });
-          var _gi = galRefsSel.value.indexOf(r.path);
-          if (_gi >= 0) { galRefsSel.value.splice(_gi, 1); }
-          message.success("已移除参考图绑定" + (res && res.file_deleted ? "（文件已删）" : ""));
-          delArm.value = "";
-          await refreshAll();
-          await loadGalRefs();
-        } catch (e) { /* 已提示 */ }
-      }
+      // v0.66.0：旧「移除绑定」（refs/unbind）入口全部下线——删除一律走停用
+      // （disableGalRef），恢复 / 彻底删除在「已停用参考图」区，与立绘同口径。
       // v0.65.0：参考图删除改软删除（与立绘同口径）——停用 → 恢复 / 彻底删除
       async function disableGalRef(r) {
         if (!armDelete("galrefoff:" + r.path)) return;
@@ -9707,8 +9702,10 @@
           rows.push({
             key: j.job_id, kindLabel: KIND_LABELS[j.kind] || "生成立绘",
             label: j.label || j.char_id || "",
+            // v0.66.0：萌绘忙排队等待的实时状态（后端 queue_note → /queue/list note）
             statusText: j.status === "running"
-              ? "生成中" : "排队中（第 " + (j.queue_pos || 1) + " 位）",
+              ? (j.note || "生成中")
+              : "排队中（第 " + (j.queue_pos || 1) + " 位）",
             tagType: j.status === "running" ? "info" : "default"
           });
         });
@@ -11307,7 +11304,7 @@
                                     "checkin_link_include_star", "checkin_link_require_wake",
                                     "checkin_link_delay"] },
         { title: "萌绘生图", keys: ["gen_source_mode", "img2img_prob", "artist_draw_enabled", "draw_workflow", "img2img_workflow",
-                                    "draw_width", "draw_height", "draw_timeout", "img2img_denoise",
+                                    "draw_width", "draw_height", "draw_timeout", "anima_queue_wait", "img2img_denoise",
                                     "draw_negative_enabled", "draw_negative_prompt", "announce_enabled",
                                     "batch_art_every", "batch_require_ref", "avatar_batch_overwrite",
                                     "avatar_size"] },
@@ -11612,7 +11609,7 @@
         doDeleteEntry: doDeleteEntry, doToggleVerified: doToggleVerified, togglePack: togglePack,
         drawerRefs: drawerRefs, drawerRefsLoading: drawerRefsLoading,
         onDrawerPanelFiles: onDrawerPanelFiles,
-        designateRef: designateRef, unbindDrawerRef: unbindDrawerRef,
+        designateRef: designateRef, disableDrawerRef: disableDrawerRef,
         importOpen: importOpen, importText: importText, importPack: importPack,
         importSeries: importSeries,
         importing: importing, importResult: importResult,
@@ -11807,7 +11804,7 @@
         galOrphans: galOrphans, bindOrphan: bindOrphan,
         galOrphansOpen: galOrphansOpen, deleteOrphan: deleteOrphan,
         galDrawRef: galDrawRef, galDrawRefAbs: galDrawRefAbs, setDrawSource: setDrawSource,
-        setMainRef: setMainRef, unbindGalRef: unbindGalRef,
+        setMainRef: setMainRef,
         galUploadOpen: galUploadOpen, galUpNote: galUpNote,
         onGalPanelFiles: onGalPanelFiles,
         galMode: galMode, galRefsSel: galRefsSel, galWf: galWf, galDenoise: galDenoise,

@@ -161,6 +161,12 @@
     "type": "int",
     "default": 120
   },
+  "anima_queue_wait": {
+    "description": "萌绘忙等待上限（秒）",
+    "hint": "萌绘正在画图时先排队等它空闲再提交（不占生图超时）；0 = 关闭预等待（忙时直接提交，可能超时报错）",
+    "type": "int",
+    "default": 600
+  },
   "draw_negative_enabled": {
     "description": "启用负面提示词",
     "hint": "关闭后完全交给用户工作流（含下方内容也不再传）",

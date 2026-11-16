@@ -234,6 +234,8 @@ class MoeWaifuPlugin(Star):
             "draw_width": self._cfg("draw_width", 700),
             "draw_height": self._cfg("draw_height", 1200),
             "draw_timeout": self._cfg("draw_timeout", 120),
+            # v0.66.0：萌绘忙时先排队等空闲的预算（秒，0=关）——等待不占 draw_timeout
+            "anima_queue_wait": self._cfg("anima_queue_wait", 600),
             "draw_workflow": self._cfg("draw_workflow", ""),
             "draw_negative_enabled": self._cfg("draw_negative_enabled", True),
             "draw_negative_prompt": self._cfg("draw_negative_prompt", ""),

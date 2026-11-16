@@ -1508,9 +1508,12 @@ async def _run_job(plugin, job_id: str, entry: dict, kind: str,
         )
     logger.info(f"[{PLUGIN_NAME}] 立绘提示词（{prompt_src}）：{prompt_text[:80]}")
     t0 = time.monotonic()
+    # v0.66.0：萌绘忙时 generate_portrait 内部会先排队等空闲（不占 draw_timeout），
+    # 等待状态经 progress 写进任务的 queue_note，队列面板实时可见
     src, status, error, _dur = await draw.generate_portrait(
         plugin.context, draw_cfg, entry, seed_int, _synthetic_event(),
         prompt=prompt_text,
+        progress=lambda note: job.update({"queue_note": str(note)}),
     )
     duration = int((time.monotonic() - t0) * 1000)
     # v0.20.0：变化维度 / 图片尺寸随档记录。
@@ -1581,6 +1584,9 @@ async def h_queue_list(plugin) -> dict:
             row["queue_pos"] = dq.position(jid)
             active.append(row)
         elif status == "running":
+            # v0.66.0：萌绘忙排队等待的实时状态（generate_portrait progress 回调写入）
+            if job.get("queue_note"):
+                row["note"] = str(job.get("queue_note"))
             active.append(row)
         elif status in ("ok", "error", "timeout"):
             row["error"] = str(job.get("error") or "")[:120]
@@ -6010,7 +6016,7 @@ async def h_avatar_clear(plugin) -> dict:
 
 async def generate_avatar_for(plugin, entry: dict, workflow: str = "",
                               mode: str = "", ref: str = "",
-                              apply: bool = True) -> tuple:
+                              apply: bool = True, progress=None) -> tuple:
     """生成单个角色头像并落盘（单发 job 与批量队列共用），返回 (rel, w, h)。
 
     v0.42.0 三条口径（工坊「生成头像」弹窗）：
@@ -6019,6 +6025,8 @@ async def generate_avatar_for(plugin, entry: dict, workflow: str = "",
     - `apply=False` 产物落到 `avatars/_pending_<cid>_<ts>.png` 且**不写条目**，
       由前端预览后决定要不要调 /pools/avatar_set 替换（结果可选是否替换）。
     - 批量队列始终 apply=True（没有预览环节）。
+    v0.66.0：`progress` 透传 generate_portrait——萌绘忙排队等待的状态上报
+    （单发 job 写 queue_note，批量头像走 AvatarRunner 自己的进度展示）。
     """
     cid = str(entry.get("id") or "").strip()
     if not cid:
@@ -6069,7 +6077,8 @@ async def generate_avatar_for(plugin, entry: dict, workflow: str = "",
             use_entry, {"workflow": wf, "img2img_workflow": wf})
     seed = int(time.time() * 1000) % (2 ** 31)
     src, status, err, _dur = await draw.generate_portrait(
-        plugin.context, cfg, use_entry, seed, _synthetic_event(), prompt=prompt)
+        plugin.context, cfg, use_entry, seed, _synthetic_event(), prompt=prompt,
+        progress=progress)
     if src is None:
         raise RuntimeError(str(err or status or "萌绘生成失败"))
     if apply:
@@ -6151,7 +6160,8 @@ async def _run_avatar_job(plugin, job_id: str, entry: dict, workflow: str,
     t0 = time.monotonic()
     try:
         rel, w, h = await generate_avatar_for(
-            plugin, entry, workflow=workflow, mode=mode, ref=ref, apply=apply)
+            plugin, entry, workflow=workflow, mode=mode, ref=ref, apply=apply,
+            progress=lambda note: job.update({"queue_note": str(note)}))
         fp = _safe_data_file(plugin, rel)
         job.update({"status": "ok", "avatar": rel, "width": w, "height": h,
                     "thumb": _thumb_data_url(fp, 240) if fp else None,

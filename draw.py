@@ -28,6 +28,13 @@ import time
 import traceback
 from pathlib import Path
 
+try:  # 包内加载用 astrbot 的 logger；平铺调试 / 单测回落标准 logging
+    from astrbot.api import logger
+except Exception:  # pragma: no cover - 本地平铺调试
+    import logging
+
+    logger = logging.getLogger("moe_waifu")
+
 PLUGIN_SOURCE = "萌萌今日老婆"
 
 # 内置负面兜底：排除男性特征 + NSFW（星语 DEFAULT_DRAW_NEGATIVE 的角色卡子集）。
@@ -178,6 +185,96 @@ def _get_tool_handler(context, tool_name: str):
     return getattr(tool, "handler", None) or tool
 
 
+ANIMA_PLUGIN_NAME = "astrbot_plugin_comfyui_anima"
+
+
+def anima_queue_ahead(context, workflow: str = "", img2img_workflow: str = "",
+                      is_img2img: bool = False) -> int:
+    """读萌绘本地队列的「待处理任务数（含正在生成）」；读不到返回 -1（未知）。
+
+    萌绘自己维护 per-server 本地队列（`_server_pending`，刻意不依赖 ComfyUI 的
+    /queue 接口）。外部插件直接提交第二笔时，ComfyUI 虽然会排队，但萌绘侧的
+    「单张等待硬上限」与调用方的 wait_for 都可能先把等待掐断 → 表现为直接报错。
+    这里只做**防御性反射**（解析工作流 → 定位服务器 → 读队列深度）：萌绘未装 /
+    版本结构变化 / 解析失败一律返回 -1，调用方不等待，绝不能让排队探测把出图搞挂。
+    """
+    try:
+        star = context.get_registered_star(ANIMA_PLUGIN_NAME)
+    except Exception:
+        return -1
+    core = getattr(star, "star_cls", None)
+    if core is None:
+        return -1
+    resolve_wf = getattr(core, "_resolve_workflow", None)
+    resolve_srv = getattr(core, "_resolve_server", None)
+    server_key = getattr(core, "_server_key", None)
+    pending_map = getattr(core, "_server_pending", None)
+    if not (callable(resolve_wf) and callable(resolve_srv)
+            and callable(server_key) and isinstance(pending_map, dict)):
+        return -1
+    try:
+        # 会话记忆（沿用会话最近工作流）与本次探测无关：排队深度看的是
+        # 服务器不是具体工作流，解析失败/解析到不同服务器都只是近似，-1 兜底。
+        wf = resolve_wf(workflow or None, is_img2img=bool(is_img2img))
+        if not isinstance(wf, dict):
+            return -1
+        server = resolve_srv(wf.get("server_key") or wf.get("server_name") or None)
+        return len(pending_map.get(server_key(server), []))
+    except Exception:
+        return -1
+
+
+async def wait_anima_idle(context, cfg: dict, tool_name: str, kwargs: dict,
+                          progress=None) -> str:
+    """萌绘忙（本地队列有待处理任务）时**先排队等待空闲再提交**，返回等待说明。
+
+    - 等待不占 draw_timeout、不计入生成耗时统计（调用方在 t0 之后才开始计时）；
+    - `anima_queue_wait` 配置等待预算（秒，默认 600；0 = 关闭预等待）；
+    - 预算耗尽仍忙则照样提交（回落到旧行为：萌绘侧自己的动态等待/超时兜底）；
+    - `progress(note)` 可选回调：把等待状态透给工坊任务面板 / 批量行。
+    """
+    try:
+        budget = int(cfg.get("anima_queue_wait", 600) or 0)
+    except (TypeError, ValueError):
+        budget = 600
+    if budget <= 0:
+        return ""
+    is_i2i = str(tool_name) == "comfyui_img2img"
+    wf = str(kwargs.get("workflow") or "")
+    img_wf = str(kwargs.get("img2img_workflow") or "")
+    deadline = time.monotonic() + budget
+    note = ""
+    while True:
+        ahead = anima_queue_ahead(context, wf, img_wf, is_i2i)
+        if ahead <= 0:
+            return note
+        waited = int(budget - max(0.0, deadline - time.monotonic()))
+        if waited >= budget:
+            # 超时说明必须带「超时」字样：调用方与面板要知道这次提交是
+            # 预算耗尽后的兜底（萌绘侧动态等待可能仍然不够）
+            tail = ((note + "；等待空闲超时，仍尝试提交") if note
+                    else "萌绘忙：等待空闲超时，仍尝试提交")
+            if progress and tail != note:
+                try:
+                    progress(tail)
+                except Exception:
+                    pass
+            logger.warning(
+                f"[draw] 等待萌绘队列空闲超时（>{budget}s，队列仍 {ahead} 个），"
+                "照常提交（萌绘侧动态等待兜底）")
+            return tail
+        new_note = f"萌绘忙：排队等待空闲（前面 {ahead} 个任务，已等 {waited}s）"
+        if new_note != note:
+            note = new_note
+            if progress:
+                try:
+                    progress(note)
+                except Exception:
+                    pass
+            logger.info(f"[draw] {note}")
+        await asyncio.sleep(min(3.0, max(0.5, budget - waited)))
+
+
 def _base_kwargs(cfg: dict, prompt: str, seed_int: int,
                  with_workflow: bool = True, with_size: bool = True) -> dict:
     kwargs = dict(
@@ -325,7 +422,8 @@ def _stage_refs(refs: list, data_dir) -> tuple[list, str]:
 
 
 async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
-                            event=None, prompt: str | None = None):
+                            event=None, prompt: str | None = None,
+                            progress=None):
     """按角色策略生成立绘。返回 (本地路径|None, status, error, duration_ms)。
 
     ⚠️ 所有分支必须返回**4 元组**：调用方一律 `a, b, c, d = await ...`，
@@ -336,6 +434,9 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
     prompt：v0.5.6 起由调用方经 prompt_gen 预生成（LLM 编辑指令 / 含变化维度的
     tags）；留 None 时回落本地 tags 拼装（build_prompt，兼容旧路径）。
     cfg["data_dir"]：参考图里相对路径（refs/xxx.png）的解析基准。
+    progress：v0.66.0 起可选回调 `progress(note)`——萌绘忙时先排队等空闲再提交
+    （等待不占 draw_timeout、不计耗时），把「萌绘忙：排队等待空闲…」透给
+    工坊任务面板 / 批量行；聊天路径可留 None（只写日志）。
     """
     prompt = str(prompt or "").strip() or build_prompt(entry)
     stype = str(entry.get("strategy_type") or "base")
@@ -430,6 +531,15 @@ async def generate_portrait(context, cfg: dict, entry: dict, seed_int: int,
                 kwargs["loras"] = [str(x) for x in loras if str(x).strip()]
             else:
                 return None, "error", "lora 策略缺少 loras 列表（如 [\"xxx:0.8\"]）", 0
+
+    # v0.66.0：萌绘忙（本地队列含正在生成的任务）时先排队等空闲再提交——
+    # ComfyUI 虽然自己会排队，但萌绘的「单张等待硬上限」与调用方的 wait_for
+    # 都可能先把等待掐断，表现为「萌绘正在画图时本插件直接报错」。
+    # 等待放在计时起点之前：不占 draw_timeout，也不进耗时统计。
+    try:
+        await wait_anima_idle(context, cfg, tool_name, kwargs, progress)
+    except Exception:
+        log_exception("[draw] 萌绘队列预等待异常（忽略，照常提交）")
 
     t0 = time.monotonic()
     try:
