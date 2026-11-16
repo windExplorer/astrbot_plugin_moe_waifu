@@ -223,8 +223,60 @@ try {
       { kind: 'portrait', path: 'portraits/c1/p1.png', thumb: 'data:p' }
     ] });
 } catch (e) { fail('galSwapCharPickerItems 求值抛错: ' + e.message); }
-if (galBuilt.value.length !== 1 || galBuilt.value[0].path !== 'refs/r1.png') {
-  fail('角色详情身份图候选口径错（应只含 ref，不含立绘）');
+// v0.62.0：口径已放开——参考图 + 立绘都要进候选，且立绘项标注「立绘」
+if (galBuilt.value.length !== 2
+    || !galBuilt.value.some(it => it.path === 'refs/r1.png')
+    || !galBuilt.value.some(it => it.path === 'portraits/c1/p1.png' && it.label.indexOf('立绘') >= 0)) {
+  fail('角色详情身份图候选应含参考图+立绘（v0.62.0）');
+}
+// 去重：同一 path 只保留一份
+const dupBuilt = new Function('Vue', 'genSources',
+  html.slice(gs, ge) + '\nreturn galSwapCharPickerItems;')(
+  fakeVue, { value: [
+    { kind: 'ref', path: 'refs/r1.png', thumb: 'data:r' },
+    { kind: 'portrait', path: 'refs/r1.png', thumb: 'data:r2' }
+  ] });
+if (dupBuilt.value.length !== 1) fail('身份图候选没对同 path 去重');
+
+// v0.62.0：试画台身份候选 = 参考图 + 立绘（abs 当 path）
+const ts2 = html.indexOf('var trySwapCharPickerItems = Vue.computed(function () {');
+if (ts2 < 0) fail('找不到 trySwapCharPickerItems 定义');
+const te2 = html.indexOf('\n      function openTryRefPicker()', ts2);
+let tryBuilt;
+try {
+  tryBuilt = new Function('Vue', 'tryRefPickerItems', 'tryPortraits',
+    html.slice(ts2, te2) + '\nreturn trySwapCharPickerItems;')(
+    fakeVue, { value: [{ path: 'refs/a.png', thumb: 'data:a', label: '参考图', sub: '' }] },
+    { value: [
+      { abs: 'X:/data/portraits/c1/p2.png', thumb: 'data:p2', file: 'p2.png',
+        active: true, exists: true, display_no: 2, width: 832, height: 1216 },
+      { abs: 'X:/data/portraits/c1/p3.png', thumb: '', file: 'p3.png',
+        active: false, exists: true }  // 停用立绘应被排除
+    ] });
+} catch (e) { fail('trySwapCharPickerItems 求值抛错: ' + e.message); }
+if (tryBuilt.value.length !== 2) fail('试画台身份候选应=1参考图+1启用立绘（停用不算）');
+if (!tryBuilt.value.some(it => it.path === 'X:/data/portraits/c1/p2.png'
+    && it.label.indexOf('立绘') >= 0)) fail('试画台立绘项 path/label 错');
+
+// v0.62.0：全局图库瀑布流 + 上传区固定 + 列数按数量
+if (html.indexOf('.gr-waterfall { column-count: var(--gr-cols') < 0) fail('瀑布流 CSS 缺失');
+if (html.indexOf('.gr-toolbar { position: sticky; top: 0') < 0) fail('上传固定条 CSS 缺失');
+if (html.indexOf('class="gr-toolbar"') < 0) fail('上传区没进固定条');
+if (html.indexOf('class="gr-waterfall"') < 0) fail('卡片墙没用瀑布流容器');
+const gc = html.indexOf('var grCols = Vue.computed(function () {');
+if (gc < 0) fail('找不到 grCols');
+const gcSeg = html.slice(gc, gc + 500);
+if (!/n <= 4.*return 2/.test(gcSeg) || !/n <= 10.*return 3/.test(gcSeg)) {
+  fail('grCols 没按图库数量自适应列数');
+}
+if (!/grCols: grCols/.test(html)) fail('grCols 没暴露给模板');
+// n-grid 定列网格应已从全局图库移除（避免瀑布流与定列并存）
+const grSeg = html.split("menu === 'global_refs'", 2)[1] || '';
+if (grSeg.indexOf('<n-grid') < 0 || grSeg.indexOf('<n-grid') > grSeg.indexOf('</n-card>')) {
+  // 允许页面其它区块仍有 n-grid，但全局图库这一段不该再有
+}
+if (grSeg.slice(0, grSeg.indexOf('</n-card>')).indexOf('<n-grid') >= 0) {
+  fail('全局图库仍用 n-grid 定列，没换成瀑布流');
 }
 
 console.log('test_image_picker: ALL OK');

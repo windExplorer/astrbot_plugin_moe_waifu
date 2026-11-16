@@ -2,6 +2,33 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.62.0 (2026-11-16)
+
+**身份图可选立绘；全局图库改瀑布流排版，上传区固定不随滚动。**
+
+- ① **角色参考图支持选立绘**：此前两处身份图（图2）弹窗只列已绑定参考图——试画台
+  `tryRefPickerItems` 来自 `refs/list`（只有参考图），角色详情 `galSwapCharPickerItems`
+  又显式过滤掉 `kind === "portrait"`。用户要求立绘也能当身份来源。
+  - 试画台：`loadTryRefs()` 改为 `Promise.all` 并行拉 `refs/list` + `portraits/list`
+    （`char_id = tryCharId`，条目的 id 就是角色 id）；新增 `trySwapCharPickerItems`
+    = 参考图 + 该角色立绘（立绘用 `abs` 当 path、标注「立绘 · #序号」、只收 active
+    且存在的），身份弹窗改用它，缩略图兜底也加 `tryPortraits`。
+  - 角色详情：`genSources` 本就含 portrait 项（path=abs、thumb 可用），
+    `galSwapCharPickerItems` 去掉 `kind !== "ref"` 过滤、只去重并标注「参考图 / 立绘」。
+  - 两处弹窗标题改「参考图 / 立绘」，hint 说明按当前方案迁移身份特征。
+- ② **全局图库瀑布流**：原 `<n-grid :cols="5">` 定 5 列 + 封面强制 4:3，图少时卡片
+  稀、图多时长短图留白。改 CSS columns 瀑布流（`.gr-waterfall`，`break-inside:avoid`），
+  封面按原图 `width/height` 比例铺；列数 `grCols` 按图库数量自适应（≤4→2、≤10→3、
+  ≤20→4、再多 5），不做分页，参考角色库卡片墙。
+  - 上传区（说明 + `w-upload-panel`）包进 `.gr-toolbar`（`position: sticky; top: 0`
+    + 不透明背景遮住滚上来的卡片），滚动卡片墙时固定不跟随。
+  - 卡片容器从 `n-space` 换 `div`（沿用「v-if 兄弟撞 key」纪律）。
+- 守卫：`tests/test_image_picker.js` 真跑两个候选 computed——角色详情应含 ref+立绘且
+  去重、试画台应=参考图+启用立绘（停用排除）、立绘项 path/label 正确；新增瀑布流 /
+  固定条 CSS、`grCols` 自适应、全局图库段内无 `n-grid` 等守卫。内联 JS / 模板编译 /
+  模板结构 / HTML 完整 / WebUI 契约全过。
+- 版本 v0.61.0 -> v0.62.0。
+
 ## v0.61.0 (2026-11-16)
 
 **角色替换从「固定只换脸」升级为三档方案可选，默认档补上体型 / 头发 / 头顶饰物跟随图2。**

@@ -703,14 +703,23 @@
   .pi-tag.keep { opacity: .6; }
   .pi-tag.off { opacity: .32; text-decoration: line-through; }
   .pi-list { max-height: 300px; overflow-y: auto; padding-right: 4px; }
-  /* v0.59.1：全局图库卡片重排——封面固定 4:3，信息定高，备注/标签弹窗编辑不撑布局 */
-  .gr-card { border: 1px solid var(--wf-line); border-radius: 12px; overflow: hidden;
+  /* v0.59.1：全局图库卡片重排——信息定高，备注/标签弹窗编辑不撑布局 */
+  /* v0.62.0：上传区固定——滚动卡片墙时不跟着走；用不透明背景遮住下方 */
+  .gr-toolbar { position: sticky; top: 0; z-index: 14; padding: 6px 0 12px;
+    margin-bottom: 12px; background: var(--wf-surface);
+    border-bottom: 1px solid var(--wf-line); }
+  .gr-toolbar > * + * { margin-top: 10px; }
+  /* v0.62.0：瀑布流——CSS columns，列数由 grCols 按图库数量给（2~5）。
+     break-inside:avoid 保证一张卡不被拆到两列；封面按原图比例，长短图都紧密排。 */
+  .gr-waterfall { column-count: var(--gr-cols, 3); column-gap: 12px; }
+  .gr-card { break-inside: avoid; margin-bottom: 12px; display: inline-block; width: 100%;
+    border: 1px solid var(--wf-line); border-radius: 12px; overflow: hidden;
     background: var(--wf-surface); transition: transform .15s, box-shadow .15s, border-color .15s; }
   .gr-card:hover { transform: translateY(-2px); border-color: var(--wf-brand);
     box-shadow: 0 8px 20px -10px rgba(80,40,70,.5); }
-  .gr-card-cover { position: relative; aspect-ratio: 4 / 3; overflow: hidden; cursor: zoom-in;
+  .gr-card-cover { position: relative; overflow: hidden; cursor: zoom-in;
     background: rgba(128,128,128,.08); }
-  .gr-card-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .gr-card-cover img { display: block; width: 100%; height: auto; object-fit: cover; }
   .gr-card-idx { position: absolute; top: 6px; left: 6px; min-width: 20px; height: 20px;
     line-height: 20px; text-align: center; background: rgba(0,0,0,.55); color: #fff;
     border-radius: 6px; font-size: 11px; font-weight: 700; }
@@ -1300,7 +1309,9 @@
           <!-- ============ 全局参考图库（v0.56.0：角色替换的「画布」） ============ -->
           <div v-if="menu === 'global_refs'">
             <n-card size="small" :bordered="true" title="全局参考图库">
-              <n-space vertical size="medium">
+              <!-- v0.62.0：上传区固定——滚动卡片墙时不跟着走；用 div 而非 n-space
+                   （v-if 兄弟撞 key 老坑），sticky 背景遮住下方滚上来的卡片 -->
+              <div class="gr-toolbar">
                 <div class="bind-tip" style="margin-top: 0;">
                   这里放「精美画布图」：单人、构图 / 姿势 / 背景明确的图最适合做角色替换。
                   在试画台或角色详情选「角色替换」模式时，这里的图当画布（图1），
@@ -1309,43 +1320,44 @@
                 <w-upload-panel :multiple="true"
                                 hint="支持 png / jpg / jpeg / webp / gif，可多选；单张不超过 15MB。同内容只存一份。"
                                 @files="onGlobalPanelFiles"></w-upload-panel>
-                <n-alert v-if="globalRefsLoading" type="info" :bordered="false">加载中…</n-alert>
-                <n-grid v-if="globalRefs.length > 0" :cols="5" :x-gap="12" :y-gap="12">
-                  <n-gi v-for="(r, ri) in globalRefs" :key="r.path">
-                    <div class="gr-card">
-                      <div class="gr-card-cover" @click="openViewer(r.path, '全局参考图')">
-                        <img v-if="r.thumb" :src="r.thumb" alt="全局参考图" title="点击查看大图">
-                        <div v-else class="picker-noimg">文件丢失</div>
-                        <span class="gr-card-idx">{{ ri + 1 }}</span>
-                      </div>
-                      <div class="gr-card-info">
-                        <div class="gr-card-note" :class="{ empty: !r.note }"
-                             :title="'点这里编辑第 ' + (ri + 1) + ' 张的备注'"
-                             @click="beginGrNote(r)">
-                          {{ r.note || "＋ 添加标签 / 备注" }}
-                        </div>
-                        <div class="gr-card-meta" v-if="r.exists">
-                          {{ r.width && r.height ? r.width + ' × ' + r.height + ' ' + grShape(r) : '尺寸未知' }}
-                          · {{ grSize(r.size) }}
-                        </div>
-                        <div class="gr-card-file" :title="r.path">{{ grName(r) }} · {{ (r.ext || 'img').toUpperCase() }}</div>
-                      </div>
-                      <div class="gr-card-ops">
-                        <w-icon-btn icon="edit" size="tiny" tip="编辑标签 / 备注"
-                                    @click="beginGrNote(r)"></w-icon-btn>
-                        <w-icon-btn icon="info" size="tiny"
-                                    tip="查看完整信息（路径 / sha256 / 尺寸等）"
-                                    @click="openGrDetail(r)"></w-icon-btn>
-                        <w-icon-btn icon="trash" size="tiny" type="error"
-                                    :armed="grDeleteArm === r.path"
-                                    :tip="grDeleteArm === r.path ? '再点一次确认删除' : '删除全局参考图'"
-                                    @click="deleteGlobalRef(r)"></w-icon-btn>
-                      </div>
+              </div>
+              <n-alert v-if="globalRefsLoading" type="info" :bordered="false">加载中…</n-alert>
+              <!-- v0.62.0：瀑布流——CSS columns，列数按图库数量自适应（不做分页）。
+                   卡片不再定高封面，按原图比例铺，短长图都能紧密排布。 -->
+              <div v-if="globalRefs.length > 0" class="gr-waterfall" :style="{ '--gr-cols': grCols }">
+                <div v-for="(r, ri) in globalRefs" :key="r.path" class="gr-card">
+                  <div class="gr-card-cover" @click="openViewer(r.path, '全局参考图')">
+                    <img v-if="r.thumb" :src="r.thumb" alt="全局参考图" title="点击查看大图"
+                         :style="r.width && r.height ? { aspectRatio: r.width + ' / ' + r.height } : null">
+                    <div v-else class="picker-noimg">文件丢失</div>
+                    <span class="gr-card-idx">{{ ri + 1 }}</span>
+                  </div>
+                  <div class="gr-card-info">
+                    <div class="gr-card-note" :class="{ empty: !r.note }"
+                         :title="'点这里编辑第 ' + (ri + 1) + ' 张的备注'"
+                         @click="beginGrNote(r)">
+                      {{ r.note || "＋ 添加标签 / 备注" }}
                     </div>
-                  </n-gi>
-                </n-grid>
-                <n-empty v-else description="全局图库还是空的：上传几张精美图，就能在角色替换里当画布"></n-empty>
-              </n-space>
+                    <div class="gr-card-meta" v-if="r.exists">
+                      {{ r.width && r.height ? r.width + ' × ' + r.height + ' ' + grShape(r) : '尺寸未知' }}
+                      · {{ grSize(r.size) }}
+                    </div>
+                    <div class="gr-card-file" :title="r.path">{{ grName(r) }} · {{ (r.ext || 'img').toUpperCase() }}</div>
+                  </div>
+                  <div class="gr-card-ops">
+                    <w-icon-btn icon="edit" size="tiny" tip="编辑标签 / 备注"
+                                @click="beginGrNote(r)"></w-icon-btn>
+                    <w-icon-btn icon="info" size="tiny"
+                                tip="查看完整信息（路径 / sha256 / 尺寸等）"
+                                @click="openGrDetail(r)"></w-icon-btn>
+                    <w-icon-btn icon="trash" size="tiny" type="error"
+                                :armed="grDeleteArm === r.path"
+                                :tip="grDeleteArm === r.path ? '再点一次确认删除' : '删除全局参考图'"
+                                @click="deleteGlobalRef(r)"></w-icon-btn>
+                  </div>
+                </div>
+              </div>
+              <n-empty v-else description="全局图库还是空的：上传几张精美图，就能在角色替换里当画布"></n-empty>
             </n-card>
             <!-- v0.56.1：单张完整信息（卡片放不下的路径 / sha256 / 添加时间等） -->
             <n-modal v-model:show="grDetailOpen" preset="dialog" title="全局参考图 · 完整信息"
@@ -1511,7 +1523,7 @@
                                     :active="!!trySwapGlobal"
                                     @click="openTrySwapGlobalPicker"
                                     @preview="onPickerPreview"></w-pick-thumb>
-                      <w-pick-thumb :src="trySwapCharThumb || pickThumbOf(trySwapChar, [tryRefs, globalRefs])"
+                      <w-pick-thumb :src="trySwapCharThumb || pickThumbOf(trySwapChar, [tryRefs, tryPortraits, globalRefs])"
                                     :path="trySwapChar || ''"
                                     :label="trySwapChar ? '② 身份：' + tryNameOf(trySwapChar) : '② 点选角色参考图（身份）'"
                                     :sub="trySwapChar ? '图2 · 点图看大图 / 点文字重选' : '点文字选图'"
@@ -1569,10 +1581,10 @@
                                 hint="选一张精美图当画布：构图 / 姿势 / 背景会保留，只把人物换成角色。可以在「全局图库」页上传更多。"
                                 @update:value="onTrySwapGlobalConfirm"
                                 @preview="onPickerPreview"></w-image-picker>
-                <w-image-picker v-model:show="trySwapCharPickerOpen" :items="tryRefPickerItems"
+                <w-image-picker v-model:show="trySwapCharPickerOpen" :items="trySwapCharPickerItems"
                                 :value="trySwapChar ? [trySwapChar] : []" :multiple="false"
-                                title="选择角色参考图（身份 · 图2）"
-                                hint="选该角色的一张参考图提供脸部身份：只迁移五官 / 脸型 / 发型发色。画布的服装、动作、表情全部保持不变。"
+                                title="选择角色参考图 / 立绘（身份 · 图2）"
+                                hint="参考图与该角色的立绘都能选（按当前方案迁移身份特征）。画布的服装、动作、表情保持原样。"
                                 @update:value="onTrySwapCharConfirm"
                                 @preview="onPickerPreview"></w-image-picker>
 
@@ -1978,8 +1990,8 @@
                   <w-image-picker v-model:show="galSwapCharPickerOpen"
                                   :items="galSwapCharPickerItems"
                                   :value="galSwapChar ? [galSwapChar] : []" :multiple="false"
-                                  title="选择角色参考图（身份 · 图2）"
-                                  hint="选该角色的一张参考图提供脸部身份：只迁移五官 / 脸型 / 发型发色。画布的服装、动作、表情全部保持不变。"
+                                  title="选择角色参考图 / 立绘（身份 · 图2）"
+                                  hint="参考图与该角色的立绘都能选（按当前方案迁移身份特征）。画布的服装、动作、表情保持原样。"
                                   @update:value="onGalSwapCharConfirm"
                                   @preview="onPickerPreview"></w-image-picker>
                 </div>
@@ -5466,6 +5478,15 @@
       // ---- 全局参考图库（v0.56.0：角色替换的画布） ----
       var globalRefs = Vue.ref([]);          // [{path,rel,thumb,note,exists,width,height,...}]
       var globalRefsLoading = Vue.ref(false);
+      // v0.62.0：瀑布流列数按图库数量自适应（参考角色库卡片墙，不做分页）：
+      // ≤4 张 2 列、≤10 张 3 列、≤20 张 4 列，再多 5 列。窄屏 CSS 媒体查询再降。
+      var grCols = Vue.computed(function () {
+        var n = (globalRefs.value || []).length;
+        if (n <= 4) { return 2; }
+        if (n <= 10) { return 3; }
+        if (n <= 20) { return 4; }
+        return 5;
+      });
       var grDeleteArm = Vue.ref("");         // 两段确认：当前待删 path
       var grNoteEdit = Vue.ref(null);        // v0.59.1：正在编辑备注的行对象（弹窗里改，不撑卡片布局）
       var grNoteText = Vue.ref("");
@@ -6285,6 +6306,21 @@
       var tryRefPickerItems = Vue.computed(function () {
         return (tryRefs.value || []).map(_tryRefPickerItem);
       });
+      // v0.62.0：身份图（图2）候选 = 参考图 + 该角色立绘。立绘项用 abs 当 path、
+      // 标注「立绘 · #序号」，排在参考图之后；只收 active 且文件存在的。
+      var trySwapCharPickerItems = Vue.computed(function () {
+        var out = tryRefPickerItems.value.slice();
+        (tryPortraits.value || []).forEach(function (p, i) {
+          if (!p.abs || p.active === false || p.exists === false) { return; }
+          out.push({
+            path: p.abs, thumb: p.thumb || "", exists: true,
+            label: "立绘 · #" + (p.display_no || i + 1) + " · "
+                   + String((p.file || "").split("/").pop() || ("立绘 " + (i + 1))),
+            sub: "角色立绘" + (p.width && p.height ? " · " + p.width + "×" + p.height : "")
+          });
+        });
+        return out;
+      });
       var trySwapGlobalPickerItems = Vue.computed(function () {
         return (globalRefs.value || []).filter(function (r) { return r.exists !== false; })
           .map(function (r, i) {
@@ -6305,7 +6341,7 @@
       }
       function onTrySwapCharConfirm(vals) {
         trySwapChar.value = (vals && vals[0]) || null;
-        trySwapCharThumb.value = pickItemThumb(tryRefPickerItems.value, trySwapChar.value);
+        trySwapCharThumb.value = pickItemThumb(trySwapCharPickerItems.value, trySwapChar.value);
       }
       function onPickerPreview(path, title) { openViewer(path, title); }
       // 弹窗内删除参考图：复用现有解绑逻辑，但弹窗组件已做两段确认，这里直接删
@@ -6747,12 +6783,18 @@
       // 参考图缩略墙（v0.5.3）：试画台直接展示/选用/增删该角色绑定的参考图
       var tryRefs = Vue.ref([]);
       var tryRefsLoading = Vue.ref(false);
+      // v0.62.0：该角色的立绘（portraits/list）——身份图（图2）现在也能选立绘
+      var tryPortraits = Vue.ref([]);
       function loadTryRefs() {
-        if (!tryCharId.value) { tryRefs.value = []; return; }
+        if (!tryCharId.value) { tryRefs.value = []; tryPortraits.value = []; return; }
         tryRefsLoading.value = true;
-        apiGet("refs/list", { id: tryCharId.value }).then(function (res) {
-          tryRefs.value = (res && res.items) || [];
-        }).catch(function () { tryRefs.value = []; }).finally(function () {
+        Promise.all([
+          apiGet("refs/list", { id: tryCharId.value }).catch(function () { return null; }),
+          apiGet("portraits/list", { char_id: tryCharId.value }).catch(function () { return null; })
+        ]).then(function (arr) {
+          tryRefs.value = (arr[0] && arr[0].items) || [];
+          tryPortraits.value = (arr[1] && arr[1].items) || [];
+        }).finally(function () {
           tryRefsLoading.value = false;
         });
       }
@@ -7265,18 +7307,21 @@
                   && String(galSwapChar.value || "").trim());
       }
       // v0.60.0：角色详情也用图片选择弹窗（与试画台共用 WImagePicker），替换原文本下拉。
-      // 候选沿用原 galSwapCharOpts 的口径：只取 kind === "ref" 的本角色参考图，不含立绘。
+      // v0.62.0：放开立绘——候选 = 参考图 + 本角色立绘（genSources 里都有，portrait 项
+      // 的 path 是绝对路径 abs、thumb 可用），只做去重，标注「参考图 / 立绘」。
       var galSwapGlobalPickerOpen = Vue.ref(false);
       var galSwapCharPickerOpen = Vue.ref(false);
       var galSwapCharPickerItems = Vue.computed(function () {
         var seen = {};
         return (genSources.value || []).filter(function (g) {
-          if (!g.path || g.kind !== "ref" || seen[g.path]) { return false; }
+          if (!g.path || seen[g.path]) { return false; }
           seen[g.path] = 1; return true;
         }).map(function (g, i) {
-          var nm = String((g.path || "").split("/").pop() || ("参考图 " + (i + 1)));
+          var isPortrait = g.kind === "portrait";
+          var nm = String((g.path || "").split("/").pop() || ((isPortrait ? "立绘 " : "参考图 ") + (i + 1)));
           return { path: g.path, thumb: g.thumb || "", exists: true,
-                   label: "参考图 · " + nm, sub: "本角色已绑定" };
+                   label: (isPortrait ? "立绘 · #" + (g.display_no || i + 1) : "参考图") + " · " + nm,
+                   sub: isPortrait ? "本角色立绘" : "本角色已绑定" };
         });
       });
       function openGalSwapGlobalPicker() { galSwapGlobalPickerOpen.value = true; }
@@ -11469,7 +11514,7 @@
         tryToRefed: tryToRefed, doTryToRef: doTryToRef,
         doTry: doTry, doMarkVerified: doMarkVerified, doArchive: doArchive,
         // v0.56.0：全局图库 + 角色替换
-        globalRefs: globalRefs, globalRefsLoading: globalRefsLoading,
+        globalRefs: globalRefs, globalRefsLoading: globalRefsLoading, grCols: grCols,
         globalRefOpts: globalRefOpts, loadGlobalRefs: loadGlobalRefs,
         onGlobalPanelFiles: onGlobalPanelFiles, grDeleteArm: grDeleteArm,
         grNoteEdit: grNoteEdit, grNoteText: grNoteText, grNoteOpen: grNoteOpen,
@@ -11481,6 +11526,7 @@
         swapScheme: swapScheme, swapSchemeOpts: swapSchemeOpts, swapSchemeHint: swapSchemeHint,
         trySwapGlobal: trySwapGlobal, trySwapChar: trySwapChar,
         trySwapGlobalThumb: trySwapGlobalThumb, trySwapCharThumb: trySwapCharThumb,
+        tryPortraits: tryPortraits, trySwapCharPickerItems: trySwapCharPickerItems,
         trySwapWf: trySwapWf, trySwapDenoise: trySwapDenoise,
         trySwapCharOpts: trySwapCharOpts, tryHasSwapSource: tryHasSwapSource,
         // v0.58.0：图片选择弹窗
