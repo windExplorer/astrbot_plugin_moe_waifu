@@ -703,18 +703,47 @@
   .pi-tag.keep { opacity: .6; }
   .pi-tag.off { opacity: .32; text-decoration: line-through; }
   .pi-list { max-height: 300px; overflow-y: auto; padding-right: 4px; }
-  /* v0.56.0：全局图库备注编辑（普通 div，不用 n-space——v-if 兄弟节点撞 key 老坑） */
-  .gr-note-edit { display: flex; gap: 4px; align-items: center; margin-top: 4px; }
-  /* v0.56.1：全局图库卡片信息（小字分层，不用 n-space——v-if 兄弟节点撞 key 老坑） */
-  .gr-card-note { font-size: 12px; line-height: 1.4; min-height: 30px;
-    overflow-wrap: anywhere; cursor: pointer; }
-  .gr-card-note.empty { opacity: .5; font-style: italic; }
+  /* v0.60.0：全局图库卡片重排——封面固定 4:3，信息定高，备注/标签弹窗编辑不撑布局 */
+  .gr-card { border: 1px solid var(--wf-line); border-radius: 12px; overflow: hidden;
+    background: var(--wf-surface); transition: transform .15s, box-shadow .15s, border-color .15s; }
+  .gr-card:hover { transform: translateY(-2px); border-color: var(--wf-brand);
+    box-shadow: 0 8px 20px -10px rgba(80,40,70,.5); }
+  .gr-card-cover { position: relative; aspect-ratio: 4 / 3; overflow: hidden; cursor: zoom-in;
+    background: rgba(128,128,128,.08); }
+  .gr-card-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .gr-card-idx { position: absolute; top: 6px; left: 6px; min-width: 20px; height: 20px;
+    line-height: 20px; text-align: center; background: rgba(0,0,0,.55); color: #fff;
+    border-radius: 6px; font-size: 11px; font-weight: 700; }
+  .gr-card-info { padding: 8px 10px 4px; }
+  .gr-card-note { font-size: 12px; line-height: 1.4; height: 34px; overflow: hidden;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow-wrap: anywhere; cursor: pointer; font-weight: 600; }
+  .gr-card-note:hover { color: var(--wf-brand); }
+  .gr-card-note.empty { opacity: .5; font-weight: 400; font-style: italic; }
   .gr-card-meta { font-size: 11px; opacity: .78; line-height: 1.5; overflow-wrap: anywhere; }
-  .gr-card-file { font-size: 10px; opacity: .5; overflow-wrap: anywhere; }
+  .gr-card-file { font-size: 10px; opacity: .5; overflow-wrap: anywhere;
+    white-space: nowrap; text-overflow: ellipsis; }
+  .gr-card-ops { display: flex; justify-content: flex-end; gap: 2px; padding: 2px 6px 6px; }
   .gr-detail-grid { display: grid; grid-template-columns: 84px 1fr; gap: 10px 12px; font-size: 13px; }
   .gr-detail-grid .k { opacity: .6; white-space: nowrap; }
   .gr-detail-grid .v { overflow-wrap: anywhere; }
   .swap-panel { display: block; }
+  /* v0.60.0：图片选择浮层（自绘，绕开 vendored naive dialog slot 不转发的问题） */
+  .picker-overlay { position: fixed; inset: 0; z-index: 3000; display: flex;
+    align-items: center; justify-content: center; padding: 24px;
+    background: rgba(0,0,0,.48); backdrop-filter: blur(2px); }
+  .picker-dialog { width: 860px; max-width: 96vw; max-height: 88vh; display: flex;
+    flex-direction: column; background: var(--wf-bg); color: inherit;
+    border: 1px solid var(--wf-line); border-radius: 12px;
+    box-shadow: 0 16px 48px rgba(0,0,0,.28); overflow: hidden; }
+  .picker-head { display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border-bottom: 1px solid var(--wf-line); }
+  .picker-title { font-size: 15px; font-weight: 700; }
+  .picker-close { font-size: 22px; line-height: 1; cursor: pointer; opacity: .6; padding: 0 4px; }
+  .picker-close:hover { opacity: 1; }
+  .picker-body { padding: 12px 16px; overflow-y: auto; flex: 1; }
+  .picker-foot { display: flex; justify-content: flex-end; gap: 10px;
+    padding: 10px 16px; border-top: 1px solid var(--wf-line); }
   /* v0.58.0：全局图片选择弹窗网格（普通 div，不用 n-space——v-if 兄弟撞 key 老坑） */
   .picker-tip { font-size: 12px; opacity: .75; line-height: 1.5; }
   .picker-count { font-size: 12px; font-weight: 600; margin: 8px 0 10px; }
@@ -1262,28 +1291,28 @@
                                 hint="支持 png / jpg / jpeg / webp / gif，可多选；单张不超过 15MB。同内容只存一份。"
                                 @files="onGlobalPanelFiles"></w-upload-panel>
                 <n-alert v-if="globalRefsLoading" type="info" :bordered="false">加载中…</n-alert>
-                <n-grid v-if="globalRefs.length > 0" :cols="5" :x-gap="10" :y-gap="10">
+                <n-grid v-if="globalRefs.length > 0" :cols="5" :x-gap="12" :y-gap="12">
                   <n-gi v-for="(r, ri) in globalRefs" :key="r.path">
-                    <div class="gal-item">
-                      <img v-if="r.thumb" :src="r.thumb" class="clickable-img"
-                           alt="全局参考图" title="点击查看大图"
-                           @click="openViewer(r.path, '全局参考图')">
-                      <div v-else class="gal-meta">文件丢失</div>
-                      <div class="gr-card-note" :class="{ empty: !r.note }"
-                           :title="'第 ' + (ri + 1) + ' 张 · 点这里写备注'"
-                           @click="beginGrNote(r)">
-                        {{ r.note || "＋ 点这里写备注（场景 / 画风 / 适合谁）" }}
+                    <div class="gr-card">
+                      <div class="gr-card-cover" @click="openViewer(r.path, '全局参考图')">
+                        <img v-if="r.thumb" :src="r.thumb" alt="全局参考图" title="点击查看大图">
+                        <div v-else class="picker-noimg">文件丢失</div>
+                        <span class="gr-card-idx">{{ ri + 1 }}</span>
                       </div>
-                      <div class="gr-card-meta" v-if="r.exists">
-                        {{ r.width && r.height ? r.width + ' × ' + r.height + ' ' + grShape(r) : '尺寸未知' }}
+                      <div class="gr-card-info">
+                        <div class="gr-card-note" :class="{ empty: !r.note }"
+                             :title="'点这里编辑第 ' + (ri + 1) + ' 张的备注'"
+                             @click="beginGrNote(r)">
+                          {{ r.note || "＋ 添加标签 / 备注" }}
+                        </div>
+                        <div class="gr-card-meta" v-if="r.exists">
+                          {{ r.width && r.height ? r.width + ' × ' + r.height + ' ' + grShape(r) : '尺寸未知' }}
+                          · {{ grSize(r.size) }}
+                        </div>
+                        <div class="gr-card-file" :title="r.path">{{ grName(r) }} · {{ (r.ext || 'img').toUpperCase() }}</div>
                       </div>
-                      <div class="gr-card-meta" v-if="r.exists">
-                        {{ grSize(r.size) }} · {{ (r.ext || 'img').toUpperCase() }} · {{ fmtTime(r.created_at) }}
-                      </div>
-                      <div class="gr-card-file" :title="r.path">{{ grName(r) }}</div>
-                      <div class="gal-ops">
-                        <w-icon-btn icon="edit" size="tiny"
-                                    :tip="'备注：' + (r.note || '未填')"
+                      <div class="gr-card-ops">
+                        <w-icon-btn icon="edit" size="tiny" tip="编辑标签 / 备注"
                                     @click="beginGrNote(r)"></w-icon-btn>
                         <w-icon-btn icon="info" size="tiny"
                                     tip="查看完整信息（路径 / sha256 / 尺寸等）"
@@ -1292,11 +1321,6 @@
                                     :armed="grDeleteArm === r.path"
                                     :tip="grDeleteArm === r.path ? '再点一次确认删除' : '删除全局参考图'"
                                     @click="deleteGlobalRef(r)"></w-icon-btn>
-                      </div>
-                      <div v-if="grNoteEdit === r.path" class="gr-note-edit">
-                        <n-input v-model:value="grNoteText" size="tiny" placeholder="这张图适合做什么角色替换"></n-input>
-                        <n-button size="tiny" type="primary" @click="saveGlobalRefNote(r)">保存</n-button>
-                        <n-button size="tiny" @click="grNoteEdit = ''">取消</n-button>
                       </div>
                     </div>
                   </n-gi>
@@ -1335,6 +1359,22 @@
               </div>
               <template #action>
                 <n-button size="small" type="primary" @click="grDetailOpen = false">关闭</n-button>
+              </template>
+            </n-modal>
+            <!-- v0.60.0：编辑标签 / 备注——独立弹窗，不再内嵌卡片撑乱布局 -->
+            <n-modal v-model:show="grNoteOpen" preset="dialog" title="编辑标签 / 备注"
+                     style="width: 480px;">
+              <n-space vertical size="small">
+                <div class="bind-tip" style="margin-top: 0;" v-if="grNoteEdit">
+                  {{ grName(grNoteEdit) }} · {{ grNoteEdit.width && grNoteEdit.height ? grNoteEdit.width + '×' + grNoteEdit.height : '' }}
+                </div>
+                <n-input v-model:value="grNoteText" type="textarea" :rows="3"
+                         placeholder="例如：夏日海边白裙 / 赛博朋克 / 适合角色替换的全身站姿"></n-input>
+                <div class="bind-tip" style="margin-top: 0;">写清楚场景 / 画风 / 适合谁，选图时一眼就能认出来。</div>
+              </n-space>
+              <template #action>
+                <n-button size="small" @click="grNoteOpen = false">取消</n-button>
+                <n-button size="small" type="primary" @click="saveGlobalRefNote">保存</n-button>
               </template>
             </n-modal>
           </div>
@@ -4977,22 +5017,26 @@
       body.push(cells.length
         ? h("div", { class: "picker-grid" }, cells)
         : h("div", { class: "picker-empty" }, "这里还没有图片"));
-      return h(NS.NModal, {
-        show: this.show,
-        "onUpdate:show": function (v) { self.$emit("update:show", v); },
-        preset: "dialog",
-        title: this.title,
-        style: "width: 860px; max-width: 94vw;"
-      }, {
-        default: function () { return body; },
-        action: function () {
-          return [
+      // v0.60.0：不用 NS.NModal——vendored naive 的 dialog preset 在 render function 里
+      // 不转发 default/action slot（弹窗壳出来了、内容空白，v0.58 实测）。改自绘浮层，
+      // 与页面里久经考验的 lightbox 同为纯 DOM，稳。
+      if (!this.show) { return null; }
+      var overlay = h("div", { class: "picker-overlay",
+        onClick: function (e) { if (e.target === e.currentTarget) self.doCancel(); } }, [
+        h("div", { class: "picker-dialog" }, [
+          h("div", { class: "picker-head" }, [
+            h("span", { class: "picker-title" }, String(this.title || "选择图片")),
+            h("span", { class: "picker-close", onClick: self.doCancel }, "×")
+          ]),
+          h("div", { class: "picker-body" }, body),
+          h("div", { class: "picker-foot" }, [
             h(NS.NButton, { size: "small", onClick: self.doCancel }, "取消"),
             h(NS.NButton, { size: "small", type: "primary", onClick: self.doConfirm },
-              "确定" + (self.multiple ? "（" + self.draft.length + "）" : ""))
-          ];
-        }
-      });
+              "确定" + (this.multiple ? "（" + this.draft.length + "）" : ""))
+          ])
+        ])
+      ]);
+      return overlay;
     }
   };
 
@@ -5284,8 +5328,9 @@
       var globalRefs = Vue.ref([]);          // [{path,rel,thumb,note,exists,width,height,...}]
       var globalRefsLoading = Vue.ref(false);
       var grDeleteArm = Vue.ref("");         // 两段确认：当前待删 path
-      var grNoteEdit = Vue.ref("");          // 正在编辑备注的 path
+      var grNoteEdit = Vue.ref(null);        // v0.60.0：正在编辑备注的行对象（弹窗里改，不撑卡片布局）
       var grNoteText = Vue.ref("");
+      var grNoteOpen = Vue.ref(false);       // 备注编辑弹窗开关
       var grDetailOpen = Vue.ref(false);     // v0.56.1：详情弹窗
       var grDetail = Vue.ref(null);
       function openGrDetail(r) { grDetail.value = r; grDetailOpen.value = true; }
@@ -5332,15 +5377,20 @@
         uploading.value = false;
         if (okN) { message.success("已加入全局图库 " + okN + " 张"); await loadGlobalRefs(); }
       }
-      async function saveGlobalRefNote(r) {
+      async function saveGlobalRefNote() {
+        var r = grNoteEdit.value;
+        if (!r) { return; }
         try {
           await apiPost("global_refs/note", { path: r.path, note: grNoteText.value });
           r.note = grNoteText.value;
-          grNoteEdit.value = "";
+          grNoteOpen.value = false;
+          grNoteEdit.value = null;
           message.success("备注已保存");
         } catch (e) { /* 已提示 */ }
       }
-      function beginGrNote(r) { grNoteEdit.value = r.path; grNoteText.value = r.note || ""; }
+      function beginGrNote(r) {
+        grNoteEdit.value = r; grNoteText.value = r.note || ""; grNoteOpen.value = true;
+      }
       async function deleteGlobalRef(r) {
         if (grDeleteArm.value !== r.path) {
           grDeleteArm.value = r.path;
@@ -11176,7 +11226,7 @@
         globalRefs: globalRefs, globalRefsLoading: globalRefsLoading,
         globalRefOpts: globalRefOpts, loadGlobalRefs: loadGlobalRefs,
         onGlobalPanelFiles: onGlobalPanelFiles, grDeleteArm: grDeleteArm,
-        grNoteEdit: grNoteEdit, grNoteText: grNoteText,
+        grNoteEdit: grNoteEdit, grNoteText: grNoteText, grNoteOpen: grNoteOpen,
         saveGlobalRefNote: saveGlobalRefNote, beginGrNote: beginGrNote,
         deleteGlobalRef: deleteGlobalRef,
         grDetailOpen: grDetailOpen, grDetail: grDetail, openGrDetail: openGrDetail,
