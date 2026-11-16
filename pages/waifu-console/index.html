@@ -1327,8 +1327,14 @@
                 <!-- 第 1 步：角色 + 画法 + 参考图 -->
                 <div v-if="tryStep === 1">
                   <n-space align="center" :wrap="true">
+                    <n-select v-model:value="tryFilterSeries" :options="seriesOpts" filterable
+                              size="small" style="width: 160px;"
+                              placeholder="全部作品"></n-select>
+                    <n-select v-model:value="tryFilterVerified" :options="verifiedOpts"
+                              size="small" style="width: 100px;"
+                              placeholder="验证状态"></n-select>
                     <n-select v-model:value="tryCharId" :options="charOpts" filterable
-                              placeholder="选择要试画的角色" style="width: 320px;"></n-select>
+                              placeholder="选择要试画的角色" style="width: 300px;"></n-select>
                     <span style="font-size: 13px;">画法：</span>
                     <n-radio-group v-model:value="tryMode" size="small">
                       <n-radio-button value="entry">跟随条目</n-radio-button>
@@ -1344,8 +1350,8 @@
                               @click="gotoStep2">下一步：确认提示词 →</n-button>
                   </n-space>
                   <div class="bind-tip" style="margin-top: 12px;" v-if="!tryCharId">
-                    先在上框选择要试画的角色（可按名字 / 作品搜索）；未验证角色同样可以试，
-                    画对了在第 3 步点「标记 verified」即可参与群内抽卡。
+                    先用「作品 / 验证状态」缩小范围，再从角色下拉里选（下拉也可按名字 / 作品搜索）；
+                    未验证角色同样可以试，画对了在第 3 步点「标记 verified」即可参与群内抽卡。
                   </div>
                   <div v-if="tryMode === 'img2img'" style="margin-top: 10px;">
                     <n-space :wrap="true" size="small" align="center">
@@ -6048,14 +6054,28 @@
       }
       var tryElapsed = Vue.ref(0);
       var uploading = Vue.ref(false);
+      // v0.57.0：试画台角色筛选——作品 / 是否验证（复用角色库的 seriesOpts/verifiedOpts）
+      var tryFilterSeries = Vue.ref("");
+      var tryFilterVerified = Vue.ref("");
       var charOpts = Vue.computed(function () {
-        return allEntries.value.map(function (e) {
+        return allEntries.value.filter(function (e) {
+          if (tryFilterSeries.value && (e.series || "") !== tryFilterSeries.value) return false;
+          if (tryFilterVerified.value === "yes" && !e.verified) return false;
+          if (tryFilterVerified.value === "no" && e.verified) return false;
+          return true;
+        }).map(function (e) {
           return {
             label: e.name + "（" + (e.series || catLabel(e.category)) + "）"
               + (e.verified ? "" : " · 未验证"),
             value: e.id
           };
         });
+      });
+      // 筛选把当前选中角色排除时清掉选择，避免「选中的角色不在列表里」的鬼影
+      Vue.watch([tryFilterSeries, tryFilterVerified], function () {
+        if (tryCharId.value && !charOpts.value.some(function (o) {
+          return o.value === tryCharId.value;
+        })) { tryCharId.value = null; }
       });
       var tryEntry = Vue.computed(function () {
         return allEntries.value.find(function (e) { return e.id === tryCharId.value; }) || null;
@@ -10947,6 +10967,8 @@
         loadDuplicates: loadDuplicates, doDedupe: doDedupe,
         catLabel: catLabel, stratLabel: stratLabel, portraitCount: portraitCount, delArm: delArm,
         tryCharId: tryCharId, charOpts: charOpts, tryEntry: tryEntry,
+        // v0.57.0：试画台角色筛选
+        tryFilterSeries: tryFilterSeries, tryFilterVerified: tryFilterVerified,
         tryRunning: tryRunning, tryError: tryError, tryPreview: tryPreview, tryOk: tryOk,
         tryArchived: tryArchived, tryEntryVerified: tryEntryVerified,
         tryToRefed: tryToRefed, doTryToRef: doTryToRef,
