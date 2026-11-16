@@ -2,6 +2,31 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.60.3 (2026-11-16)
+
+**修：图2选完图仍显示占位「图」；已选卡片点击区域拆分（缩略图看大图 / 文字进弹窗）。**
+
+- 现象（用户截图）：角色详情角色替换里，①画布缩略图正常，②身份却只有占位「图」，
+  标签显示 `gen_..._ganyu.png` 这种没有可读名的路径；另外整块卡片都能点，点图也是进
+  选择弹窗，与页面「生成源」条「点图片看大图、点文字选中」的约定不一致。
+- 根因 ①：`pickThumbOf` 靠路径反查缩略图。`gen_` 前缀图是立绘转入参考图，ref 行的
+  `thumb` 可能为 null，仅查 `genSources` 又找不到同名可用缩略图，于是落回占位。
+  更隐蔽的是换角色 watch 只清了 `galRefsSel` / refs / 提示词，**没清 `galSwapChar`**，
+  换角色后 ②身份 残留上一位角色的路径——既没名字也没缩略图。
+- 根因 ②：`WPickThumb` 整个是 `<button onClick=进弹窗>`，缩略图没有独立的看大图入口。
+- 修复：① 四个 picker 确认回调（试画台 global/char、角色详情 global/char）在写入 path
+  的当下把对应 item 的 `thumb` 一起存进新 ref（`*Swap*Thumb`），按钮优先用存下来的，
+  `pickThumbOf` 退回路径归一 + **文件名兜底**（跨表按 basename 找可用缩略图）；
+  ② 换角色 watch 同步清 `galSwapChar` / `galSwapCharThumb`；
+  ③ `WPickThumb` 根元素改 `div`，缩略图 `img` 绑 `preview`（emit path+label → 看大图，
+  占位块无 path 时放行到根节点进弹窗），文字区绑 `click` 进选择弹窗；四处挂载补
+  `:path` 与 `@preview`，文案同步改「点图看大图 / 点文字重选」。
+- 守卫：`tests/test_image_picker.js` 真跑 WPickThumb render，断言看大图 emit preview、
+  文字区 emit click、占位块不 emit preview；新增四个确认回调必须存 thumb、换角色必须
+  清 galSwapChar 等守卫。前端 JS / 模板编译 / 模板结构 / HTML / 契约 / 全局图替换 /
+  schema 全过。
+- 版本 v0.60.2 -> v0.60.3。
+
 ## v0.60.2 (2026-11-16)
 
 **修：角色替换不再传「重绘强度」——Qwen Edit 双图编辑根本不支持这个参数。**

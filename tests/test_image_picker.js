@@ -140,22 +140,56 @@ let ThumbComp;
 try {
   ThumbComp = (new Function('h', thumbSrc + '\nreturn WPickThumb;'))(h);
 } catch (e) { fail('WPickThumb eval 抛错: ' + e.message); }
-const thumbInst = { src: 'data:img', label: '① 画布：g.webp', sub: '图1', index: 0,
-                    active: true, $emit: function () {} };
+const emitted = [];
+const thumbInst = { src: 'data:img', path: 'refs/g.webp', label: '① 画布：g.webp',
+                    sub: '图1', index: 0, active: true,
+                    $emit: function (ev, a, b) { emitted.push([ev, a, b]); } };
 let thumbVnode;
 try { thumbVnode = ThumbComp.render.call(thumbInst); } catch (e) {
   fail('WPickThumb render 抛错: ' + e.message);
 }
-if (!thumbVnode || thumbVnode.tag !== 'button') fail('WPickThumb 未渲染按钮');
+// v0.60.3：根元素必须是 div（不再是整块 button），才能把「看大图」和「进弹窗」拆成两个区域
+if (!thumbVnode || thumbVnode.tag !== 'div') fail('WPickThumb 根元素不是 div（点击区域无法拆分）');
 const thumbKids = thumbVnode.children || [];
-if (!thumbKids.some(k => k && k.props && k.props.class === 'pick-thumb-img')) {
-  fail('选中后没展示缩略图 img（仍只显示名字）');
+const imgNode = thumbKids.find(k => k && k.props && String(k.props.class).indexOf('pick-thumb-img') >= 0);
+if (!imgNode) fail('选中后没展示缩略图 img（仍只显示名字）');
+// 点缩略图 emit preview(path,label)，点根节点 emit click——两条路径互不干扰
+if (typeof imgNode.props.onClick !== 'function') fail('缩略图没绑看大图点击');
+imgNode.props.onClick({ stopPropagation: function () {} });
+if (emitted.length !== 1 || emitted[0][0] !== 'preview' || emitted[0][1] !== 'refs/g.webp') {
+  fail('点缩略图没 emit preview(path)');
 }
+emitted.length = 0;
+if (typeof thumbVnode.props.onClick !== 'function') fail('根节点没绑进弹窗点击');
+thumbVnode.props.onClick();
+if (emitted.length !== 1 || emitted[0][0] !== 'click') fail('点文字区没 emit click');
+// 占位块（无 path）点缩略图区应放行到根节点 click，不该 emit preview
+const noPath = Object.assign({}, thumbInst, { src: '', path: '', $emit: function (ev) { emitted.push([ev]); } });
+const noPathVnode = ThumbComp.render.call(noPath);
+const phNode = (noPathVnode.children || []).find(k => k && k.props && String(k.props.class).indexOf('pick-thumb-ph') >= 0);
+emitted.length = 0;
+if (phNode && typeof phNode.props.onClick === 'function') phNode.props.onClick({ stopPropagation: function () {} });
+if (emitted.some(e => e[0] === 'preview')) fail('占位块（无 path）不应 emit preview');
 // 试画台 swap / 角色详情 swap / img2img 已选条三处都必须用缩略图
 if ((html.match(/<w-pick-thumb /g) || []).length < 4) {
   fail('缩略图按钮挂载点不足（试画台 swap + 角色详情 swap 共 4 处）');
 }
 if (html.indexOf('class="picker-strip-thumb"') < 0) fail('img2img 已选条没加缩略图');
+// v0.60.3：选中即存缩略图——4 个确认回调都要写对应的 thumb ref，挂载点优先用它
+for (const [cb, ref] of [
+  ['onTrySwapGlobalConfirm', 'trySwapGlobalThumb'],
+  ['onTrySwapCharConfirm', 'trySwapCharThumb'],
+  ['onGalSwapGlobalConfirm', 'galSwapGlobalThumb'],
+  ['onGalSwapCharConfirm', 'galSwapCharThumb']
+]) {
+  const s = html.indexOf('function ' + cb + '(vals) {');
+  if (s < 0) fail('找不到 ' + cb);
+  const seg = html.slice(s, s + 420);
+  if (seg.indexOf(ref + '.value =') < 0) fail(cb + ' 没存 ' + ref + '（选完仍会丢缩略图）');
+}
+if (!/galSwapChar\.value = null; galSwapCharThumb\.value = ""/.test(html)) {
+  fail('换角色没清 galSwapChar 缩略图（会残留上一位角色的身份图）');
+}
 
 // 9) v0.60.0：角色详情 swap 也用图片弹窗，老文本下拉必须撤掉
 const galSeg = html.split('v-if="galMode === \'swap\'" class="swap-panel"', 2)[1] || '';
