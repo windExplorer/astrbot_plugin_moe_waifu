@@ -86,4 +86,47 @@ if (html.indexOf('class="gr-note-edit"') >= 0) fail('卡片里仍有内嵌备注
 if (html.indexOf('.gr-card-note') < 0 || html.indexOf('.gr-card-cover') < 0) {
   fail('全局图库卡片新样式缺失');
 }
+
+// 6) v0.59.2：数据源必须在首屏 / 换页签 / 换画法时真的加载。
+// v0.58~v0.59.1 组件本身没错，是 globalRefs 只在点「全局图库」页签时拉、
+// tryRefs 只在 img2img 下拉——用户从试画台直达 swap 模式时两者恒空，弹窗空白。
+const boot = html.indexOf('loadAll().then(function ()');
+if (boot < 0) fail('找不到首屏加载块');
+const bootSeg = html.slice(boot, boot + 800);
+if (bootSeg.indexOf('return Promise.all([loadGallery()') < 0
+    || bootSeg.indexOf('loadGlobalRefs()') < 0) {
+  fail('首屏没拉 globalRefs（角色替换「画布」弹窗必空）');
+}
+if (!/else if \(m === "global_refs"\) \{ loadGlobalRefs\(\); \}/.test(html)) {
+  fail('menu watcher 缺 global_refs 分支（服务端记忆页签恢复后列表不加载）');
+}
+const mw = html.indexOf('return [tryCharId.value, tryMode.value]');
+if (mw < 0) fail('找不到 tryCharId/tryMode watcher');
+const mwSeg = html.slice(mw, mw + 900);
+if (!/v\[1\] === "img2img" \|\| v\[1\] === "swap"/.test(mwSeg)) {
+  fail('换画法 watcher 未在 swap 模式加载 tryRefs（「身份」弹窗必空）');
+}
+
+// 7) 源数组有数据 → 传给 picker 的 items 必须非空（真跑 computed，不是看字符串）
+const cs = html.indexOf('function _tryRefPickerItem(r, i) {');
+const ce = html.indexOf('\n      function openTryRefPicker()', cs);
+if (cs < 0 || ce < 0) fail('找不到 _tryRefPickerItem / picker computed 区块');
+const compSrc = html.slice(cs, ce);
+const fakeVue = { computed: fn => ({ get value() { return fn(); } }) };
+const fakeGlobal = [{ path: 'global_refs/g1.webp', thumb: 'data:g', note: '画布',
+                      exists: true, width: 2160, height: 3156, size: 12345 }];
+const fakeRefs = [{ path: 'refs/r1.png', thumb: 'data:r', note: '主参考',
+                    exists: true, width: 700, height: 1200, source: '卡池' }];
+let built;
+try {
+  built = new Function('Vue', 'globalRefs', 'tryRefs', 'grName', 'grSize',
+    compSrc + '\nreturn { a: tryRefPickerItems, b: trySwapGlobalPickerItems };')(
+    fakeVue, { value: fakeGlobal }, { value: fakeRefs },
+    r => String((r && r.path || '').split('/').pop()),
+    n => String(n || 0) + ' B');
+} catch (e) { fail('picker computed 求值抛错: ' + e.message); }
+if (!built.a.value.length) fail('tryRefs 有数据但 tryRefPickerItems 为空');
+if (!built.b.value.length) fail('globalRefs 有数据但 trySwapGlobalPickerItems 为空');
+if (built.b.value[0].path !== 'global_refs/g1.webp') fail('picker item 丢 path');
+
 console.log('test_image_picker: ALL OK');

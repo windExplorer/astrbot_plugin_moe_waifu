@@ -703,7 +703,7 @@
   .pi-tag.keep { opacity: .6; }
   .pi-tag.off { opacity: .32; text-decoration: line-through; }
   .pi-list { max-height: 300px; overflow-y: auto; padding-right: 4px; }
-  /* v0.60.0：全局图库卡片重排——封面固定 4:3，信息定高，备注/标签弹窗编辑不撑布局 */
+  /* v0.59.1：全局图库卡片重排——封面固定 4:3，信息定高，备注/标签弹窗编辑不撑布局 */
   .gr-card { border: 1px solid var(--wf-line); border-radius: 12px; overflow: hidden;
     background: var(--wf-surface); transition: transform .15s, box-shadow .15s, border-color .15s; }
   .gr-card:hover { transform: translateY(-2px); border-color: var(--wf-brand);
@@ -728,7 +728,7 @@
   .gr-detail-grid .k { opacity: .6; white-space: nowrap; }
   .gr-detail-grid .v { overflow-wrap: anywhere; }
   .swap-panel { display: block; }
-  /* v0.60.0：图片选择浮层（自绘，绕开 vendored naive dialog slot 不转发的问题） */
+  /* v0.59.1：图片选择浮层（自绘，绕开 vendored naive dialog slot 不转发的问题） */
   .picker-overlay { position: fixed; inset: 0; z-index: 3000; display: flex;
     align-items: center; justify-content: center; padding: 24px;
     background: rgba(0,0,0,.48); backdrop-filter: blur(2px); }
@@ -1361,7 +1361,7 @@
                 <n-button size="small" type="primary" @click="grDetailOpen = false">关闭</n-button>
               </template>
             </n-modal>
-            <!-- v0.60.0：编辑标签 / 备注——独立弹窗，不再内嵌卡片撑乱布局 -->
+            <!-- v0.59.1：编辑标签 / 备注——独立弹窗，不再内嵌卡片撑乱布局 -->
             <n-modal v-model:show="grNoteOpen" preset="dialog" title="编辑标签 / 备注"
                      style="width: 480px;">
               <n-space vertical size="small">
@@ -5017,7 +5017,7 @@
       body.push(cells.length
         ? h("div", { class: "picker-grid" }, cells)
         : h("div", { class: "picker-empty" }, "这里还没有图片"));
-      // v0.60.0：不用 NS.NModal——vendored naive 的 dialog preset 在 render function 里
+      // v0.59.1：不用 NS.NModal——vendored naive 的 dialog preset 在 render function 里
       // 不转发 default/action slot（弹窗壳出来了、内容空白，v0.58 实测）。改自绘浮层，
       // 与页面里久经考验的 lightbox 同为纯 DOM，稳。
       if (!this.show) { return null; }
@@ -5328,7 +5328,7 @@
       var globalRefs = Vue.ref([]);          // [{path,rel,thumb,note,exists,width,height,...}]
       var globalRefsLoading = Vue.ref(false);
       var grDeleteArm = Vue.ref("");         // 两段确认：当前待删 path
-      var grNoteEdit = Vue.ref(null);        // v0.60.0：正在编辑备注的行对象（弹窗里改，不撑卡片布局）
+      var grNoteEdit = Vue.ref(null);        // v0.59.1：正在编辑备注的行对象（弹窗里改，不撑卡片布局）
       var grNoteText = Vue.ref("");
       var grNoteOpen = Vue.ref(false);       // 备注编辑弹窗开关
       var grDetailOpen = Vue.ref(false);     // v0.56.1：详情弹窗
@@ -6585,9 +6585,13 @@
         tryStep.value = 1;
         tryPrompt.value = ""; tryDims.value = []; tryBodyZh.value = "";
         tryPromptSource.value = ""; tryStyle.value = ""; tryAttempt.value = 0;
-        if (v[0] && v[1] === "img2img") {
-          tryOverride.value.ref = "";   // 换角色/换模式清空，避免残留别的角色的参考图
-          tryOverride.value.refs = [];
+        // v0.59.2：角色替换（swap）也依赖该角色的参考图当「图2 身份」，
+        // 旧版只在 img2img 下拉 tryRefs，切到 swap 时直接清空 → 身份图弹窗空白。
+        if (v[0] && (v[1] === "img2img" || v[1] === "swap")) {
+          if (v[1] === "img2img") {
+            tryOverride.value.ref = "";   // 换角色/换模式清空，避免残留别的角色的参考图
+            tryOverride.value.refs = [];
+          }
           loadTryRefs();
         } else { tryRefs.value = []; }
       });
@@ -10438,6 +10442,9 @@
         }
         else if (m === "works") { loadWorks().then(resyncCurrentWork); }
         else if (m === "try") { loadTryRefs(); }
+        // v0.59.2：restoreUiMenu 直接写 menu.value 不走 setMenu，这里补一刀，
+        // 否则「服务端记住的页签 = 全局图库」刷新进来列表不加载。
+        else if (m === "global_refs") { loadGlobalRefs(); }
         else if (m === "gallery") { loadGallery(); loadGalRefs(); }
         else if (m === "bind") { loadBindPools(); loadConfig(); }
         else if (m === "config") { loadConfig(); }
@@ -11150,8 +11157,12 @@
         // v0.42.0：首屏也拉一次调试历史（服务端页签记忆恢复到 debug 时
         // 不必依赖 watch 时机，查询历史一定不为空）
         loadDebugHistory();
+        // v0.59.2：全局图库必须首屏就拉——角色替换的「全局图（画布）」选择器
+        // 直接读 globalRefs，旧版只在 refreshAll / 点「全局图库」页签时才加载，
+        // 用户从「试画台」直达并点选时 globalRefs 仍是空数组 → 弹窗空白。
         return Promise.all([loadGallery(), loadConfig(), loadWorks(), loadWorkflows(),
-                            loadLlmProviders(), loadThemes(), loadPresets()]);
+                            loadLlmProviders(), loadThemes(), loadPresets(),
+                            loadGlobalRefs()]);
       });
 
       // v0.34.2：全局出图队列轮询（顶部指示器 + 队列面板共用一份数据）

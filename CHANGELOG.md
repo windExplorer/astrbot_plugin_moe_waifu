@@ -2,6 +2,32 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.59.2 (2026-11-16)
+
+**修：试画台选图弹窗「明明有数据却空白」——真正根因是数据源没加载，不是渲染层。**
+
+- 现象：v0.59.1 把 `WImagePicker` 从 `NS.NModal` 改成自绘浮层后，弹窗壳（标题 / 提示 /
+  按钮）正常出现，但三处选图弹窗仍显示「这里还没有图片」；而「全局图库」页和角色详情
+  「参考图」页都能看到图。说明 `items` prop 是空数组，不是 slot 丢失。
+- 根因 ① **`globalRefs` 首屏根本没加载**：启动只有 `loadAll()`（=`fetchPools()`）+
+  `loadGallery/loadConfig/...`，`loadGlobalRefs()` 只在 `refreshAll()` 和手点「全局图库」
+  页签时调用；`restoreUiMenu()` 又直接写 `menu.value` 绕过 `setMenu()`。用户从「试画台」
+  直达并点「全局参考图（画布）」时，列表仍是初始 `[]`。
+- 根因 ② **swap 模式把 `tryRefs` 清空了**：`tryCharId/tryMode` 的 watcher 仅在
+  `tryMode === "img2img"` 时 `loadTryRefs()`，其余模式（含「角色替换」）走
+  `else { tryRefs.value = []; }`。而角色替换的「图2 身份」选择器正是从 `tryRefs` 取，
+  所以角色参考图弹窗必空（角色详情里的 11 张是另一份 `drawerRefs`，不受影响）。
+- 修复：① 首屏 `Promise.all` 增加 `loadGlobalRefs()`；menu watcher 补
+  `m === "global_refs"` 分支覆盖页签记忆恢复。② watcher 条件改为
+  `v[1] === "img2img" || v[1] === "swap"`，swap 也拉该角色的参考图（清空 overrides
+  仍只在 img2img 做，避免误伤）；无角色时才清空。顺手把误写成 v0.60.0 的注释改回 v0.59.1。
+- 守卫：`tests/test_image_picker.js` 新增两组——加载时机（首屏 / menu watcher / swap
+  分支）+ 真跑 `tryRefPickerItems`、`trySwapGlobalPickerItems` 两个 computed，源数组有
+  数据时 items 必须非空且 path 不丢。前端 JS / HTML / 模板编译 / 结构 / 契约 / 角色替换
+  / UI 全过（注：`test_ui_v042` 的「私聊开关」断言因 main.py 现有 3 处 guard 而测试写 2
+  处，属既有的陈旧断言，与本次无关）。
+- 版本 v0.59.1 -> v0.59.2。
+
 ## v0.59.1 (2026-11-16)
 
 **修：试画台图片选择弹窗空白；全局图库卡片重排，加标签不再撑乱布局。**
