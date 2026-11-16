@@ -76,7 +76,18 @@
     0% { background-position: 150% 0; }
     100% { background-position: -50% 0; }
   }
-  .gal-loading-badge { font-size: 11px; opacity: .6; }
+  .gal-loading-badge { font-size: 11px; opacity: .75; display: inline-flex; align-items: center; gap: 5px; }
+  /* v0.63.0：切角色/进详情的加载动画——旋转小圈 + 页签下方进度条 */
+  .gal-spin { display: inline-block; width: 11px; height: 11px; border-radius: 50%;
+    border: 2px solid var(--wf-brand); border-top-color: transparent;
+    animation: gal-spin .7s linear infinite; }
+  @keyframes gal-spin { to { transform: rotate(360deg); } }
+  .gal-loadbar { position: relative; height: 3px; margin: -6px 0 12px; overflow: hidden;
+    border-radius: 3px; background: rgba(160,120,150,.14); }
+  .gal-loadbar i { position: absolute; top: 0; left: 0; height: 100%; width: 35%;
+    border-radius: 3px; background: linear-gradient(90deg, transparent, var(--wf-brand), transparent);
+    animation: gal-loadbar 1.1s ease-in-out infinite; }
+  @keyframes gal-loadbar { 0% { transform: translateX(-100%); } 100% { transform: translateX(390%); } }
   /* v0.14.0：生成立绘弹窗的维度 chip（点值下拉=单独随机/选定值锁定，×=移除） */
   .dim-chip-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .dim-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
@@ -549,16 +560,15 @@
     border-color: var(--wf-brand);
     box-shadow: 0 8px 20px -10px rgba(160,50,120,.85); }
   .av-pic img { width: 100%; height: 100%; object-fit: cover; display: block;
-    cursor: zoom-in; }
+    cursor: pointer; }
   .av-letter { font-size: 26px; font-weight: 700; line-height: 1; user-select: none; }
-  /* 头像墙角落的「详情」角标：点头像本身看大图，进详情走这里 */
-  .av-detail { position: absolute; right: 4px; bottom: 4px; z-index: 3;
-    font-size: 10.5px; line-height: 1; padding: 3px 6px; border-radius: 999px;
-    color: #fff; cursor: pointer; background: rgba(20,12,20,.55);
-    border: 1px solid rgba(255,255,255,.28); opacity: 0;
+  /* v0.63.0：点头像整块进详情；右上角放大镜看大图（不拦主流程） */
+  .av-zoom { position: absolute; right: 3px; top: 3px; z-index: 3;
+    font-size: 11px; line-height: 1; padding: 2px 4px; border-radius: 999px;
+    background: rgba(20,12,20,.6); opacity: 0; cursor: zoom-in;
     transition: opacity .15s ease, background .15s ease; }
-  .av-tile:hover .av-detail { opacity: 1; }
-  .av-detail:hover { background: rgba(20,12,20,.8); }
+  .av-tile:hover .av-zoom { opacity: 1; }
+  .av-zoom:hover { background: rgba(20,12,20,.85); }
   .av-hover { position: absolute; left: 50%; bottom: calc(100% + 6px);
     transform: translate(-50%, 4px); z-index: 6; pointer-events: none;
     display: flex; flex-direction: column; gap: 2px; align-items: center;
@@ -1172,19 +1182,19 @@
             </div>
 
             <!-- 头像墙视图（v0.49.0 / v0.50.0）：一屏纯头像；没有头像用文字头像兜底，
-                 悬停浮出「名字 + 作品」小气泡。点头像看大图，右下角「详情」进角色页 -->
+                 悬停浮出「名字 + 作品」小气泡。v0.63.0：点头像直接进角色详情；
+                 看大图移到右上角小放大镜（不拦主流程） -->
             <div v-if="charsMode === 'avatar'" style="margin-top: 14px;">
               <div class="av-wall" v-if="filteredEntries.length > 0">
                 <div v-for="e in filteredEntries" :key="'avw' + e.id" class="av-tile"
-                     :title="(e.name || '') + ' · ' + (e.series || '未填作品')"
+                     :title="'进入 ' + (e.name || '') + ' 的角色详情'"
                      @click="gotoGallery(e.id)">
                   <div class="av-pic" :style="{ background: (e.color || '#8A8A9A') + '33' }">
-                    <img v-if="avatarThumbs[e.id]" :src="avatarThumbs[e.id]" alt=""
-                         @click.stop="openCharAvatarViewer(e)">
+                    <img v-if="avatarThumbs[e.id]" :src="avatarThumbs[e.id]" alt="">
                     <span v-else class="av-letter"
                           :style="{ color: e.color || '#8A8A9A' }">{{ (e.name || '?').slice(0, 1) }}</span>
-                    <span v-if="avatarThumbs[e.id]" class="av-detail" title="进入角色详情"
-                          @click.stop="gotoGallery(e.id)">详情</span>
+                    <span v-if="avatarThumbs[e.id]" class="av-zoom" title="看头像大图"
+                          @click.stop="openCharAvatarViewer(e)">🔍</span>
                   </div>
                   <div class="av-hover">
                     <b>{{ e.name }}</b>
@@ -1684,7 +1694,7 @@
                         placeholder="选择角色（按立绘数）" style="width: 250px;"></n-select>
               <template v-if="detailEntry">
                 <span class="detail-name">{{ detailEntry.name }}</span>
-                <span v-if="galSwitching" class="gal-loading-badge">载入中…</span>
+                <span v-if="galSwitching" class="gal-loading-badge"><i class="gal-spin"></i>载入中…</span>
                 <n-tag v-if="detailEntry.series" size="small" :bordered="false">{{ detailEntry.series }}</n-tag>
                 <n-tag v-if="detailEntry.tier" size="small" :bordered="false">{{ detailEntry.tier }}</n-tag>
                 <n-tag size="small" :bordered="false">{{ catLabel(detailEntry.category) }}</n-tag>
@@ -1701,10 +1711,11 @@
                 v-if="galDisabledCount > 0"> · 停用 {{ galDisabledCount }}</span></span>
               <w-icon-btn icon="refresh" tip="刷新全部" :loading="refreshing"
                           @click="refreshAll"></w-icon-btn>
-              <!-- v0.31.0：角色头像（有才显示，点击进资料页换） -->
+              <!-- v0.31.0 头像；v0.63.0：点头像看大图（与资料页/图库页头像一致），
+                   不再跳资料 tab；换头像在资料 tab 的三个入口 -->
               <img v-if="galAvatarThumb" :src="galAvatarThumb" class="gal-avatar"
-                   title="角色头像（到「资料」页签可更换）" alt="头像"
-                   @click="switchGalTab('profile')">
+                   title="点击查看头像大图（换头像去「资料」页签）" alt="头像"
+                   @click="openCharAvatarViewer(null)">
             </div>
 
             <!-- v0.42.0：速览并入资料、新增图库（参考图 / 立绘 / 头像一屏总览）；
@@ -1715,6 +1726,9 @@
                    @click="switchGalTab(t.key)">{{ t.label }}</div>
             </div>
             </div><!-- /sticky-head：头部与页签固定区结束 -->
+            <!-- v0.63.0：切角色/进详情时的加载进度条——所有页签都能看到，
+                 固定在页签下方不挡操作，配合各页已有的骨架，减少「卡住」感 -->
+            <div v-if="galSwitching" class="gal-loadbar"><i></i></div>
 
             <!-- v0.42.0：速览与资料合并成同一页（原本两页来回切，信息还重复） -->
             <div v-if="galTab === 'profile'" class="stack">

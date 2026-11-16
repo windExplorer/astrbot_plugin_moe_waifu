@@ -116,6 +116,22 @@ def main():
     check("角色库有头像墙视图", 'v-if="charsMode === \'avatar\'"' in page
           and ".av-wall" in page and ".av-hover" in page)
     check("头像墙有文字头像兜底", 'class="av-letter"' in page)
+    # v0.63.0：点头像整块进详情（不再点头像看大图），看大图移到右上角放大镜
+    avseg2 = page.split("charsMode === 'avatar'", 2)[1][:2600]
+    check("头像墙点头像直接进详情", 'class="av-tile"' in avseg2
+          and '@click="gotoGallery(e.id)"' in avseg2
+          and 'class="av-detail"' not in avseg2)  # 旧「详情」角标已撤，整块可点
+    check("头像墙看大图移到放大镜角标", 'class="av-zoom"' in avseg2
+          and '@click.stop="openCharAvatarViewer(e)"' in avseg2
+          and '.av-zoom' in page)
+    # 详情页加载动画：旋转圈 + 页签下方进度条
+    check("详情页加载有旋转圈+进度条动画", '.gal-spin' in page
+          and '@keyframes gal-spin' in page and 'class="gal-loadbar"' in page
+          and '@keyframes gal-loadbar' in page)
+    # 顶部头像改看大图，不再跳资料 tab
+    check("顶部头像点击看大图而非跳资料tab",
+          '@click="openCharAvatarViewer(null)"' in page
+          and '@click="switchGalTab(\'profile\')"' not in page)
     # 同一个坑：预览弹窗里有 v-if 兄弟节点（加载态 / 清单 / 提示），不能放 n-space
     avseg = page.split('title="批量头像 · 预览"', 1)[1][:400]
     check("批量头像预览容器不是 n-space（div.stack）",

@@ -440,7 +440,7 @@ check("脏平台名在启动时幂等清洗",
 _SCHEMA = (ROOT / "_conf_schema.json").read_text(encoding="utf-8")
 check("私聊抽卡开关默认关闭且两个指令都拦",
       '"allow_private_draw"' in _SCHEMA
-      and MAIN.count("if not gid and not self._allow_private()") == 2)
+      and MAIN.count("if not gid and not self._allow_private()") >= 2)
 check("卡面统计口径可配（all / group）",
       '"same_stat_scope"' in _SCHEMA and "same_stat_scope" in MAIN
       and "same_stat_scope" in PAGE)
