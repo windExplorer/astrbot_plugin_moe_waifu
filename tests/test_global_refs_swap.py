@@ -82,16 +82,24 @@ def main():
     check("编辑指令用 <image1> 画布 + <image2> 身份",
           "<image1>" in page and "<image2>" in page
           and "画布" in page and "身份" in page)
-    # v0.60.1：表情/神态必须跟随 <image2>。v0.56 原指令写「除人物身份外不做任何
-    # 其它改动」+「姿势一律不改」，模型把表情归进画布侧保留 → 换脸不换表情。
+    # v0.60.4 纠正：只换脸。用户明确「要的是跟随画布的服装、动作、表情」——
+    # v0.60.1 曾写「表情跟随 image2 / 不要用 image1 的表情」，理解反了，
+    # 导致越画越偏。现在服装/动作/表情全部归画布侧，image2 只供脸部身份。
     swap_inst = re.search(r'var SWAP_INSTRUCTION = "(.*?)";', page, re.S)
     inst = swap_inst.group(1) if swap_inst else ""
-    check("编辑指令含表情跟随 image2 的明确措辞",
-          "表情" in inst and "神态" in inst and "<image2>" in inst
-          and "不要用 <image1> 的表情" in inst, inst)
-    check("编辑指令不用「除人物身份外不做任何其它改动」压制表情",
-          "除人物身份外不做任何其它改动" not in inst
-          and "除人物身份与表情外" in inst, inst)
+    check("编辑指令明确服装/动作/表情跟随画布 image1",
+          "服装" in inst and "动作" in inst and "表情" in inst
+          and "以 <image1> 画布为准" in inst
+          and "不要带 <image2> 的服装、动作或表情" in inst, inst)
+    check("编辑指令把 image2 限定为脸部身份",
+          "脸部身份" in inst and "五官" in inst and "脸型" in inst
+          and "发型发色" in inst, inst)
+    check("编辑指令不得让表情/神态跟随 image2（v0.60.1 的错误）",
+          "表情与神态同样跟随" not in inst
+          and "不要用 <image1> 的表情" not in inst
+          and "除人物身份与表情外" not in inst, inst)
+    check("面板文案说明只换脸、画布服装动作表情不变",
+          page.count("画布的服装、动作、表情、背景全部保持原样") >= 2)
     check("试画台 swap 提示词走固定指令",
           "tryPrompt.value = trySwapPrompt()" in page)
     check("角色详情 swap 提示词走固定指令",
