@@ -82,28 +82,39 @@ def main():
     check("编辑指令用 <image1> 画布 + <image2> 身份",
           "<image1>" in page and "<image2>" in page
           and "画布" in page and "身份" in page)
-    # v0.60.4 纠正：只换脸。用户明确「要的是跟随画布的服装、动作、表情」——
-    # v0.60.1 曾写「表情跟随 image2 / 不要用 image1 的表情」，理解反了，
-    # 导致越画越偏。现在服装/动作/表情全部归画布侧，image2 只供脸部身份。
-    swap_inst = re.search(r'var SWAP_INSTRUCTION = "(.*?)";', page, re.S)
-    inst = swap_inst.group(1) if swap_inst else ""
-    check("编辑指令明确服装/动作/表情跟随画布 image1",
-          "服装" in inst and "动作" in inst and "表情" in inst
-          and "以 <image1> 画布为准" in inst
-          and "不要带 <image2> 的服装、动作或表情" in inst, inst)
-    check("编辑指令把 image2 限定为脸部身份",
-          "脸部身份" in inst and "五官" in inst and "脸型" in inst
-          and "发型发色" in inst, inst)
-    check("编辑指令不得让表情/神态跟随 image2（v0.60.1 的错误）",
-          "表情与神态同样跟随" not in inst
-          and "不要用 <image1> 的表情" not in inst
-          and "除人物身份与表情外" not in inst, inst)
-    check("面板文案说明只换脸、画布服装动作表情不变",
-          page.count("画布的服装、动作、表情、背景全部保持原样") >= 2)
-    check("试画台 swap 提示词走固定指令",
-          "tryPrompt.value = trySwapPrompt()" in page)
-    check("角色详情 swap 提示词走固定指令",
-          "galPrompt.value = SWAP_INSTRUCTION" in page)
+    # v0.61.0：三档方案（face 保守 / appearance 标准默认 / full 彻底），
+    # 用户实测「只换脸不够——体型、头发、头顶悬浮物/头环要跟图2」，故默认 appearance。
+    sw = re.search(r'var SWAP_SCHEMES = \[(.*?)\n  \];', page, re.S)
+    schemes = sw.group(1) if sw else ""
+    check("三档替换方案齐全（face/appearance/full）",
+          all('key: "%s"' % k in schemes for k in ("face", "appearance", "full")), schemes[:120])
+    check("标准档含体型/发型/头顶饰物跟随 image2",
+          "体型" in schemes and "发型发色" in schemes
+          and "头顶悬浮饰物" in schemes and "头环" in schemes, schemes[:120])
+    check("三档的服装/动作/表情仍归画布",
+          "以 <image1> 画布为准" in schemes
+          and "不要带 <image2> 的服装、动作或表情" in schemes, schemes[:120])
+    check("默认方案是标准档 appearance",
+          'Vue.ref("appearance")' in page)
+    check("按 key 取指令的函数存在且回退标准档",
+          "function swapSchemePrompt(key)" in page
+          and "return SWAP_SCHEMES[1].prompt" in page)
+    check("不得再有「表情跟随 image2」的错误措辞（v0.60.1）",
+          "表情与神态同样跟随" not in page
+          and "不要用 <image1> 的表情" not in page
+          and "除人物身份与表情外" not in page)
+    check("两处面板都有方案切换下拉",
+          page.count(':options="swapSchemeOpts"') >= 2)
+    check("换方案会同步刷新两处提示词",
+          "Vue.watch(swapScheme, function ()" in page
+          and "tryPrompt.value = trySwapPrompt()" in page
+          and "galPrompt.value = swapSchemePrompt(swapScheme.value)" in page)
+    check("方案状态已暴露给模板",
+          'swapScheme: swapScheme, swapSchemeOpts: swapSchemeOpts, swapSchemeHint: swapSchemeHint' in page)
+    check("试画台 swap 提示词走方案函数",
+          "function trySwapPrompt() { return swapSchemePrompt(swapScheme.value); }" in page)
+    check("角色详情 swap 提示词走方案函数",
+          "galPrompt.value = swapSchemePrompt(swapScheme.value)" in page)
 
     # 4) 菜单 / 上传端点 / 两段删除
     check("前端新增全局图库页签", 'key: "global_refs"' in page)

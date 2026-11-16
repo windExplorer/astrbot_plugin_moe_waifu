@@ -1498,6 +1498,11 @@
                       顺序固定：全局图=图1、角色图=图2（不可颠倒）。
                       全局图库为空时先去侧栏「全局图库」上传。
                     </div>
+                    <!-- v0.61.0：替换方案三档切换；换方案要重算提示词，保证第2步看到的是新指令 -->
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px;">
+                      <n-select v-model:value="swapScheme" :options="swapSchemeOpts" style="width: 340px;"></n-select>
+                      <span class="bind-tip" style="margin: 0;">{{ swapSchemeHint }}</span>
+                    </div>
                     <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px;">
                       <w-pick-thumb :src="trySwapGlobalThumb || pickThumbOf(trySwapGlobal, [globalRefs, tryRefs])"
                                     :path="trySwapGlobal || ''"
@@ -1934,6 +1939,11 @@
                     顺序固定：全局图=图1、角色图=图2（不可颠倒）。
                     「宽/高」留空 = 用配置尺寸；带尺寸开关的 Qwen 2.1 Edit 工作流按此出图。
                     角色替换走 Qwen Edit 双图编辑，不支持「重绘强度」——改动范围由提示词指令控制。
+                  </div>
+                  <!-- v0.61.0：替换方案三档切换；换方案要重算提示词 -->
+                  <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px;">
+                    <n-select v-model:value="swapScheme" :options="swapSchemeOpts" style="width: 340px;"></n-select>
+                    <span class="bind-tip" style="margin: 0;">{{ swapSchemeHint }}</span>
                   </div>
                   <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px;">
                     <w-pick-thumb :src="galSwapGlobalThumb || pickThumbOf(galSwapGlobal, [globalRefs, tryRefs])"
@@ -4998,11 +5008,38 @@
   // 用户明确否决：要的是画布的服装、动作、表情都保留，越改越偏。
   // 本插件出图 raw_prompt=True 跳过萌绘 LLM 润色，这条指令原样送进工作流，
   // 所以必须自己写全；放模块顶层，试画台与角色详情两处共用。
-  var SWAP_INSTRUCTION = "<image1> 是画布：完整保留其构图、人物姿势与动作、服装与配饰、" +
-    "面部表情与神态、背景、光线、镜头视角与画风，一律不改。" +
-    "只把 <image1> 中人物的脸部身份换成 <image2> 中人物的——五官长相、脸型与发型发色以 <image2> 为准。" +
-    "服装、动作姿势、表情神态一律以 <image1> 画布为准，不要带 <image2> 的服装、动作或表情。" +
-    "除脸部身份外不做任何其它改动。";
+  // v0.61.0：改成三档方案。每档都是完整指令（raw_prompt 原样送，必须写全），
+  // 核心区别是「<image2> 角色到底带哪些东西过来」——用户实测只换脸不够：
+  // 体型、头发、头顶悬浮饰物（头环等）属于角色固有外观，得跟图2；服装/动作/
+  // 表情仍跟画布。三档给用户自己选，默认「标准」（正好覆盖该需求）。
+  var SWAP_SCHEMES = [
+    { key: "face", label: "保守 · 只换脸",
+      hint: "只换五官 / 脸型；头发、体型、服装、动作、表情全用画布的。",
+      prompt: "<image1> 是画布：完整保留其构图、人物姿势与动作、体型、发型发色、头顶饰物、服装与配饰、" +
+        "面部表情与神态、背景、光线、镜头视角与画风，一律不改。" +
+        "只把 <image1> 中人物的五官与脸型换成 <image2> 中人物的，其余一律以 <image1> 画布为准。" },
+    { key: "appearance", label: "标准 · 换脸+体型+发型头饰（推荐）",
+      hint: "换脸、发型发色、头顶悬浮物 / 头环、体型轮廓用图2；服装、动作、表情用画布的。",
+      prompt: "<image1> 是画布：保留其构图、人物姿势与动作、服装与配饰、面部表情与神态、" +
+        "背景、光线、镜头视角与画风，一律不改。" +
+        "把 <image1> 中人物替换为 <image2> 中的角色，其中五官脸型、发型发色、" +
+        "头顶悬浮饰物 / 头环 / 发饰、体型与身材轮廓都以 <image2> 为准。" +
+        "服装、动作姿势、表情神态一律以 <image1> 画布为准，不要带 <image2> 的服装、动作或表情。" },
+    { key: "full", label: "彻底 · 连服装一起换",
+      hint: "脸、发型头饰、体型、服装配饰全用图2；只保留画布的姿势动作与背景。",
+      prompt: "<image1> 是画布：保留其构图、人物姿势与动作、背景、光线、镜头视角与画风，一律不改。" +
+        "把 <image1> 中人物整体替换为 <image2> 中的角色——五官脸型、发型发色、" +
+        "头顶悬浮饰物 / 头环 / 发饰、体型与身材轮廓、服装与配饰全部以 <image2> 为准。" +
+        "只有姿势动作与场景背景沿用 <image1> 画布。" }
+  ];
+  function swapSchemePrompt(key) {
+    for (var i = 0; i < SWAP_SCHEMES.length; i++) {
+      if (SWAP_SCHEMES[i].key === key) { return SWAP_SCHEMES[i].prompt; }
+    }
+    return SWAP_SCHEMES[1].prompt;
+  }
+  // v0.60.4 的纯换脸指令保留为 face 档，兼容旧引用
+  var SWAP_INSTRUCTION = swapSchemePrompt("face");
 
   // ---- 图片选择弹窗公共组件（v0.58.0）----
   // 缩略网格里点选图片，支持单选/多选、点选顺序编号（图1/图2/图3）、看大图、删除。
@@ -6202,6 +6239,17 @@
       // v0.13.3：width/height = 本次图生图显式尺寸（留空 = 配置；不随「按本次参数保存」固化）
       var tryOverride = Vue.ref({ ref: "", refs: [], denoise: null, loras: "",
                                   width: null, height: null });
+      // v0.61.0：三档替换方案（试画台与角色详情共用同一档）
+      var swapScheme = Vue.ref("appearance");
+      var swapSchemeOpts = SWAP_SCHEMES.map(function (s) {
+        return { label: s.label, value: s.key };
+      });
+      var swapSchemeHint = Vue.computed(function () {
+        for (var i = 0; i < SWAP_SCHEMES.length; i++) {
+          if (SWAP_SCHEMES[i].key === swapScheme.value) { return SWAP_SCHEMES[i].hint; }
+        }
+        return "";
+      });
       // v0.56.0：角色替换——全局图(画布/图1) + 角色参考图(身份/图2)
       var trySwapGlobal = Vue.ref(null);
       var trySwapChar = Vue.ref(null);
@@ -6319,7 +6367,19 @@
         }
         return "";
       }
-      function trySwapPrompt() { return SWAP_INSTRUCTION; }
+      function trySwapPrompt() { return swapSchemePrompt(swapScheme.value); }
+      // v0.61.0：换方案立刻同步两处已生成的提示词——用户改方案后不必手动重进第2步。
+      // 只改 prompt 文本，不触碰 tryStep / galPromptConfirmed，避免打断正在编辑的内容。
+      Vue.watch(swapScheme, function () {
+        if (tryMode.value === "swap" && String(tryPrompt.value || "").trim()) {
+          tryPrompt.value = trySwapPrompt();
+          tryPromptSource.value = "角色替换 · " + swapSchemeHint.value + "（可手动改）";
+        }
+        if (galMode.value === "swap" && String(galPrompt.value || "").trim()) {
+          galPrompt.value = swapSchemePrompt(swapScheme.value);
+          galPromptSource.value = "角色替换 · " + swapSchemeHint.value + "（可手动改）";
+        }
+      });
       function tryHasSource() {
         // 本次多选、手动填的单张、或条目自带的主参考/多图源，任一存在即可
         var ov = tryOverride.value || {};
@@ -6384,7 +6444,7 @@
         // （manual 直通）；这里直接把指令填进确认框，用户仍可手动改。
         if (tryMode.value === "swap") {
           tryPrompt.value = trySwapPrompt();
-          tryPromptSource.value = "角色替换 · Qwen 双图编辑指令（可手动改）";
+          tryPromptSource.value = "角色替换 · " + swapSchemeHint.value + "（可手动改）";
           tryDims.value = []; tryBodyZh.value = ""; tryStyle.value = "";
           tryPromptLoading.value = false;
           return;
@@ -7900,8 +7960,8 @@
         galArtistMade.value = false;   // v0.40.0：重新走池子预览 = 不再是画师产出
         // v0.56.0 角色替换：固定 Qwen 双图编辑指令，不经过 prompt_gen（manual 直通）
         if (galMode.value === "swap") {
-          galPrompt.value = SWAP_INSTRUCTION;
-          galPromptSource.value = "角色替换 · Qwen 双图编辑指令（可手动改）";
+          galPrompt.value = swapSchemePrompt(swapScheme.value);
+          galPromptSource.value = "角色替换 · " + swapSchemeHint.value + "（可手动改）";
           galDims.value = []; galThemeResolved.value = null;
           galPromptKey = galPromptKeyNow();
           galPromptLoading.value = false;
@@ -11417,6 +11477,8 @@
         deleteGlobalRef: deleteGlobalRef,
         grDetailOpen: grDetailOpen, grDetail: grDetail, openGrDetail: openGrDetail,
         grSize: grSize, grShape: grShape, grName: grName,
+        // v0.61.0：角色替换三档方案（试画台 / 角色详情共用）
+        swapScheme: swapScheme, swapSchemeOpts: swapSchemeOpts, swapSchemeHint: swapSchemeHint,
         trySwapGlobal: trySwapGlobal, trySwapChar: trySwapChar,
         trySwapGlobalThumb: trySwapGlobalThumb, trySwapCharThumb: trySwapCharThumb,
         trySwapWf: trySwapWf, trySwapDenoise: trySwapDenoise,
