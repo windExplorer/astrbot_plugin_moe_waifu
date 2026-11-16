@@ -127,6 +127,11 @@ class MoeWaifuPlugin(Star):
                 webui_api.register(self)
             except Exception:
                 logger.error(f"[{PLUGIN_NAME}] 工坊 WebUI 注册失败\n{traceback.format_exc()}")
+            try:  # v0.67.2：头像指针自愈（v0.67.0 跨卷移动丢指针事故的补救）
+                from . import webui_api as _webui
+                _webui.heal_avatar_pointers(self)
+            except Exception:
+                logger.warning(f"[{PLUGIN_NAME}] 头像指针自愈失败（忽略）\n{traceback.format_exc()}")
             try:  # 清理过期卡图（只删渲染产物，不动 draws 行与立绘库）
                 removed = await asyncio.to_thread(self._prune_cards, self._data_dir)
                 if removed:

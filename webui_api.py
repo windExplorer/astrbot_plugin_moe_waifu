@@ -384,6 +384,7 @@ async def h_save_entry(plugin) -> dict:
     # 角色当前所在卷（用户去目标卷里找当然「搜不到」）。
     # 现语义：id 已在别的卷 = 这次保存是「移动」——从原卷摘除并写入目标卷。
     owner_pack = ""
+    owner_raw = None
     for pack in pool.load_packs(_pools_dir(plugin), logger):
         if pack["pack"] == pack_name:
             continue
@@ -391,47 +392,59 @@ async def h_save_entry(plugin) -> dict:
             other = pool.normalize_entry(raw, pack["pack"])
             if other and other["id"] == normalized["id"]:
                 owner_pack = pack["pack"]
+                owner_raw = raw
                 break
         if owner_pack:
             break
     replaced = False
+    saved = normalized
     for i, raw in enumerate(entries):
         existing = pool.normalize_entry(raw, pack_name)
         if existing and existing["id"] == normalized["id"]:
             # 表单只托管部分字段：整体替换会静默清空 strategy.refs / cover，
             # 用户「改个名字保存」后参考图就全不见了（v0.9.10 修复）。
             entries[i] = pool.merge_saved_entry(raw, normalized)
+            saved = entries[i]
             replaced = True
             break
-    moved_from = ""
-    if not replaced:
-        # v0.31.0：新建条目记录入库日期（旧条目没有该字段，界面显示「—」）
+    # v0.67.2：移动 / JSON 级重复自愈都必须带上旧条目的完整字段——表单只托管
+    # 部分字段（strategy 重建、cover / profile / avatar 不托管），v0.67.0 直接
+    # append normalized 把参考图绑定 / 头像 / 资料 / 封面全丢了（用户实测：
+    # 鸣潮卷移到游戏卷后资料全没）。merge_saved_entry 与同卷编辑同一套合并语义。
+    merged = normalized
+    if isinstance(owner_raw, dict):
+        merged = pool.merge_saved_entry(owner_raw, normalized)
+    if not str(merged.get("added_at") or "").strip():
         try:
-            normalized["added_at"] = plugin._today()
+            merged["added_at"] = plugin._today()
         except Exception:
-            normalized["added_at"] = time.strftime("%Y-%m-%d")
-        entries.append(normalized)
-        if owner_pack:
-            # 跨卷移动：先摘原卷并落盘（同步钩子删掉旧表行），再写目标卷
-            # （同步钩子按新卷重建行）。顺序不能反——char_id 全库唯一 +
-            # 冲突「先同步的卷胜」，反了行会留在旧卷、界面上角色纹丝不动。
-            loaded_old = _load_pack_file(plugin, owner_pack)
-            if loaded_old is not None:
-                opath, odata = loaded_old
-                oentries = (odata.get("entries")
-                            if isinstance(odata.get("entries"), list) else [])
-                kept_old = [r for r in oentries
-                            if not (isinstance(r, dict) and str(r.get("id") or "").strip()
-                                    == normalized["id"])]
-                if len(kept_old) != len(oentries):
-                    odata["entries"] = kept_old
-                    _json_save(opath, odata)
-                    moved_from = owner_pack
-                    logger.info(f"[{PLUGIN_NAME}] 角色跨卷移动：{normalized['id']}"
-                                f" {owner_pack} -> {pack_name}")
+            merged["added_at"] = time.strftime("%Y-%m-%d")
+    moved_from = ""
+    if owner_pack:
+        # 原卷还有同 id（移动 / 历史原因造成的 JSON 级重复）：先摘原卷并落盘
+        # （同步钩子删掉旧表行），再写目标卷（同步钩子按新卷重建行）。
+        # 顺序不能反——char_id 全库唯一 + 冲突「先同步的卷胜」，反了行会留在
+        # 旧卷、界面上角色纹丝不动。
+        loaded_old = _load_pack_file(plugin, owner_pack)
+        if loaded_old is not None:
+            opath, odata = loaded_old
+            oentries = (odata.get("entries")
+                        if isinstance(odata.get("entries"), list) else [])
+            kept_old = [r for r in oentries
+                        if not (isinstance(r, dict) and str(r.get("id") or "").strip()
+                                == normalized["id"])]
+            if len(kept_old) != len(oentries):
+                odata["entries"] = kept_old
+                _json_save(opath, odata)
+                moved_from = owner_pack
+                logger.info(f"[{PLUGIN_NAME}] 角色跨卷移动：{normalized['id']}"
+                            f" {owner_pack} -> {pack_name}")
+    if not replaced:
+        entries.append(merged)
+        saved = merged
     data["entries"] = entries
     _json_save(path, data)
-    return ok({"replaced": replaced, "moved_from": moved_from, "entry": normalized})
+    return ok({"replaced": replaced, "moved_from": moved_from, "entry": saved})
 
 
 async def h_import_pack(plugin) -> dict:
@@ -6192,6 +6205,43 @@ async def h_avatar_discard(plugin) -> dict:
     except OSError as exc:
         return err(f"清理候选文件失败：{exc}")
     return ok({"removed": 1})
+
+
+def heal_avatar_pointers(plugin) -> dict:
+    """头像指针自愈（v0.67.2，启动时跑一次）。
+
+    v0.67.0 的跨卷移动把条目上的 avatar 指针丢了（文件 avatars/<id>.png 本来
+    就在磁盘上，命名按 char_id 确定）。这里扫描全部卷：avatar 为空但标准路径
+    文件存在的条目，原位补回指针。幂等，只在有修补时写盘；文件不存在 /
+    指针仍在的条目一律不动。
+    """
+    healed, changed_packs = 0, 0
+    data_root = Path(plugin._data_dir)
+    for pack in pool.load_packs(_pools_dir(plugin), logger):
+        loaded = _load_pack_file(plugin, pack["pack"])
+        if loaded is None:
+            continue
+        path, data = loaded
+        entries = data.get("entries") if isinstance(data.get("entries"), list) else []
+        changed = False
+        for raw in entries:
+            if not isinstance(raw, dict) or str(raw.get("avatar") or "").strip():
+                continue   # 指针还在的条目一律不动
+            cid = str(raw.get("id") or "").strip()
+            if not cid:
+                continue
+            rel = avatars.avatar_rel(cid)
+            if (data_root / rel).is_file():
+                raw["avatar"] = rel
+                changed = True
+                healed += 1
+        if changed:
+            _json_save(path, data)
+            changed_packs += 1
+    if healed:
+        logger.info(f"[{PLUGIN_NAME}] 头像指针自愈：补回 {healed} 个条目"
+                    f"（{changed_packs} 个卷落盘）")
+    return {"healed": healed, "packs": changed_packs}
 
 
 async def _run_avatar_job(plugin, job_id: str, entry: dict, workflow: str,

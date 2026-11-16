@@ -88,16 +88,50 @@ def setup_env(td: Path):
 def test_cross_pack_move(td: Path):
     setup_env(td)
     try:
+        # 旧条目带全量资产字段（参考图绑定 / 封面 / 资料 / 头像 / 入库日期）——
+        # v0.67.0 移动把它们全丢过，这里就是回归现场
+        dump(pools / "wuthering_waves.json", "wuthering_waves", [
+            {"id": "moning", "name": "莫宁", "series": "鸣潮", "category": "game",
+             "tags_en": "1girl", "verified": True,
+             "strategy": {"type": "img2img", "ref": "refs/a.png",
+                          "refs": ["refs/a.png", "refs/b.png"],
+                          "draw_ref": "refs/b.png"},
+             "cover": "refs/b.png",
+             "profile": {"简介": "测试资料", "生日": "7月23日"},
+             "avatar": "avatars/moning.png",
+             "added_at": "2026-11-01"}], title="鸣潮")
+        # 现实中条目是经应用写入的（_json_save 钩子已同步新表）——这里同样
+        # 先同步，owner 扫描拿到的才是带资产的完整条目
+        st.sync_pack_file(pools / "wuthering_waves.json")
         res = asyncio.run(call(api.h_save_entry, {
             "pack": "game",
+            # 表单重建条目：只有画法 / 主参考 / 名字等托管字段，不带 refs /
+            # cover / profile / avatar（编辑抽屉的真实 payload 形状）
             "entry": {"id": "moning", "name": "莫宁", "series": "鸣潮",
-                      "category": "game", "tags_en": "1girl", "strategy": {},
+                      "category": "game", "tags_en": "1girl",
+                      "strategy": {"type": "img2img", "ref": "refs/a.png"},
                       "verified": True}}))
         check("改卷保存成功（不再报 id 重复）", res["status"] == "ok", str(res))
         check("返回移动来源卷", res["data"].get("moved_from") == "wuthering_waves",
               str(res.get("data")))
         check("目标卷文件已含角色", "moning" in ids_of(pools / "game.json"))
         check("原卷文件已摘除角色", "moning" not in ids_of(pools / "wuthering_waves.json"))
+        moved = next(e for e in read(pools / "game.json")["entries"]
+                     if e["id"] == "moning")
+        check("移动保留参考图绑定",
+              moved["strategy"].get("refs") == ["refs/a.png", "refs/b.png"],
+              str(moved["strategy"]))
+        check("移动保留出卡源", moved["strategy"].get("draw_ref") == "refs/b.png",
+              str(moved["strategy"]))
+        check("移动保留封面", moved.get("cover") == "refs/b.png", str(moved))
+        check("移动保留资料", moved.get("profile", {}).get("生日") == "7月23日",
+              str(moved.get("profile")))
+        check("移动保留头像指针", moved.get("avatar") == "avatars/moning.png",
+              str(moved.get("avatar")))
+        check("移动保留入库日期", moved.get("added_at") == "2026-11-01",
+              str(moved.get("added_at")))
+        check("表单字段正常更新", moved["name"] == "莫宁"
+              and moved["strategy"].get("type") == "img2img", str(moved))
         prow = st._conn.execute(
             "SELECT p.name FROM characters c JOIN packs p ON p.id=c.pack_id"
             " WHERE c.char_id='moning'").fetchone()
@@ -110,11 +144,37 @@ def test_cross_pack_move(td: Path):
                       "category": "game", "tags_en": "1girl", "strategy": {}}}))
         check("同卷编辑 replaced", res2["data"].get("replaced") is True, str(res2))
         check("同卷编辑无移动", res2["data"].get("moved_from") == "", str(res2))
-        check("同卷编辑更新了名字",
-              next(e for e in read(pools / "game.json")["entries"]
-                   if e["id"] == "moning")["name"] == "莫宁改")
+        moved2 = next(e for e in read(pools / "game.json")["entries"]
+                      if e["id"] == "moning")
+        check("同卷编辑不丢资产（头像 / 参考图仍在）",
+              moved2.get("avatar") == "avatars/moning.png"
+              and moved2["strategy"].get("refs") == ["refs/a.png", "refs/b.png"],
+              str(moved2))
         check("角色只剩一份（原卷没被复制回去）",
               "moning" not in ids_of(pools / "wuthering_waves.json"))
+    finally:
+        st.close()
+
+
+def test_avatar_heal(td: Path):
+    setup_env(td)
+    try:
+        av_dir = td / "avatars"
+        av_dir.mkdir(parents=True, exist_ok=True)
+        (av_dir / "moning.png").write_bytes(b"PNG")
+        # 条目 avatar 指针为空（v0.67.0 移动丢指针的现场）→ 自愈补回
+        dump(pools / "wuthering_waves.json", "wuthering_waves", [
+            {"id": "moning", "name": "莫宁", "series": "鸣潮", "category": "game",
+             "tags_en": "1girl", "strategy": {}, "avatar": ""}], title="鸣潮")
+        st.sync_pack_file(pools / "wuthering_waves.json")
+        res = api.heal_avatar_pointers(plugin)
+        check("自愈补回 1 个指针", res["healed"] == 1, str(res))
+        check("条目指针已恢复",
+              next(e for e in read(pools / "wuthering_waves.json")["entries"]
+                   if e["id"] == "moning")["avatar"] == "avatars/moning.png")
+        # 已有指针的条目不动
+        res2 = api.heal_avatar_pointers(plugin)
+        check("幂等（第二次 0 个）", res2["healed"] == 0, str(res2))
     finally:
         st.close()
 
@@ -191,6 +251,7 @@ def test_import_pack_selection(td: Path):
 
 def main():
     jobs = [("cross_pack_move", test_cross_pack_move),
+            ("avatar_heal", test_avatar_heal),
             ("import_defaults", test_import_defaults),
             ("import_pack_selection", test_import_pack_selection)]
     for name, fn in jobs:
