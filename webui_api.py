@@ -378,14 +378,22 @@ async def h_save_entry(plugin) -> dict:
         return err(f"卷不存在：{pack_name}")
     path, data = loaded
     entries = data.get("entries") if isinstance(data.get("entries"), list) else []
-    # 跨卷 id 查重（编辑自身除外）
+    # v0.67.0：跨卷移动支持。旧版查重扫「除目标卷外的所有卷」，而角色在新表里
+    # 全库唯一（char_id UNIQUE）——改卷保存时它自己在**原卷**的行必然被扫出来，
+    # 报「id 与卷 X 中的角色重复」：所有跨卷移动全被拦死，且错误里点的卷名是
+    # 角色当前所在卷（用户去目标卷里找当然「搜不到」）。
+    # 现语义：id 已在别的卷 = 这次保存是「移动」——从原卷摘除并写入目标卷。
+    owner_pack = ""
     for pack in pool.load_packs(_pools_dir(plugin), logger):
         if pack["pack"] == pack_name:
             continue
         for raw in pack["entries"]:
             other = pool.normalize_entry(raw, pack["pack"])
             if other and other["id"] == normalized["id"]:
-                return err(f"id 与卷 {pack['pack']} 中的角色重复：{normalized['id']}")
+                owner_pack = pack["pack"]
+                break
+        if owner_pack:
+            break
     replaced = False
     for i, raw in enumerate(entries):
         existing = pool.normalize_entry(raw, pack_name)
@@ -395,6 +403,7 @@ async def h_save_entry(plugin) -> dict:
             entries[i] = pool.merge_saved_entry(raw, normalized)
             replaced = True
             break
+    moved_from = ""
     if not replaced:
         # v0.31.0：新建条目记录入库日期（旧条目没有该字段，界面显示「—」）
         try:
@@ -402,9 +411,27 @@ async def h_save_entry(plugin) -> dict:
         except Exception:
             normalized["added_at"] = time.strftime("%Y-%m-%d")
         entries.append(normalized)
+        if owner_pack:
+            # 跨卷移动：先摘原卷并落盘（同步钩子删掉旧表行），再写目标卷
+            # （同步钩子按新卷重建行）。顺序不能反——char_id 全库唯一 +
+            # 冲突「先同步的卷胜」，反了行会留在旧卷、界面上角色纹丝不动。
+            loaded_old = _load_pack_file(plugin, owner_pack)
+            if loaded_old is not None:
+                opath, odata = loaded_old
+                oentries = (odata.get("entries")
+                            if isinstance(odata.get("entries"), list) else [])
+                kept_old = [r for r in oentries
+                            if not (isinstance(r, dict) and str(r.get("id") or "").strip()
+                                    == normalized["id"])]
+                if len(kept_old) != len(oentries):
+                    odata["entries"] = kept_old
+                    _json_save(opath, odata)
+                    moved_from = owner_pack
+                    logger.info(f"[{PLUGIN_NAME}] 角色跨卷移动：{normalized['id']}"
+                                f" {owner_pack} -> {pack_name}")
     data["entries"] = entries
     _json_save(path, data)
-    return ok({"replaced": replaced, "entry": normalized})
+    return ok({"replaced": replaced, "moved_from": moved_from, "entry": normalized})
 
 
 async def h_import_pack(plugin) -> dict:
@@ -425,12 +452,20 @@ async def h_import_pack(plugin) -> dict:
     v0.29.0：新增可选 `series`——「作品库 → 批量导入」从这里进来时带上当前
     作品名，导入的条目**统一归到该作品**（JSON 里写错作品名的也一并纠正），
     留空则完全按条目自带的 series 走（角色库的普通导入行为不变）。
+
+    v0.67.0（用户口径）：①新增可选 `category`（anime=动漫 / game=游戏，留空 =
+    按条目自带）——导入时可选类型；②未选卷（pack 留空且 JSON 没写 pack）不再
+    落到 imported 卷，而是并入「其他卷」（key=other，自动创建）；③条目没写
+    series 且未指定作品 → 并入「其他」作品。避免导入随手造出一堆一次性卷。
     """
     body = await _body()
     text = str(body.get("text") or "").strip()
     pack_override = str(body.get("pack") or "").strip()
     series_override = str(body.get("series") or "").strip()[:60]
     overwrite = bool(body.get("overwrite", False))
+    category = str(body.get("category") or "").strip().lower()
+    if category and category not in pool.CATEGORY_LABELS:
+        category = ""   # 非法枚举按未指定处理（按条目自带）
     if not text:
         return err("请粘贴或上传 JSON 文本")
     try:
@@ -438,12 +473,14 @@ async def h_import_pack(plugin) -> dict:
     except Exception as exc:
         return err("JSON 解析失败：" + str(exc)[:120])
     if isinstance(obj, dict):
-        pack_name = pack_override or str(obj.get("pack") or "").strip()
-        title = str(obj.get("title") or pack_name or "导入卷")
+        pack_name = pack_override or str(obj.get("pack") or "").strip() or "other"
+        # key=other 的卷统一标题「其他卷」（新建时；已有卷保留原标题不动）
+        title = ("其他卷" if pack_name == "other"
+                 else str(obj.get("title") or pack_name or "导入卷"))
         entries = obj.get("entries")
     elif isinstance(obj, list):
-        pack_name = pack_override or "imported"
-        title = pack_override or "导入卷"
+        pack_name = pack_override or "other"
+        title = "其他卷" if pack_name == "other" else (pack_override or "导入卷")
         entries = obj
     else:
         return err("JSON 需为「角色数组」或「{pack, entries}」对象")
@@ -457,6 +494,10 @@ async def h_import_pack(plugin) -> dict:
         if e:
             if series_override:
                 e["series"] = series_override
+            if category:
+                e["category"] = category
+            if not str(e["series"] or "").strip():
+                e["series"] = "其他"   # 未选作品且条目没写 → 并入「其他」作品
             good.append(e)
         else:
             skipped.append({"id": str((raw or {}).get("id")
@@ -550,6 +591,7 @@ async def h_import_pack(plugin) -> dict:
         _json_save(path, data)
     return ok({
         "pack": pack_name, "created": created, "series": series_override,
+        "category": category,
         "imported": added, "updated": updated, "duplicates": dup_skipped,
         "total": len(good), "skipped": skipped, "overwrite": overwrite,
     })

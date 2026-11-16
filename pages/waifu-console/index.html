@@ -4414,6 +4414,8 @@
             <n-gi>
               <n-select v-model:value="form.pack" :options="drawerPackOpts"
                         placeholder="所在卷"></n-select>
+              <!-- v0.67.0：改卷=跨卷移动（旧版会被「id 与卷 X 重复」拦死） -->
+              <div class="bind-tip" style="margin-top: 2px;">改选其他卷并保存 = 把角色<b>移动</b>到该卷（参考图 / 立绘 / 记录都跟着走）</div>
             </n-gi>
           </n-grid>
           <n-grid :cols="2" :x-gap="10">
@@ -4537,14 +4539,24 @@
           粘贴角色 JSON（支持「角色数组」<code>[...]</code> 或「整卷对象」<code>{"pack","entries"}</code>），或选 .json 文件。
           每条需含 <b>id / name / tags_en</b>。导入即写入 <b>pools/&lt;卷名&gt;.json</b>，
           更新插件不会被覆盖；<b>全库按 id 去重</b>，已存在的角色默认不导入。
+          未选卷默认并入<b>其他卷</b>，未填作品并入<b>「其他」作品</b>。
           <div>只补简介 / 生日 / 声优 / 印象语这些资料请用「导入资料」；字段与示例见
             <a style="cursor:pointer; color: var(--wf-brand);"
                @click="gotoHelp('import_char')">帮助 → 角色导入</a></div>
         </n-alert>
         <!-- v0.29.0：作品页批量导入时预填，导入的条目统一归到这个作品 -->
+        <!-- v0.67.0：类型 / 目标卷下拉（用户口径：类型就动漫/游戏两大类；
+             未选卷并入其他卷，未填作品并入其他作品） -->
+        <n-space align="center" :wrap="true">
+          <span style="font-size:13px;">类型：</span>
+          <n-select v-model:value="importCategory" :options="importCatOpts"
+                    style="width: 180px;"></n-select>
+          <span style="font-size:13px;">目标卷：</span>
+          <n-select v-model:value="importPack" :options="importPackOpts"
+                    style="width: 280px;"></n-select>
+        </n-space>
         <n-input v-model:value="importSeries"
-                 placeholder="作品名（可选；填了则导入的角色统一归到该作品，留空按条目自带 series）"></n-input>
-        <n-input v-model:value="importPack" placeholder="卷名（可选；整卷对象的 pack 优先，缺省 imported）"></n-input>
+                 placeholder="作品名（可选；留空并入「其他」作品；填了则导入的角色统一归到该作品）"></n-input>
         <n-input v-model:value="importText" type="textarea" :rows="12"
                  placeholder='例如：[{"id":"my_char_1","name":"角色A","tags_en":"1girl, long hair","series":"某作","tier":"S"}, {"id":"my_char_2","name":"角色B","tags_en":"1girl","tier":"A"}]'></n-input>
         <n-checkbox v-model:checked="importOverwrite" style="font-size:13px;">覆盖已有角色的基础信息（默认关：已存在的一律跳过；开启也只改名字 / 作品 / 标签等，不动参考图、封面、验证状态）</n-checkbox>
@@ -4555,7 +4567,7 @@
         <div v-if="importResult" style="margin-top:8px;">
           <n-alert :type="importResult.pack ? 'success' : 'error'" :show-icon="false">
             <template v-if="importResult.pack">
-              卷 <b>{{ importResult.pack }}</b><span v-if="importResult.series">（作品：{{ importResult.series }}）</span>：新增 {{ importResult.imported }} 条、更新 {{ importResult.updated }} 条、重复跳过 {{ importResult.duplicates }} 条（共合法 {{ importResult.total }} 条）
+              卷 <b>{{ importResult.pack }}</b><span v-if="importResult.series">（作品：{{ importResult.series }}）</span><span v-if="importResult.category">（类型：{{ importResult.category === "anime" ? "动漫" : importResult.category === "game" ? "游戏" : importResult.category }}）</span>：新增 {{ importResult.imported }} 条、更新 {{ importResult.updated }} 条、重复跳过 {{ importResult.duplicates }} 条（共合法 {{ importResult.total }} 条）
               <span v-if="importResult.skipped && importResult.skipped.length">；不合法 / 跳过明细 {{ importResult.skipped.length }} 条</span>
             </template>
             <template v-else>{{ importResult.error || importResult.message || '导入失败' }}</template>
@@ -5886,8 +5898,25 @@
       // ---- 导入角色 ----
       var importOpen = Vue.ref(false);
       var importText = Vue.ref("");
-      var importPack = Vue.ref("");
+      // v0.67.0：卷改下拉（默认其他卷；「跟随 JSON」才用 JSON 自带 pack），新增类型选择
+      var importPack = Vue.ref("other");
+      var importCategory = Vue.ref("");
       var importSeries = Vue.ref("");   // v0.29.0：作品页导入时预填，统一归入该作品
+      var importCatOpts = [
+        { label: "按条目自带（不指定）", value: "" },
+        { label: "动漫", value: "anime" },
+        { label: "游戏", value: "game" }
+      ];
+      var importPackOpts = Vue.computed(function () {
+        var opts = [{ label: "其他卷（默认：未选卷并入这里）", value: "other" }];
+        (meta.value.packs || []).forEach(function (p) {
+          if (p.pack === "other") { return; }
+          opts.push({ label: (p.title || p.pack) + "（" + (p.entries || []).length + " 条）",
+                      value: p.pack });
+        });
+        opts.push({ label: "跟随 JSON 自带卷（不推荐）", value: "__json__" });
+        return opts;
+      });
       var importing = Vue.ref(false);
       var importResult = Vue.ref(null);
       var importOverwrite = Vue.ref(false);
@@ -6066,6 +6095,8 @@
       function openImport() {
         importResult.value = null;
         importSeries.value = "";
+        importPack.value = "other";
+        importCategory.value = "";
         importOpen.value = true;
       }
       // v0.29.0：作品页（列表 / 详情）进来的导入入口。series 非空时后端把导入的
@@ -6089,8 +6120,11 @@
         try {
           var res = await apiPost("pools/import", {
             text: text,
-            pack: String(importPack.value || "").trim(),
+            // v0.67.0：「跟随 JSON 自带卷」= 不传 pack（后端用 JSON 的 pack，
+            // 没写也并入其他卷）；选了其他卷 / 现有卷则按所选落卷
+            pack: importPack.value === "__json__" ? "" : String(importPack.value || "other"),
             series: String(importSeries.value || "").trim(),
+            category: String(importCategory.value || ""),
             overwrite: !!importOverwrite.value
           });
           importResult.value = res;
@@ -11611,6 +11645,8 @@
         onDrawerPanelFiles: onDrawerPanelFiles,
         designateRef: designateRef, disableDrawerRef: disableDrawerRef,
         importOpen: importOpen, importText: importText, importPack: importPack,
+        importCategory: importCategory, importCatOpts: importCatOpts,
+        importPackOpts: importPackOpts,
         importSeries: importSeries,
         importing: importing, importResult: importResult,
         importOverwrite: importOverwrite,
