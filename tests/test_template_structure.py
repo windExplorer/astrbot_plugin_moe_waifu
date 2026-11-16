@@ -151,6 +151,19 @@ def main():
     check("试画台三个步骤分支都在",
           all(f'v-if="tryStep === {n}"' in try_seg for n in (1, 2, 3)))
 
+    # v0.67.1：首屏 loadOverview() 必须在 setup 末尾（avatarThumbsLoading 等
+    # ref 声明之后）。它内部调 loadAvatarThumbs，var 提升下提前调用读到
+    # undefined ref → 挂载期必抛 Uncaught (in promise) TypeError（真机实测）。
+    # loadOverview 另有四处运行时调用（切页签 / 恢复页签，挂载后才触发，安全），
+    # 守卫抓旧 bug 的形状：setup 前段带「首屏」注释的顶层调用不得回来。
+    decl_at = page.find("var avatarThumbsLoading")
+    call_at = page.rfind("loadOverview();")
+    check("首屏 loadOverview 调用在 avatarThumbs ref 声明之后",
+          decl_at > 0 and call_at > decl_at,
+          f"decl@{decl_at} call@{call_at}")
+    check("旧版 setup 前段首屏调用已移除",
+          "loadOverview();  // 首屏" not in page)
+
     if FAILURES:
         print(f"test_template_structure: {len(FAILURES)} FAILED")
         sys.exit(1)

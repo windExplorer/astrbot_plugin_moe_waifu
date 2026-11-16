@@ -2,6 +2,28 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.67.1 (2026-11-17)
+
+**修复挂载期必现的 Uncaught (in promise) TypeError（用户真机控制台报）。**
+
+- **现象**：打开工坊页控制台必现一条 `Uncaught (in promise) TypeError: Cannot
+  read properties of undefined (reading 'value')`，栈指向
+  `loadAvatarThumbs ← loadOverview ← setup`。功能不受影响（总览正常出数据、
+  下一次刷新就走通了），但每开一次页面都报一次。
+- **根因**：`loadOverview();` 首屏调用写在 setup **前段**（定义处，5745 行），
+  而它内部 `loadAvatarThumbs()` 依赖的 `avatarThumbsLoading` /
+  `avatarThumbsLoaded` 等 ref 用 `var` 声明在 setup **后段**（~9350 行）——
+  var 提升只把声明提上去、赋值不会，调用瞬间这些变量还是 `undefined`，
+  读 `.value` 直接抛。异步函数里的同步段抛错 = 返回已拒绝的 Promise，
+  无人接住 → unhandled rejection。
+- **修复**：首屏调用挪到 setup **末尾**（`return` 前、与 `pollQueueTop()`
+  同区），此时全部 ref 已初始化；其余四处 `loadOverview()` 都是挂载后的
+  运行时调用（切页签 / 恢复页签），本就安全。
+- **守卫**：`test_template_structure` 加两条源码断言——setup 末尾的调用必须在
+  `var avatarThumbsLoading` 声明之后；旧「setup 前段 + // 首屏 注释」的调用
+  形状不得回归。冒烟实测：修复前挂载必报 1 条 rejection，修复后 `__errs` 为空。
+- 版本 v0.67.0 -> v0.67.1。
+
 ## v0.67.0 (2026-11-17)
 
 **导入角色可选类型 / 默认并入其他卷；修复改卷报「id 与卷 X 重复」的假重复。**

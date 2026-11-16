@@ -5742,7 +5742,10 @@
         }
       }
       function goMenu(key) { setMenu(key); }
-      loadOverview();  // 首屏（含服务端恢复到总览）就有数据
+      // v0.67.1：首屏调用挪到 setup 末尾（return 前）——曾放在这里，而它内部
+      // 调的 loadAvatarThumbs 依赖的 avatarThumbsLoading 等 ref 声明在 setup
+      // 后段（var 提升 → 调用时还是 undefined），挂载期必抛
+      // Uncaught (in promise) TypeError: Cannot read properties of undefined
 
       // ---- 角色库 ----
       var filterPack = Vue.ref("");
@@ -11611,6 +11614,12 @@
       // v0.34.2：全局出图队列轮询（顶部指示器 + 队列面板共用一份数据）
       pollQueueTop();
       queueTopTimer = setInterval(pollQueueTop, 3000);
+
+      // v0.67.1：总览首屏数据（含服务端恢复到总览就有数据）。必须放在 setup
+      // 末尾——loadOverview → loadAvatarThumbs 用到的 avatarThumbsLoading 等
+      // ref 声明在 setup 后段，提前调用会因 var 提升读到 undefined 必抛
+      // （挂载期 Uncaught (in promise) TypeError，真机控制台可见）。
+      loadOverview();
 
       return {
         theme: theme, themeOverrides: themeOverrides,
