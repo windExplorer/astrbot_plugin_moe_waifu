@@ -2,6 +2,21 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.71.0 (2026-11-17)
+
+**工坊页首套移动端适配：窄屏收起侧栏改横向页签条，网格 / 表格 / 弹窗 / 触屏操作全面收口。**
+
+- **现象（用户）**：「移动端页面样式很烂」——手机上打开工坊，176px 固定侧栏吃掉近一半宽度，内容挤成一条；n-grid 写死 4/6 列、表格 nowrap 直接撑破卡片，hover 才浮现的操作条在触屏上根本看不到。
+- **根因**：`pages/waifu-console/index.html` 从 v0.42.0 重构至今**一条媒体查询都没有**，`n-layout-sider :width="176"` 与所有 `:cols` 都是固定值；`.gal-ops` / `.cover-zoom` / `.av-zoom` / `.work-hint` 全靠 `:hover` 显示。v0.64.0 的 `grCols` 注释里写着「窄屏 CSS 媒体查询再降」，但那套媒体查询从未落地。
+- **改动（前端单文件 `index.html`）**：
+  - 新增 `.m-nav` 横向可滚页签条（≤768px 显示、侧栏 `display:none`），遍历 `menuOpts` 走 `onMenu`；刻意用纯 `div` + `button` 而非 `n-menu` / `n-space`——vendored naive 在 v-if 切换 + sandbox iframe 下有 keyed diff 错位前科。切页/服务端恢复页签后 `ensureMobileTabVisible()` 用 `nav.scrollTo` 把当前项滚到可视中央（不用 `scrollIntoView`，避免连带滚动外层 Dashboard）。
+  - 视口高度 `100vh` → `100dvh`（避开手机地址栏收起时的底部裁切）；`.page-scroll` 内边距 22px→12px，`.sticky-head` / `.sticky-sec` 负 margin 同步收窄，避免固定头两侧留白。
+  - n-grid（含 `.ov-grid`）窄屏强制两列 `!important` 覆盖 naive 的 inline style；瀑布流降 2 列、data-table 加 min-width + 横滚；`.rec-table` / `.kv-table` 块级横滚。
+  - 抽屉全宽、弹窗限 `calc(100vw - 20px)`、图片选择浮层窄屏两列；横向 `n-space` 统一换行，定宽控件（`.batch-scope-slot` / `.prof-grid` / `.queue-row` / `.config-save-float`）收窄。
+  - 触屏没有 hover：`.gal-ops` / `.cover-zoom` / `.av-zoom` / `.work-hint` 常驻可见；卡片图 max-height 320px→240px。
+- **验证**：新增 `tests/test_mobile_responsive.py` 守卫（页签条契约 / 媒体查询 / 网格表格弹窗适配 / 触屏操作条 / sticky 同步）；`test_mobile_responsive` / `test_template_structure` / `test_html_integrity` / `test_inline_js` / `test_template_compile` / `test_webui_contract` / `test_theme_options` 全过。
+- 版本 v0.70.0 -> v0.71.0。
+
 ## v0.70.0 (2026-11-17)
 
 **清掉角色库页最后一批「卷」残留：删卷筛选、卷启停开关、X卷统计；角色只按类型管理。**
