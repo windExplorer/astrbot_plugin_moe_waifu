@@ -217,11 +217,6 @@
   .quote-old { font-size: 12px; opacity: .5; text-decoration: line-through;
     word-break: break-all; }
   .quote-new { word-break: break-all; }
-  .pack-pill { display: inline-flex; align-items: center; gap: 8px;
-    background: rgba(214,51,132,.06); border: 1px solid rgba(214,51,132,.22);
-    border-radius: 999px; padding: 4px 12px; transition: opacity .15s ease; }
-  .pack-name { font-weight: 600; font-size: 13px; }
-  .pack-count { font-size: 11px; opacity: .55; }
   .dropzone { border: 1.5px dashed rgba(160,120,150,.4); border-radius: 10px;
     padding: 12px; transition: background .15s ease, border-color .15s ease; }
   .dropzone.drag { background: rgba(214,51,132,.07); border-color: #d63384; }
@@ -863,7 +858,7 @@
               <div>
                 <div class="h-title">♥ 萌萌今日老婆 · 工坊</div>
                 <div class="h-sub">
-                  共 {{ ov.chars }} 位角色（启用 {{ ov.chars_enabled }} · 停用 {{ ov.chars_disabled }}）/ {{ ov.packs }} 卷<br>
+                  共 {{ ov.chars }} 位角色（启用 {{ ov.chars_enabled }} · 停用 {{ ov.chars_disabled }}）<br>
                   立绘 {{ ov.portraits }} 张 · 今日 {{ ov.today_draws }} 人抽到老婆（{{ ov.today_draw_times }} 次） · 累计 {{ ov.total_draws }} 人次<br>
                   出图方式 {{ ovGenModeLabel }}<span
                     v-if="ov.gen_source_mode === 'mix'"> · 图生图命中 {{ ov.img2img_prob }}%</span><span
@@ -896,7 +891,7 @@
                   <div class="ov-num" :style="{ color: brandColor }">{{ ov.chars }}</div>
                   <!-- v0.54.0：总数 / 启用 / 停用三个数字并列（用户口径：只要数字文案） -->
                   <div class="ov-label">
-                    启用 {{ ov.chars_enabled }} · 停用 {{ ov.chars_disabled }} · {{ ov.packs }} 卷
+                    启用 {{ ov.chars_enabled }} · 停用 {{ ov.chars_disabled }}
                   </div>
                   <div class="ov-bar"><i :style="{ width: ovVerifiedPct }"></i></div>
                 </div>
@@ -1111,8 +1106,6 @@
               <span style="font-size: 12px; opacity: .6;">每行</span>
               <n-select v-model:value="uiColsSel" :options="colOpts" size="small"
                         style="width: 88px;"></n-select>
-              <n-select v-model:value="filterPack" :options="packOpts" size="small"
-                        style="width: 130px;"></n-select>
               <n-select v-model:value="filterCat" :options="catOpts" size="small"
                         style="width: 110px;"></n-select>
               <n-select v-model:value="filterSeries" :options="seriesOpts" size="small"
@@ -1122,17 +1115,6 @@
               <n-input v-model:value="keyword" placeholder="搜 id / 名字 / 作品" size="small"
                        clearable style="width: 180px;"></n-input>
             </n-space>
-            <n-space :wrap="true" size="small" align="center" style="margin-top: 12px;">
-              <span style="font-size: 13px; opacity: .7;">角色卷</span>
-              <div v-for="p in meta.packs" :key="p.pack" class="pack-pill"
-                   :style="p.enabled ? '' : 'opacity: .5;'">
-                <span class="pack-name">{{ p.title }}</span>
-                <span class="pack-count">{{ p.entries.length }} 条</span>
-                <n-switch size="small" :value="p.enabled"
-                          @update:value="togglePack(p)"></n-switch>
-              </div>
-            </n-space>
-
             <!-- 卡片视图（默认） -->
             <div v-if="charsMode === 'card'" style="margin-top: 14px;">
               <n-grid :cols="uiCols" :x-gap="12" :y-gap="12">
@@ -5782,14 +5764,13 @@
       // Uncaught (in promise) TypeError: Cannot read properties of undefined
 
       // ---- 角色库 ----
-      var filterPack = Vue.ref("");
       var filterCat = Vue.ref("");
       var filterSeries = Vue.ref("");
       var filterVerified = Vue.ref("");
       var keyword = Vue.ref("");
 
       var packOpts = Vue.computed(function () {
-        var opts = [{ label: "全部卷", value: "" }];
+        var opts = [{ label: "全部类型", value: "" }];
         (meta.value.packs || []).forEach(function (p) {
           opts.push({ label: p.title || p.pack, value: p.pack });
         });
@@ -5833,7 +5814,6 @@
       });
       var filteredEntries = Vue.computed(function () {
         return allEntries.value.filter(function (e) {
-          if (filterPack.value && e.pack !== filterPack.value) return false;
           if (filterCat.value && e.category !== filterCat.value) return false;
           if (filterSeries.value && (e.series || "") !== filterSeries.value) return false;
           if (filterVerified.value === "yes" && !e.verified) return false;
@@ -5932,15 +5912,6 @@
         if (delTimer) clearTimeout(delTimer);
         delTimer = setTimeout(function () { delArm.value = ""; }, 3000);
         return false;
-      }
-
-      async function togglePack(p) {
-        try {
-          await apiPost("pools/set_pack", { pack: p.pack, enabled: !p.enabled });
-          p.enabled = !p.enabled;
-          message.success((p.enabled ? "已启用" : "已停用") + "：" + (p.title || p.pack));
-          await refreshAll();
-        } catch (e) { /* 已提示 */ }
       }
 
       // ---- 编辑抽屉 ----
@@ -6279,7 +6250,7 @@
         var s = (cardPage.value - 1) * cardPageSize;
         return filteredEntries.value.slice(s, s + cardPageSize);
       });
-      Vue.watch([filterPack, filterCat, filterSeries, filterVerified, keyword], function () {
+      Vue.watch([filterCat, filterSeries, filterVerified, keyword], function () {
         cardPage.value = 1;
       });
       function gotoTryFromChars(e) {
@@ -11723,7 +11694,7 @@
         charsMode: charsMode, cardPage: cardPage, cardPageSize: cardPageSize,
         pagedEntries: pagedEntries, gotoTryFromChars: gotoTryFromChars,
         gotoGallery: gotoGallery,
-        filterPack: filterPack, filterCat: filterCat, filterSeries: filterSeries,
+        filterCat: filterCat, filterSeries: filterSeries,
         seriesOpts: seriesOpts, filterVerified: filterVerified,
         // v0.68.0：catPickOpts（抽屉/导入选类型）、类型管理弹窗绑定
         keyword: keyword, packOpts: packOpts, catOpts: catOpts, verifiedOpts: verifiedOpts,
@@ -11736,7 +11707,7 @@
         form: form, saving: saving, tierOpts: tierOpts,
         quoteGenLoading: quoteGenLoading, doQuoteGen: doQuoteGen,
         openNew: openNew, openEdit: openEdit, saveForm: saveForm,
-        doDeleteEntry: doDeleteEntry, doToggleVerified: doToggleVerified, togglePack: togglePack,
+        doDeleteEntry: doDeleteEntry, doToggleVerified: doToggleVerified,
         drawerRefs: drawerRefs, drawerRefsLoading: drawerRefsLoading,
         onDrawerPanelFiles: onDrawerPanelFiles,
         designateRef: designateRef, disableDrawerRef: disableDrawerRef,

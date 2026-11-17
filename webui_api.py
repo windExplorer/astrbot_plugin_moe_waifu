@@ -1036,18 +1036,6 @@ async def h_dedupe(plugin) -> dict:
                "groups": len(groups), "backup": str(backup_dir)})
 
 
-async def h_set_pack(plugin) -> dict:
-    body = await _body()
-    pack_name = str(body.get("pack") or "").strip()
-    loaded = _load_pack_file(plugin, pack_name)
-    if loaded is None:
-        return err(f"卷不存在：{pack_name}")
-    path, data = loaded
-    data["enabled"] = bool(body.get("enabled", True))
-    _json_save(path, data)
-    return ok({"pack": pack_name, "enabled": data["enabled"]})
-
-
 async def h_set_verified(plugin) -> dict:
     body = await _body()
     cid = str(body.get("id") or "").strip()
@@ -6808,7 +6796,6 @@ def register(plugin) -> None:
         ("/trash/restore", h_trash_restore, ["POST"]),
         ("/trash/purge", h_trash_purge, ["POST"]),
         ("/pools/delete_entry", h_delete_entry, ["POST"]),
-        ("/pools/set_pack", h_set_pack, ["POST"]),
         ("/pools/set_verified", h_set_verified, ["POST"]),
         ("/portraits/index", h_portraits_index, ["GET"]),
         ("/portraits/list", h_portraits_list, ["GET", "POST"]),

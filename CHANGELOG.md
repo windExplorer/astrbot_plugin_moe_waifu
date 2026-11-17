@@ -2,6 +2,22 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.70.0 (2026-11-17)
+
+**清掉角色库页最后一批「卷」残留：删卷筛选、卷启停开关、X卷统计；角色只按类型管理。**
+
+- **现象（用户）**：「为什么角色库还有卷的筛选和启用停用」——v0.69.0 虽把真源切到 DB、代码层删了 pack 维度，但前端角色库页还留着旧 UI。
+- **根因**：这些是 v0.6.x 卷粒度时代的遗留，在 category 真源下已失效或冗余：①「角色卷」启停开关改的是卷 dict 的 `enabled`，而 DB 的 `save_pack_data` 根本没有 enabled 列，点了刷新就回弹（等于没用）；②「全部卷」筛选下拉按 `e.pack` 筛，而 pack 现在就是 category，与旁边的「类型筛选」重复；③统计里的「X 卷」是把类型数当卷显示。
+- **用户拍板**：全删，且「按类型启停」能力不要（v0.68.0 口径：停用标签已替代——角色编辑抽屉打标签 + 配置页 `disabled_user_tags` 声明，命中者不入抽卡）。
+- **改动（前端 pages/waifu-console/index.html）**：
+  - 删角色库页 `filterPack` 卷筛选下拉 + 其过滤/watch/return 绑定；类型筛选（`filterCat`）保留。
+  - 删「角色卷」pill 启停开关区 + `togglePack` 函数 + 死 CSS（`.pack-pill` 等）。
+  - 删总览与角色卡统计里的「/ X 卷 · N 卷」文案。
+  - **保留** `packOpts` 下拉选项源：批量补图「按卷范围」与作品发现「入卷」仍要用它选目标类型（pack 值 = category），仅把 label「全部卷」改成「全部类型」——这两处是选类型不是卷筛选，不能删。
+- **改动（后端 webui_api.py）**：删 `/pools/set_pack` 路由与 `h_set_pack` handler（写卷 enabled 的无用 API）。
+- **验证**：前端结构 / 内联 JS 语法 / 模板编译 / 契约 5 个守卫全过；后端 9 个核心测试（db_source/pack_collapse/import_pack/profile_import/records/pool/dedupe/draw/fairness）全过。
+- 版本 v0.69.0 -> v0.70.0。
+
 ## v0.69.0 (2026-11-17)
 
 **角色库真源切到 SQLite，`packs` 卷维度彻底删除——角色只按 `category`（类型）存。**
