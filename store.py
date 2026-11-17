@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS draw_events (
   nonce         INTEGER NOT NULL DEFAULT 0,
   kind          TEXT NOT NULL DEFAULT 'first',   -- first / reroll
   seed_hex      TEXT NOT NULL DEFAULT '',
-  decision      TEXT NOT NULL DEFAULT '',        -- reuse_today / generate / from_pool
+  decision      TEXT NOT NULL DEFAULT '',        -- generate / from_pool / skip（历史行含 reuse_today）
   decision_note TEXT NOT NULL DEFAULT '',        -- v0.19.4：这次为什么这么出图（可读原因）
   portrait_file TEXT NOT NULL DEFAULT '',
   card_path     TEXT NOT NULL DEFAULT '',

@@ -4647,6 +4647,9 @@ def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
     allow_unverified = bool(plugin._cfg("allow_unverified", False))
     candidates = pool.candidates_for(packs, group_id, group_pools, allow_unverified,
                                 _disabled_tags_of(plugin))
+    # v0.68.1：与真机同口径——pool 模式先剔除库空角色（自动换到有图的）
+    if hasattr(plugin, "_drawable_candidates"):
+        candidates = plugin._drawable_candidates(candidates)
     # 把「该群绑定作品 ∩ verified」这条规则的实际生效范围一并返回，
     # 前端才说得清为什么候选是 N 位（群号留空时 = 全部启用卷）。
     bound = pool.parse_group_pools(group_pools)
@@ -4705,8 +4708,8 @@ def _debug_simulate_core(plugin, uid: str, date: str, nonce: int,
             and bool(plugin._cfg("prefer_unused_portrait", True)) and unused):
         decision = "from_pool"
         prefer_note = f"；优先用没抽到过的库存立绘（还剩 {len(unused)} 张没抽到过）"
-    if decision == "reuse_today":
-        pick = {"file": today_row["file"] if today_row else "", "index": None}
+    if decision == "skip":
+        pick = None  # pool 模式库空：真机会自动换一位有立绘的角色，此处无图可预览
     elif decision == "from_pool":
         rel, used_n, new_round = pool.portrait_cycle_pick(pool_files, used, seed)
         pidx = pool_files.index(rel) if rel in pool_files else None

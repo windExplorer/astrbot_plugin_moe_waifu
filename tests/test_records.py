@@ -321,7 +321,7 @@ def test_cores(tmp: Path):
     check("模拟抽签只读且给出完整链路",
           sim0["ok"] and sim0["readonly"] and sim0["candidates"] == 2
           and len(sim0["seed_hex"]) == 64 and sim0["decision"] in
-          ("generate", "from_pool", "reuse_today"))
+          ("generate", "from_pool", "skip"))
     check("模拟结果与实际签一致", sim0["matches_current"] is True)
     others = [api._debug_simulate_core(plugin, "u1", TODAY, n, "test-salt", "")
               for n in range(1, 8)]

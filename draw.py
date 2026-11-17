@@ -755,25 +755,28 @@ def resolve_portrait_rel(data_dir: Path, rel: str) -> Path:
 
 def decision_of(char_id: str, date_str: str, today_row: dict | None,
                 pool_size: int, quota: int, mode: str = "") -> str:
-    """出图决策（纯函数，可测）：reuse_today / generate / from_pool。
+    """出图决策（纯函数，可测）：skip / generate / from_pool。
 
-    v0.19.3：`mode`（配置 gen_source_mode）必须参与判定。旧实现只按配额走
-    （< 配额 → generate，满配额 → from_pool），于是「只用图生图模板」在立绘库
-    攒满之后被「满配额取库」短路——用户实报：配了 img2img，抽卡却一直是库里的
-    旧立绘、再没画过新图。语义修正：
-      - img2img（只用图生图模板）→ 每次都走 generate（是否真能图生图交给
+    v0.68.1：废除 `reuse_today`（同角色当天人人复用第一张）。旧实现只看
+    `portraits` 表里「该角色今天有没有图」，谁先画一张，后面所有人抽到该角色
+    都被钉在那张上——把 v0.48.0 写好的「按各人种子从库里挑没见过的图」整条短路，
+    用户实报「一个人抽到后其他人都用他那张」「每次都是第一张/最后一张」。
+    现在立绘一律由 `portrait_cycle_pick` 按种子 + 该用户历史已用图挑：人人不同、
+    跨天从剩余挑、抽满一轮再轮换。**画不画新图只由 mode 决定**，与「当天有没有
+    被谁画过」无关：
+      - pool（只用立绘库）→ 库有图 from_pool；库空 skip（选角阶段已过滤库空角色，
+        这里只剩并发删库/重渲染兜底，绝不画新图）；
+      - img2img（只用图生图模板）→ generate，每次现画（是否真图生图交给
         plan_source：没指定出卡源才回退取库）；
-      - 其它模式（mix / pool）→ 维持原「集满配额就取图、不浪费算力」。
-    `mode` 默认空串 = 老行为（debug 模拟等未传的旧调用点安全）。
+      - mix（含未知 mode，默认行为）→ 维持原「未满配额 generate / 满配额 from_pool」，
+        generate 再经 plan_source 按种子概率细分。
+    `today_row` 仅为兼容旧调用点保留，不再参与决策（explain_decision 仍用它出文案）。
     """
-    if str(mode) == "img2img":
-        # v0.19.6：img2img（只用图生图模板）连「当日复用」也不参与——该模式的
-        # 语义是「每次都按出卡源现画」。旧实现今天只要生成过一张同角色的立绘，
-        # 后面所有抽签（含重置后再抽）都返回 reuse_today，用户实报
-        # 「后台显示当日复用立绘，没有图生图了」。
+    m = str(mode)
+    if m == "pool":
+        return "from_pool" if pool_size > 0 else "skip"
+    if m == "img2img":
         return "generate"
-    if today_row is not None:
-        return "reuse_today"
     if pool_size < max(1, int(quota)):
         return "generate"
     return "from_pool"
@@ -838,10 +841,9 @@ def explain_decision(mode: str, decision: str, pool_size: int, quota: int,
         pool_size = max(0, int(pool_size or 0))
         full = pool_size >= quota
         stock = f"库存 {pool_size}/{quota}"
-        if d == "reuse_today":
-            return ("该角色今天就生成过立绘 → 直接复用当日那张（同角色同一天人人同款，"
-                    "省算力）；想重画用「重试今日老婆立绘」，或把出图方式改成"
-                    "「只用图生图模板」")
+        if d == "skip":
+            return ("出图方式=只用立绘库，但该角色立绘库为空"
+                    " → 已自动跳过换一位有立绘的角色（不画新图、不算换老婆次数）")
         if m == "img2img":
             if d == "generate_i2i":
                 base = ("出图方式=只用图生图模板 → 按出卡源图生图"
@@ -856,8 +858,8 @@ def explain_decision(mode: str, decision: str, pool_size: int, quota: int,
                     " → 按角色画法生成（文生图/LoRA）")
         if m == "pool":
             if d == "from_pool":
-                return f"出图方式=只用立绘库 → 从库存取图（{stock}）"
-            return "出图方式=只用立绘库，但库存为空 → 按角色画法生成（文生图/LoRA）"
+                return f"出图方式=只用立绘库 → 从库存随机取图（{stock}，避开这个人抽过的）"
+            return "出图方式=只用立绘库，但库存为空 → 跳过换一位有立绘的角色"
         # mix（含未知 mode 按 mix 处理）
         roll, prob = int(roll or 0) % 100, max(0, min(100, int(i2i_prob or 0)))
         if d == "generate_i2i":

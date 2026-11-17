@@ -547,6 +547,13 @@ class MoeWaifuPlugin(Star):
                 "（pools/ 下没有启用的角色卷，或卷内角色均未 verified）")
             yield event.plain_result("抽卡失败，暂时没有可抽的角色，请稍后再试。")
             return
+        # v0.68.1：pool 模式先剔除库空角色（自动换到有图的，不算换老婆次数）
+        candidates = self._drawable_candidates(candidates)
+        if not candidates:
+            yield event.plain_result(
+                "抽卡失败：当前「只用立绘库」模式下，没有任何角色有立绘。"
+                "请先在工坊给角色补图，或把出图方式改成「混合 / 只用图生图模板」。")
+            return
         # v0.48.0：等概率基线 + 近期重复降权（`draw_recency`），见 _pick_character
         entry = self._pick_character(candidates, uid, date, 0)
         key = (uid, date)
@@ -599,6 +606,13 @@ class MoeWaifuPlugin(Star):
         if not candidates:
             logger.warning(f"[{PLUGIN_NAME}] 重抽失败：没有可抽角色")
             yield event.plain_result("抽卡失败，暂时没有可抽的角色。")
+            return
+        # v0.68.1：pool 模式同样剔除库空角色（自动换到有图的）
+        candidates = self._drawable_candidates(candidates)
+        if not candidates:
+            yield event.plain_result(
+                "换老婆失败：当前「只用立绘库」模式下，没有任何角色有立绘。"
+                "请先在工坊给角色补图，或把出图方式改成「混合 / 只用图生图模板」。")
             return
         # v0.48.0：同一天更早的签也进历史（权重 ×0.15）→ 「换老婆」更容易换到别人
         entry = self._pick_character(candidates, uid, date, used + 1)
@@ -655,6 +669,20 @@ class MoeWaifuPlugin(Star):
                 continue
             out.append(r)
         return out
+
+    def _drawable_candidates(self, candidates: list) -> list:
+        """v0.68.1：pool（只用立绘库）模式先剔除立绘库为空的角色。
+
+        用户口径：只用立绘库时不画新图，抽到没立绘的角色就自动换一位有图的，
+        且**不算 /换老婆 次数**。过滤放在选角色之前——候选里全是库里有图的人，
+        种子照常抽，天然满足这两点。mix/img2img 会现画补库，不过滤。
+        """
+        if str(self._cfg("gen_source_mode", "mix") or "mix") != "pool":
+            return candidates
+        if not self._store:
+            return candidates
+        return [e for e in candidates
+                if self._store.count_portraits(str(e.get("id") or "")) > 0]
 
     def _pick_character(self, candidates: list, uid: str, date: str, nonce: int) -> dict:
         """抽卡 = 等概率基线 + 近期重复降权（`draw_recency` 百分比，0 = 关闭）。
@@ -849,9 +877,12 @@ class MoeWaifuPlugin(Star):
         src = None
         rel_path = ""
         pool_missing = False
-        if decision == "reuse_today":
-            src = self._data_dir / today_row["file"]
-            rel_path = str(today_row["file"])
+        if decision == "skip":
+            # v0.68.1 兜底：pool 模式库空。正常抽卡已在选角阶段剔除库空角色，
+            # 走到这里只剩重渲染 / 并发删库的边缘情形——不画新图，提示后退出。
+            logger.warning(f"[{PLUGIN_NAME}] 抽卡跳过：{char_id} 立绘库为空（pool 模式不画新图）")
+            await self._send_plain(event, "这位角色暂时没有立绘，已跳过，请换一位或稍后再试。")
+            return None
         elif decision == "from_pool":
             # v0.48.0：在这个用户还没抽到过的图里确定性挑一张；整轮抽完自动进下一轮
             rel_path, _used_n, _new_round = pool.portrait_cycle_pick(

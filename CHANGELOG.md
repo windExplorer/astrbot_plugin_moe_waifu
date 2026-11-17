@@ -2,6 +2,23 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.68.1 (2026-11-17)
+
+**废除「当日已有立绘（复用）」：同一角色多人抽到，人人从立绘库随机挑不同的图。**
+
+- **现象（用户）**：「为什么出现『当日已有立绘（复用）』，一个人抽到了，其他人都用这个人的」；追问「到底有没有随机，感觉每次都是第一张/最后一张」「第一天抽到的立绘，后续再抽到这个人要从剩余里随机，这个逻辑没忘吧」。
+- **根因**：`draw.decision_of` 的第一条是 `if today_row is not None: return "reuse_today"`。`today_row` 来自 `store.portrait_by_date(char_id, date)`，**只按「角色 + 当天」查，不看是谁抽的**——某角色当天被 A 画出一张后，B/C/D 抽到同一角色全部被钉在那张上，直接 `src = data_dir / today_row["file"]`，把 v0.48.0 写好的 `portrait_cycle_pick`（按各人种子 + 用户历史已用图挑）整条短路。所以「人人不同 / 跨天从剩余挑」的代码一直在，只是永远走不到；用户看到的就是固定一张。
+- **实测取证**（写修复前先跑真实代码）：300 个不同用户挑同一角色的 5 张图分布 `62/64/57/59/58`（均匀，非固定首末）；用掉第 1 张后跨天再抽 10 次一次都没回到它；同一人连抽 8 天序列 `4,3,5,2,1,5,1,4`（前 5 张全不同、抽满一轮才轮换）。确认挑图函数本身没问题，病灶只在 `reuse_today` 短路。
+- **修复（后端）**：
+  - `draw.decision_of` 删除 `reuse_today` 分支；`today_row` 参数保留兼容调用点、不再参与决策。新决策域 `skip / generate / from_pool`。**画不画新图始终只由 `gen_source_mode` 决定**，与「当天有没有被谁画过」无关。
+  - `main._produce` 的 `reuse_today` 取图分支改成 `skip` 兜底（pool 库空、不画新图、提示后退出）；`from_pool` 照旧走 `portrait_cycle_pick`，人人不同、跨天避重、抽满轮换。
+  - `pool` 模式库空自动换人：新增 `main._drawable_candidates`，在首抽与 `/换老婆` 选角**之前**剔除库空角色（候选里全是有图的人，种子照常抽）——自动换到有图的角色，**不消耗 `/换老婆` 每日次数**；全库无图时给可读提示。调试模拟 `webui_api._debug_simulate_core` 同口径过滤。
+  - `mix` / `img2img` 决策原样不动（用户口径：只有图生图/混合才画图）。
+  - 决策文案同步：`skip` = 「库空·跳过换人」；pool 取库写明「随机取图、避开这个人抽过的」；前端 `DECISION_LABELS` 加 `skip`，旧 `reuse_today` 映射保留仅供历史旧签显示（标注「旧版」）。
+- **边界（已向用户说明）**：某角色库里只有 1 张图时，pool 模式按规则不画新图，谁抽都是那张（随机无从谈起）；要彻底每张不同需先在工坊补图把库攒起来。
+- **守卫**：`test_draw` 改写 decision_of 断言（当日有图不再复用 / pool 库空 skip / pool 有图取库）+ 新增 skip 文案断言；`test_records` 模拟决策值域加 `skip`；新增 `test_drawable_candidates`（AST 抠真代码，验证 pool 剔库空 / mix·img2img 不过滤 / 全库无图 / 无 store 降级）。`test_draw` / `test_fairness` / `test_records` / `test_drawable_candidates` 全过。
+- 版本 v0.68.0 -> v0.68.1。
+
 ## v0.68.0 (2026-11-17)
 
 **卷收敛：卷=类型（可自定义），作品不再受限；标签替代卷的启停粒度。**

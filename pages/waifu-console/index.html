@@ -8558,9 +8558,10 @@
       var DECISION_LABELS = {
         generate: "生成新立绘", from_pool: "立绘库取图",
         generate_i2i: "图生图模板生成",
-        // v0.19.6：旧文案「当日复用立绘」让人以为是「这个用户今天抽过了」，
-        // 实际判断的是「该角色今天已生成过立绘」（同角色同一天人人同款）
-        reuse_today: "当日已有立绘（复用）", "": "—"
+        // v0.68.1：pool 模式库空自动换人（不画新图、不算换老婆次数）
+        skip: "库空·跳过换人",
+        // reuse_today 已废除（v0.68.1），保留映射只为显示历史旧签
+        reuse_today: "当日已有立绘（复用·旧版）", "": "—"
       };
       function decisionLabel(d) { return DECISION_LABELS[d] || d || "—"; }
       // 库里 created_at/updated_at 是 UTC ISO（...Z）。直接裸显既不好读又比本地时间
