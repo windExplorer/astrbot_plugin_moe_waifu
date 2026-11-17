@@ -50,8 +50,9 @@ with tempfile.TemporaryDirectory() as td:
         E("nanally_nte", "娜娜莉", "异环"),
         E("march_7th", "三月七", "崩坏：星穹铁道"),   # 不在首版范围
     ])
+    # category 真源：每条角色按自身 category 归位（anime 卷的角色 category=anime）
     dump(pools / "anime.json", "anime", [
-        E("hatsune_miku", "初音未来", "VOCALOID"),     # 不在首版范围
+        {**E("hatsune_miku", "初音未来", "VOCALOID"), "category": "anime"},
     ])
     (pools / "broken.json").write_text("{ not json", encoding="utf-8")
     # 图片：立绘 + 参考图 + 卡片 + 试画产物
@@ -92,7 +93,8 @@ with tempfile.TemporaryDirectory() as td:
     r1 = st.migrate_relational(pools, root)
     check("scope 门禁移除后全部角色入库", r1["characters"] == 6, str(r1))
     check("作品全量聚合（5 部）", r1["works"] == 5, str(r1))
-    check("有合法角色的卷都入库", r1["packs"] == 2, str(r1))
+    # v0.69.0 卷维度删：packs 表物理保留但代码不再写入（角色按 category 存）
+    check("卷表不再写入（卷维度删）", r1["packs"] == 0, str(r1))
     check("没有条目被跳过", r1["skipped"] == 0, str(r1))
     r2 = st.migrate_relational(pools, root)
     check("重复迁移幂等（数量不变）",
@@ -122,8 +124,9 @@ with tempfile.TemporaryDirectory() as td:
           str(ids))
     check("scope 外角色也入库（门禁已移除）",
           "march_7th" in ids and "hatsune_miku" in ids, str(ids))
-    check("角色都挂了作品 / 卷外键",
-          all(c["work_id"] and c["pack_id"] for c in chars), str(chars))
+    # v0.69.0 卷维度删：只断言作品外键，pack_id 恒 NULL（列物理保留但不用）
+    check("角色都挂了作品外键（卷外键已废）",
+          all(c["work_id"] for c in chars), str(chars))
     wnames = {r["name"] for r in st._conn.execute("SELECT name FROM works")}
     check("作品名即自然键",
           wnames == {"原神", "鸣潮", "异环", "崩坏：星穹铁道", "VOCALOID"},
@@ -159,8 +162,10 @@ with tempfile.TemporaryDirectory() as td:
 
     # 8) 读路径：load_packs 与卷 JSON 同构
     packs_db = st.load_packs()
-    check("新表读出的卷数与库一致", len(packs_db) == r1["packs"],
-          f"{len(packs_db)} vs {r1['packs']}")
+    # v0.69.0：按 category 分组——game 卷 5 位 + anime 卷 1 位 → 2 组
+    check("新表按 category 分组读出",
+          {p["pack"] for p in packs_db} == {"game", "anime"},
+          str([p["pack"] for p in packs_db]))
     flat = [e for p in packs_db for e in p["entries"]]
     check("读出的角色数 = characters 表", len(flat) == r1["characters"],
           f"{len(flat)} vs {r1['characters']}")
@@ -214,31 +219,28 @@ with tempfile.TemporaryDirectory() as td:
     check("读路径立刻看到改动（含全部作品）",
           len([e for p in st.load_packs() for e in p["entries"]]) == 4)
 
-    # 12) 跨卷重复 id：先同步的卷胜，遗留卷不能把角色抢过去
+    # 12) v0.69.0 卷维度删：同 id 全库唯一、category 是唯一分组。
+    # 不同 category 的同名角色是「移动」（move），同 category 是覆盖。
     dump(pools / "zolddup.json", "zolddup", [
-        {"id": "ganyu", "name": "甘雨旧卷", "series": "原神",
-         "tags_en": "1girl", "verified": False, "category": "game",
+        {"id": "ganyu", "name": "甘雨", "series": "原神",
+         "tags_en": "1girl", "verified": False, "category": "anime",
          "strategy": {}},
     ])
-    st.sync_pack_file(pools / "zolddup.json")
-    row = st._conn.execute(
-        "SELECT pack_id FROM characters WHERE char_id='ganyu'").fetchone()
-    game_pack = st._conn.execute(
-        "SELECT id FROM packs WHERE name='game'").fetchone()
-    check("跨卷重复不抢卷（先见者胜）", row["pack_id"] == game_pack["id"],
-          str(dict(row)))
-    check("遗留卷没有抢到角色",
-          st._conn.execute(
-              "SELECT COUNT(*) AS n FROM characters c JOIN packs p ON p.id=c.pack_id"
-              " WHERE p.name='zolddup'").fetchone()["n"] == 0)
+    st.sync_pack_file(pools / "zolddup.json")   # 灌库：同 id 先到先得，不移动
+    check("灌库同 id 先到先得（ganyu 仍在 game）",
+          st.find_entry_category("ganyu") == "game",
+          str(st.find_entry_category("ganyu")))
+    check("角色全库只有一份",
+          st._conn.execute("SELECT COUNT(*) AS n FROM characters WHERE char_id='ganyu'"
+                           ).fetchone()["n"] == 1)
+    # 真正的跨类型移动走 save_entry（见 test_import_pack）
+    st.save_entry({**st.find_entry("ganyu"), "category": "anime"}, "anime")
+    check("save_entry 跨类型移动生效", st.find_entry_category("ganyu") == "anime")
 
-    # 13) 空卷（没有任何合法条目）不保留卷记录，读路径也不返回
+    # 13) 空卷（没有任何合法条目）读路径不返回空组
     dump(pools / "zempty.json", "zempty", [])
     rs2 = st.sync_pack_file(pools / "zempty.json")
-    check("空卷同步后不留 packs 记录",
-          st._conn.execute(
-              "SELECT 1 FROM packs WHERE name='zempty'").fetchone() is None)
-    check("空卷 sync 返回 pack_dropped", rs2["pack_dropped"] is True, str(rs2))
+    check("空卷 sync 不报错", "error" not in rs2, str(rs2))
     check("读路径不含空卷", all(p["entries"] for p in st.load_packs()))
     st.close()
 

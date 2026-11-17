@@ -160,18 +160,24 @@ with tempfile.TemporaryDirectory() as td:
         E("b", "角色乙", "作品B"),
     ])
     # 模拟 v0.22.0 导入残留的旧卷：a 同 id 重复、b2 同名同作品不同 id
+    # v0.69.0 category 真源：残留卷用 category=other，避免灌库时同 category
+    # 后到者覆盖 game 卷里 a 的资产（真实数据里重复 id 本就不该同 category）
     _dump(pools / "old.json", "old", [
-        E("a", "角色甲", "作品A"),
-        E("b2", "角色乙", "作品B",
-          strategy={"refs": ["refs/old.png"]}),
+        {**E("a", "角色甲", "作品A"), "category": "other"},
+        {**E("b2", "角色乙", "作品B",
+             strategy={"refs": ["refs/old.png"]}), "category": "other"},
     ])
     for seq in range(1):
         st.add_portrait("a", f"portraits/a/{seq}.png", 1, "2026-11-13", seq, "base")
     for seq in range(3):
         st.add_portrait("b", f"portraits/b/{seq}.png", 1, "2026-11-13", seq, "base")
     st.add_portrait("b2", "portraits/b2/0.png", 1, "2026-11-13", 0, "base")
+    # v0.69.0 DB 真源：灌库 + 挂写钩子 + 读 provider（模拟生产 initialize）
+    st.migrate_relational(pools, root)
+    webui_api.set_pack_save(st.save_pack_data)
+    pool.set_packs_provider(st.load_packs)
 
-    # 5.1 默认导入：全库跨卷按 id 去重
+    # 5.1 默认导入：全库跨类型按 id 去重
     payload = json.dumps([E("a", "角色甲NEW", "作品A-NEW", category="game"),
                           E("new1", "新角色", "作品C", category="game")], ensure_ascii=False)
     r1 = asyncio.run(_call(webui_api.h_import_pack, plugin,
@@ -179,7 +185,7 @@ with tempfile.TemporaryDirectory() as td:
     d1 = r1["data"]
     check("导入跳过跨卷已存在的 id",
           d1["imported"] == 1 and d1["duplicates"] == 1, str(d1))
-    a_org = next(e for e in _load(pools / "game.json")["entries"] if e["id"] == "a")
+    a_org = st.find_entry("a")
     check("默认不覆盖：原条目基础信息也没动", a_org["name"] == "角色甲")
 
     # 5.2 开启覆盖：只改基础字段，参考图/封面/验证状态全留
@@ -188,7 +194,7 @@ with tempfile.TemporaryDirectory() as td:
     d2 = asyncio.run(_call(webui_api.h_import_pack, plugin,
                            {"text": payload2, "overwrite": True}))["data"]
     check("覆盖返回 updated=1", d2["updated"] == 1, str(d2))
-    a_new = next(e for e in _load(pools / "game.json")["entries"] if e["id"] == "a")
+    a_new = st.find_entry("a")
     check("覆盖更新基础信息", a_new["name"] == "角色甲NEW"
           and a_new["series"] == "作品A-NEW")
     check("覆盖保住参考图/封面/验证状态",
@@ -202,15 +208,13 @@ with tempfile.TemporaryDirectory() as td:
                             "pack": "imported"}))["data"]
     check("同名同作品不同 id 也被拦下", d3["duplicates"] == 1, str(d3))
 
-    # 5.4 预览：2 组、保留资产最全的一条
+    # 5.4 v0.69.0 category 真源：char_id 全库唯一 → 同 id 重复不可能存在，
+    # 只剩「同名同作品、id 不同」一组（b / b2）。
     groups = asyncio.run(_call(webui_api.h_duplicates, plugin, {}))["data"]["groups"]
-    check("预览扫出 2 组重复", len(groups) == 2, str([g["key"] for g in groups]))
+    check("预览扫出同名同作品组", len(groups) == 1, str([g["key"] for g in groups]))
     check("预览带 reasons_text / title / asset_text",
           all(g.get("reasons_text") and g.get("title")
               and all(it.get("asset_text") for it in g["items"]) for g in groups))
-    ga = next(g for g in groups if any(it["id"] == "a" for it in g["items"]))
-    check("同 id 组保留有资产的那条（game 卷）",
-          ga["items"][ga["keep"]]["pack"] == "game", str(ga))
     gb = next(g for g in groups if any(it["id"] == "b2" for it in g["items"]))
     check("同名组保留立绘多的 b（game 卷）",
           gb["items"][gb["keep"]]["id"] == "b", str(gb))
@@ -220,10 +224,10 @@ with tempfile.TemporaryDirectory() as td:
     d5 = asyncio.run(_call(webui_api.h_dedupe, plugin,
                            {"keys": [g["key"] for g in groups],
                             "confirm": True}))["data"]
-    check("清理移除 2 条重复条目", d5["removed"] == 2, str(d5))
+    check("清理移除 1 条重复条目", d5["removed"] == 1, str(d5))
     check("被移除条目的立绘迁移到保留 id", d5["moved_portraits"] == 1, str(d5))
     check("立绘一行不少", len(st.list_portraits_all()) == total_before)
-    kept_b = next(e for e in _load(pools / "game.json")["entries"] if e["id"] == "b")
+    kept_b = st.find_entry("b")
     check("被移除条目的参考图并入保留条目",
           "refs/old.png" in (kept_b.get("strategy") or {}).get("refs", []),
           str(kept_b))

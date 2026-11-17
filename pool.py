@@ -357,18 +357,22 @@ def _hygiene_pack(pack: dict) -> int:
     return cleaned
 
 
-def install_seed_pool(pools_dir: Path, bundled_json: Path, logger=None) -> list:
-    """把包内种子卷落到 pools/：缺失的卷整卷安装；已存在的卷按 id 合并新条目。
+def install_seed_pool(pools_dir: Path, bundled_json: Path, logger=None,
+                      read_pack=None, save_pack=None) -> list:
+    """把包内种子卷落库/落盘：缺失的卷整卷安装；已存在的卷按 id 合并新条目。
 
     合并语义（v0.3.1）：种子卷里 id 在用户卷中不存在 → 追加（verified 默认 false，
-    走试画验证流程）；id 已存在 → 一律以用户卷为准，**绝不覆盖**——
-    data 目录是唯一真源，种子卷只是播种机。
-    v0.40.0：安装 / 合并前对整卷条目做 tags 卫生（strip_lore_tags，剥离
-    S-rank / E.T.D 等背景设定杂质，幂等）——历史装机卷里已嵌入的杂质一并清。
+    走试画验证流程）；id 已存在 → 一律以用户卷为准，**绝不覆盖**。
+    v0.40.0：安装 / 合并前对整卷条目做 tags 卫生（剥离 S-rank / E.T.D 等杂质，幂等）。
+    v0.69.0 DB 真源：`read_pack(name)->dict|None` / `save_pack(dict)` 两个回调由
+    main 注入（store.load_pack_data / store.save_pack_data）——有则读写走 DB，
+    JSON 文件完全不碰（旧底稿只读保留）；无则回退老 JSON 路径（独立测试兼容）。
     返回 {"installed": [新装卷名], "merged": {卷名: 追加条数}}。
     """
     pools_dir = Path(pools_dir)
-    pools_dir.mkdir(parents=True, exist_ok=True)
+    db_mode = callable(read_pack) and callable(save_pack)
+    if not db_mode:
+        pools_dir.mkdir(parents=True, exist_ok=True)
     installed: list = []
     merged: dict = {}
     try:
@@ -381,10 +385,7 @@ def install_seed_pool(pools_dir: Path, bundled_json: Path, logger=None) -> list:
         name = str(pack.get("pack") or "").strip()
         if not name or not isinstance(pack.get("entries"), list):
             continue
-        # v0.68.0：gal 类型并入游戏（用户口径「gal 就属于游戏」）——种子的
-        # gal 卷直接装进游戏卷（条目 category 一次性改写），不再落地 gal.json；
-        # 否则每次启动都会「种子重建 gal 卷 → 卷收敛合并进游戏卷 → 进回收站」，
-        # 白白制造回收站垃圾
+        # v0.68.0：gal 并入 game（种子侧一次性改写 category）
         if name == "gal":
             name = "game"
             for raw in pack["entries"]:
@@ -392,7 +393,25 @@ def install_seed_pool(pools_dir: Path, bundled_json: Path, logger=None) -> list:
                     raw["category"] = "game"
         _hygiene_pack(pack)
         target = pools_dir / f"{name}.json"
-        if not target.exists():
+        if db_mode:
+            try:
+                current = read_pack(name)
+            except Exception as exc:
+                if logger is not None:
+                    logger.warning(f"[moe_waifu] 卷 {name} 读取失败（DB）: {exc}")
+                continue
+            if current is None:
+                pack = dict(pack)
+                pack["pack"] = name
+                try:
+                    save_pack(pack)
+                    installed.append(name)
+                except Exception as exc:
+                    if logger is not None:
+                        logger.error(f"[moe_waifu] 种子卷 {name} 入库失败: {exc}")
+                continue
+            entries = current.get("entries") if isinstance(current.get("entries"), list) else []
+        elif not target.exists():
             try:
                 target.write_text(
                     json.dumps(pack, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -402,14 +421,14 @@ def install_seed_pool(pools_dir: Path, bundled_json: Path, logger=None) -> list:
                 if logger is not None:
                     logger.error(f"[moe_waifu] 种子卷 {name} 写入失败: {exc}")
             continue
-        # 已有卷：按 id 合并种子卷里新增的条目（不覆盖用户已有条目）
-        try:
-            current = json.loads(target.read_text(encoding="utf-8"))
-        except Exception as exc:
-            if logger is not None:
-                logger.warning(f"[moe_waifu] 卷 {name} 解析失败，跳过合并: {exc}")
-            continue
-        entries = current.get("entries") if isinstance(current.get("entries"), list) else []
+        else:
+            try:
+                current = json.loads(target.read_text(encoding="utf-8"))
+            except Exception as exc:
+                if logger is not None:
+                    logger.warning(f"[moe_waifu] 卷 {name} 解析失败，跳过合并: {exc}")
+                continue
+            entries = current.get("entries") if isinstance(current.get("entries"), list) else []
         have_ids = set()
         for raw in entries:
             e = normalize_entry(raw, name)
@@ -422,28 +441,27 @@ def install_seed_pool(pools_dir: Path, bundled_json: Path, logger=None) -> list:
                 entries.append(e)
                 have_ids.add(e["id"])
                 appended += 1
-        # v0.40.0：历史装机卷里已嵌入的杂质 tag 一并清理（幂等；有清理 /
-        # 有追加才写回，不动用户其他编辑）
         cleaned = _hygiene_pack(current)
         if appended or cleaned:
             current["entries"] = entries
             try:
-                target.write_text(
-                    json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8"
-                )
+                if db_mode:
+                    save_pack(current)
+                else:
+                    target.write_text(
+                        json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
                 merged[name] = appended
             except Exception as exc:
                 if logger is not None:
                     logger.error(f"[moe_waifu] 卷 {name} 合并写回失败: {exc}")
             if cleaned and logger is not None:
-                logger.info(f"[moe_waifu] 卷 {name} tags 卫生：清理 {cleaned} 条背景设定杂质")
+                logger.info(f"[moe_waifu] 卷 {name} tags 卫生：清理 {cleaned} 条杂质")
     if installed and logger is not None:
         logger.info(f"[moe_waifu] 已安装种子卷：{', '.join(installed)}")
     if merged and logger is not None:
-        logger.info(
-            "[moe_waifu] 种子卷合并："
-            + ", ".join(f"{k}+{v}" for k, v in merged.items())
-        )
+        logger.info("[moe_waifu] 种子卷合并："
+                    + ", ".join(f"{k}+{v}" for k, v in merged.items()))
     return {"installed": installed, "merged": merged}
 
 

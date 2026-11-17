@@ -85,6 +85,7 @@ def setup_env(td: Path):
     st = store.Store(td / "waifu.db")
     st.migrate_relational(pools, td, logger=logger)
     api.set_pack_sync(st.sync_pack_file)
+    api.set_pack_save(st.save_pack_data)   # v0.69.0 DB 真源：写入也挂上
     pool.set_packs_provider(st.load_packs)
     plugin = type("P", (), {"_data_dir": td, "_store": st,
                             "_today": lambda s: "2026-11-17"})()
@@ -93,36 +94,31 @@ def setup_env(td: Path):
 def test_cross_pack_move(td: Path):
     setup_env(td)
     try:
-        # 旧条目带全量资产字段（参考图绑定 / 封面 / 资料 / 头像 / 入库日期）——
-        # v0.67.0 移动把它们全丢过，这里就是回归现场
-        dump(pools / "wuthering_waves.json", "wuthering_waves", [
-            {"id": "moning", "name": "莫宁", "series": "鸣潮", "category": "game",
-             "tags_en": "1girl", "verified": True,
-             "strategy": {"type": "img2img", "ref": "refs/a.png",
-                          "refs": ["refs/a.png", "refs/b.png"],
-                          "draw_ref": "refs/b.png"},
-             "cover": "refs/b.png",
-             "profile": {"简介": "测试资料", "生日": "7月23日"},
-             "avatar": "avatars/moning.png",
-             "added_at": "2026-11-01"}], title="鸣潮")
-        # 现实中条目是经应用写入的（_json_save 钩子已同步新表）——这里同样
-        # 先同步，owner 扫描拿到的才是带资产的完整条目
-        st.sync_pack_file(pools / "wuthering_waves.json")
+        # v0.69.0 DB 真源 + 卷维度删：角色只按 category 存。用 setup 里没有的
+        # 新 id（atri）做跨类型移动：先在 other，存到 game 即移动。旧条目带全量
+        # 资产字段——v0.67.0 移动把它们丢过，这里是回归现场。
+        st.save_entry({"id": "atri", "name": "亚托莉", "series": "ATRI",
+                       "category": "other", "tags_en": "1girl", "verified": True,
+                       "strategy": {"type": "img2img", "ref": "refs/a.png",
+                                    "refs": ["refs/a.png", "refs/b.png"],
+                                    "draw_ref": "refs/b.png"},
+                       "cover": "refs/b.png",
+                       "profile": {"简介": "测试资料", "生日": "7月23日"},
+                       "avatar": "avatars/atri.png",
+                       "added_at": "2026-11-01"}, "other")
+        check("初始角色在 other 类型", st.find_entry_category("atri") == "other")
         res = asyncio.run(call(api.h_save_entry, {
             "pack": "game",
-            # 表单重建条目：只有画法 / 主参考 / 名字等托管字段，不带 refs /
-            # cover / profile / avatar（编辑抽屉的真实 payload 形状）
-            "entry": {"id": "moning", "name": "莫宁", "series": "鸣潮",
+            # 表单重建条目：只有托管字段，不带 refs / cover / profile / avatar
+            "entry": {"id": "atri", "name": "亚托莉", "series": "ATRI",
                       "category": "game", "tags_en": "1girl",
                       "strategy": {"type": "img2img", "ref": "refs/a.png"},
                       "verified": True}}))
-        check("改卷保存成功（不再报 id 重复）", res["status"] == "ok", str(res))
-        check("返回移动来源卷", res["data"].get("moved_from") == "wuthering_waves",
+        check("改类型保存成功（不再报 id 重复）", res["status"] == "ok", str(res))
+        check("返回移动来源类型", res["data"].get("moved_from") == "other",
               str(res.get("data")))
-        check("目标卷文件已含角色", "moning" in ids_of(pools / "game.json"))
-        check("原卷文件已摘除角色", "moning" not in ids_of(pools / "wuthering_waves.json"))
-        moved = next(e for e in read(pools / "game.json")["entries"]
-                     if e["id"] == "moning")
+        check("角色已挪到 game 类型", st.find_entry_category("atri") == "game")
+        moved = st.find_entry("atri")
         check("移动保留参考图绑定",
               moved["strategy"].get("refs") == ["refs/a.png", "refs/b.png"],
               str(moved["strategy"]))
@@ -131,32 +127,30 @@ def test_cross_pack_move(td: Path):
         check("移动保留封面", moved.get("cover") == "refs/b.png", str(moved))
         check("移动保留资料", moved.get("profile", {}).get("生日") == "7月23日",
               str(moved.get("profile")))
-        check("移动保留头像指针", moved.get("avatar") == "avatars/moning.png",
+        check("移动保留头像指针", moved.get("avatar") == "avatars/atri.png",
               str(moved.get("avatar")))
         check("移动保留入库日期", moved.get("added_at") == "2026-11-01",
               str(moved.get("added_at")))
-        check("表单字段正常更新", moved["name"] == "莫宁"
+        check("表单字段正常更新", moved["name"] == "亚托莉"
               and moved["strategy"].get("type") == "img2img", str(moved))
-        prow = st._conn.execute(
-            "SELECT p.name FROM characters c JOIN packs p ON p.id=c.pack_id"
-            " WHERE c.char_id='moning'").fetchone()
-        check("新表行随同步落到目标卷", prow and prow["name"] == "game", str(prow))
+        check("角色全库只有一份（category=game）",
+              st._conn.execute("SELECT COUNT(*) AS n FROM characters WHERE char_id='atri'"
+                               ).fetchone()["n"] == 1)
 
-        # 同卷编辑：原位替换、不产生移动
+        # 同类型编辑：原位替换、不产生移动
         res2 = asyncio.run(call(api.h_save_entry, {
             "pack": "game",
-            "entry": {"id": "moning", "name": "莫宁改", "series": "鸣潮",
+            "entry": {"id": "atri", "name": "亚托莉改", "series": "ATRI",
                       "category": "game", "tags_en": "1girl", "strategy": {}}}))
-        check("同卷编辑 replaced", res2["data"].get("replaced") is True, str(res2))
-        check("同卷编辑无移动", res2["data"].get("moved_from") == "", str(res2))
-        moved2 = next(e for e in read(pools / "game.json")["entries"]
-                      if e["id"] == "moning")
-        check("同卷编辑不丢资产（头像 / 参考图仍在）",
-              moved2.get("avatar") == "avatars/moning.png"
+        check("同类型编辑 replaced", res2["data"].get("replaced") is True, str(res2))
+        check("同类型编辑无移动", res2["data"].get("moved_from") == "", str(res2))
+        moved2 = st.find_entry("atri")
+        check("同类型编辑不丢资产（头像 / 参考图仍在）",
+              moved2.get("avatar") == "avatars/atri.png"
               and moved2["strategy"].get("refs") == ["refs/a.png", "refs/b.png"],
               str(moved2))
-        check("角色只剩一份（原卷没被复制回去）",
-              "moning" not in ids_of(pools / "wuthering_waves.json"))
+        check("旧 other 类型里已无该角色",
+              st.find_entry_category("atri") == "game")
     finally:
         st.close()
 
@@ -174,9 +168,8 @@ def test_avatar_heal(td: Path):
         st.sync_pack_file(pools / "wuthering_waves.json")
         res = api.heal_avatar_pointers(plugin)
         check("自愈补回 1 个指针", res["healed"] == 1, str(res))
-        check("条目指针已恢复",
-              next(e for e in read(pools / "wuthering_waves.json")["entries"]
-                   if e["id"] == "moning")["avatar"] == "avatars/moning.png")
+        check("条目指针已恢复（DB 真源）",
+              st.find_entry("moning")["avatar"] == "avatars/moning.png")
         # 已有指针的条目不动
         res2 = api.heal_avatar_pointers(plugin)
         check("幂等（第二次 0 个）", res2["healed"] == 0, str(res2))
@@ -198,18 +191,12 @@ def test_import_defaults(td: Path):
         check("无类型参数导入成功", res["status"] == "ok", str(res))
         check("返回落卷类型标题", res["data"]["pack"] == "游戏、其他",
               str(res["data"]))
-        game = pools / "game.json"
-        other = pools / "other.json"
-        check("自带类型条目路由到对应卷",
-              "a1" in ids_of(game) and cat_of(game, "a1") == "game")
-        check("无类型条目落入其他卷",
-              "a2" in ids_of(other) and cat_of(other, "a2") == "other")
+        # v0.69.0 DB 真源：导入直接落 DB，断言读 DB
+        check("自带类型条目路由到对应类型", st.find_entry_category("a1") == "game")
+        check("无类型条目落入其他类型", st.find_entry_category("a2") == "other")
         check("空 series 并入「其他」作品",
-              next(e for e in read(other)["entries"]
-                   if e["id"] == "a2")["series"] == "其他")
-        check("自带 series 保留",
-              next(e for e in read(game)["entries"]
-                   if e["id"] == "a1")["series"] == "某作")
+              st.find_entry("a2")["series"] == "其他")
+        check("自带 series 保留", st.find_entry("a1")["series"] == "某作")
 
         # 类型选择：category=anime 指定类型；a1 已存在 game 卷 → 跨类型跳过
         res2 = asyncio.run(call(api.h_import_pack, dict(
@@ -233,7 +220,7 @@ def test_import_pack_selection(td: Path):
         # v0.68.0：指定类型 = 落该类型卷；JSON 自带 pack 字段不再生效
         res = asyncio.run(call(api.h_import_pack, dict(payload, category="game")))
         check("指定类型导入成功", res["data"]["pack"] == "游戏", str(res))
-        check("角色并入类型卷文件", "new8_1" in ids_of(pools / "game.json"))
+        check("角色并入 game 类型（DB）", st.find_entry_category("new8_1") == "game")
 
         # JSON 自带 pack 字段不再生效——按条目类型路由，不会创建一次性卷
         res2 = asyncio.run(call(api.h_import_pack, {
@@ -243,9 +230,9 @@ def test_import_pack_selection(td: Path):
                 ensure_ascii=False)}))
         check("JSON 自带 pack 不再生效（按类型落卷）",
               res2["data"]["pack"] == "游戏", str(res2))
-        check("角色并入类型卷文件", "new8_2" in ids_of(pools / "game.json"))
-        check("JSON 自带卷没有被追加角色",
-              "new8_2" not in ids_of(pools / "wuthering_waves.json"))
+        check("角色并入 game 类型（DB）", st.find_entry_category("new8_2") == "game")
+        check("不会创建 wuthering_waves 类型",
+              st.find_entry_category("new8_2") != "wuthering_waves")
 
         # 条目自带 category（game）→ 路由到游戏卷；真正无类型的才落 other
         res3 = asyncio.run(call(api.h_import_pack, {
@@ -254,7 +241,7 @@ def test_import_pack_selection(td: Path):
                  "category": "game", "tags_en": "1girl", "strategy": {}}],
                 ensure_ascii=False)}))
         check("条目自带类型路由到对应卷", res3["data"]["pack"] == "游戏", str(res3))
-        check("角色并入类型卷文件", "new8_3" in ids_of(pools / "game.json"))
+        check("角色并入 game 类型（DB）", st.find_entry_category("new8_3") == "game")
     finally:
         st.close()
 

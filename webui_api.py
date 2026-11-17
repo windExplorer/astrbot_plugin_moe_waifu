@@ -90,7 +90,24 @@ def _disabled_tags_of(plugin) -> set:
 
 
 def _load_pack_file(plugin, pack_name: str) -> tuple | None:
-    """按卷名读原始卷文件，返回 (path, data)；不存在返回 None。"""
+    """按卷名读卷数据，返回 (虚拟 path, data)；不存在返回 None。
+
+    v0.69.0 DB 真源：data 来自 `store.load_pack_data`（内存 dict），不再是磁盘文件。
+    返回的 path 仍是 `pools/<name>.json` 形状——调用方把它当句柄传给 `_json_save`，
+    后者靠 `path.parent.name == "pools"` 判定走 DB 写入，调用方无需改动。
+    """
+    store_obj = getattr(plugin, "_store", None)
+    pack_name = str(pack_name or "").strip()
+    if store_obj is not None and hasattr(store_obj, "load_pack_data"):
+        try:
+            data = store_obj.load_pack_data(pack_name)
+        except Exception as exc:
+            logger.error(f"[{PLUGIN_NAME}] 卷读取失败（DB）{pack_name}: {exc}")
+            return None
+        if data is None:
+            return None
+        return _pools_dir(plugin) / f"{pack_name}.json", data
+    # 兜底：无 store（早期初始化 / 独立工具）时仍读旧 JSON 底稿
     path = _pools_dir(plugin) / f"{pack_name}.json"
     if not path.is_file():
         return None
@@ -107,23 +124,40 @@ def _json_load(path: Path) -> dict:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-# v0.25.0：卷文件落盘后的同步回调（写 JSON → 同步新表，读路径立刻可见）。
-# 读路径已切到 SQLite，缺了这层就会出现「工坊改完还是旧数据」。
+# v0.25.0：卷文件落盘后的同步回调（写 JSON → 同步新表）——v0.69.0 起仅作兼容保留，
+# 真机写路径已走 _PACK_SAVE 直接落 DB，不再触发它。
 _PACK_SYNC = None
+# v0.69.0：DB 真源写入回调（data dict → store.save_pack_data）。register() 时挂上。
+_PACK_SAVE = None
 
 
 def set_pack_sync(fn) -> None:
-    """设置卷同步回调（None = 不同步）。register() 时挂 store.sync_pack_file。"""
+    """兼容旧钩子（None = 不同步）。register() 时挂 store.sync_pack_file。"""
     global _PACK_SYNC
     _PACK_SYNC = fn
+
+
+def set_pack_save(fn) -> None:
+    """设置 DB 真源写入回调（None = 未挂，回退写 JSON 文件）。"""
+    global _PACK_SAVE
+    _PACK_SAVE = fn
 
 
 def _json_save(path: Path, data) -> None:
     import json
 
     path = Path(path)
+    # v0.69.0：pools/ 下的角色卷直接写 DB，不再落 JSON 文件——JSON 退为只读底稿/导出格式。
+    if path.parent.name == "pools" and _PACK_SAVE is not None:
+        try:
+            _PACK_SAVE(data)
+            return
+        except Exception:
+            logger.error(f"[{PLUGIN_NAME}] 卷写入 DB 失败 {path.name}\n"
+                         f"{traceback.format_exc()}")
+            raise  # 真源写失败必须让 handler 报错，不能静默回落文件造成双源不一致
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    # 只同步 pools/ 下的角色卷；works_meta.json 等不进新表
+    # 兼容：无 DB 钩子时（早期初始化 / 独立工具）仍按旧方式同步
     if _PACK_SYNC is not None and path.parent.name == "pools":
         try:
             _PACK_SYNC(path)
@@ -200,48 +234,45 @@ def _rename_pack_file(plugin, old_key: str, new_key: str, title: str) -> None:
 
 
 def migrate_pack_collapse(plugin) -> dict:
-    """卷收敛迁移（v0.68.0，启动时跑一次、幂等，JSON 层）。
+    """卷收敛迁移（v0.68.0，幂等；v0.69.0 DB 真源后改在 DB 上做）。
 
     非标准卷（历史导入的 wuthering_waves / gal / demo / imported…）按条目
     类型并入固定类型卷（anime/game/other + 自定义类型）；gal 一次性并入游戏；
-    同 id 冲突保留资产分高的一份；原卷文件整体移入 data/_trash/<时间戳>/
-    备份后从 pools/ 消失。只动 JSON——随后的 migrate_relational 会按合并后
-    的文件重建新表（stale 卷记录由 main 侧 prune_packs 清理）。
+    同 id 冲突保留资产分高的一份；旧卷的 packs 记录由 `delete_pack` 清掉
+    （角色行随 save_pack_data 重写挂到新卷）。旧 JSON 底稿原地冻结、不删不动。
+
+    前置条件：`migrate_relational` 已把老用户 JSON 灌进 DB。DB 为空时直接返回
+    （首启灌库还没做，交给调用方排序）。
     """
-    pools_dir = _pools_dir(plugin)
-    if not pools_dir.is_dir():
+    store_obj = getattr(plugin, "_store", None)
+    if store_obj is None or not hasattr(store_obj, "load_packs"):
+        return {"merged": 0, "removed_packs": []}
+    packs = store_obj.load_packs()
+    if not packs:
         return {"merged": 0, "removed_packs": []}
     types = load_type_registry(plugin)
     canonical = {t["key"] for t in types}
     titles = {t["key"]: t["title"] for t in types}
-    files: dict = {}
-    for f in sorted(pools_dir.glob("*.json")):
-        try:
-            d = _json_load(f)
-        except Exception:
-            continue
-        if not isinstance(d, dict) or not isinstance(d.get("entries"), list):
-            continue
-        key = str(d.get("pack") or f.stem).strip()
-        files[key] = (f, d)
+    # 卷名 → 卷 dict（DB 已是真源）
+    files: dict = {p["pack"]: dict(p) for p in packs}
     merged_total, removed_packs = 0, []
-    # 1) 标准卷内的 gal → game 重写（normalize 也会兜，历史文件就地归一）
-    for key in list(files.keys()):
+    # 1) 标准卷内的 gal → game 重写
+    for key in list(files):
         if key not in canonical:
             continue
-        f, d = files[key]
+        d = files[key]
         changed = False
         for raw in d["entries"]:
             if isinstance(raw, dict) and str(raw.get("category") or "").strip().lower() == "gal":
                 raw["category"] = "game"
                 changed = True
         if changed:
-            _json_save(f, d)
+            store_obj.save_pack_data(d)
     # 2) 非标准卷 → 按条目类型并入标准卷
-    for key in list(files.keys()):
+    for key in list(files):
         if key in canonical:
             continue
-        f, d = files[key]
+        d = files[key]
         if not d.get("enabled", True):
             logger.info(f"[{PLUGIN_NAME}] 卷收敛：停用卷 {key} 的角色一并并入"
                         "（如需排除请用标签或关闭 verified）")
@@ -253,16 +284,14 @@ def migrate_pack_collapse(plugin) -> dict:
                 cat = "other"
             raw["category"] = cat
             if cat not in files:
-                files[cat] = (pools_dir / f"{cat}.json", {
-                    "pack": cat, "title": titles.get(cat, cat),
-                    "enabled": True, "entries": []})
-            target = files[cat][1]
+                files[cat] = {"pack": cat, "title": titles.get(cat, cat),
+                              "enabled": True, "entries": []}
+            target = files[cat]
             cid = str(raw.get("id") or "").strip()
             dup_idx = next((i for i, r in enumerate(target["entries"])
                             if isinstance(r, dict)
                             and str(r.get("id") or "").strip() == cid), None) if cid else None
             if dup_idx is not None:
-                # 同 id 冲突（理论不会有，全库唯一）：保留资产分高的一份
                 if pool.asset_score(raw, 0) > pool.asset_score(
                         target["entries"][dup_idx], 0):
                     target["entries"][dup_idx] = raw
@@ -270,18 +299,15 @@ def migrate_pack_collapse(plugin) -> dict:
             target["entries"].append(raw)
             merged_total += 1
         removed_packs.append(key)
-    # 3) 写回标准卷（只在动过时）+ 原卷文件进回收站
+    # 3) 写回标准卷（DB，move=True 允许跨卷改 pack_id）+ 删旧卷记录
     for key in canonical:
-        if key not in files:
-            continue
-        f, d = files[key]
-        _json_save(f, d)
+        if key in files:
+            store_obj.save_pack_data(files[key], move=True)
     for key in removed_packs:
-        f, _d = files[key]
-        _trash_files(plugin, [f"pools/{f.name}"])
+        store_obj.delete_pack(key)
     if removed_packs:
         logger.info(f"[{PLUGIN_NAME}] 卷收敛完成：并入 {merged_total} 个角色，"
-                    f"移除卷 {removed_packs}（原文件在回收站）")
+                    f"移除卷 {removed_packs}（旧 JSON 底稿原地冻结）")
     return {"merged": merged_total, "removed_packs": removed_packs}
 
 
@@ -525,90 +551,61 @@ async def h_pools(plugin) -> dict:
 
 
 async def h_save_entry(plugin) -> dict:
+    """单条角色保存（v0.69.0 DB 真源，卷维度删：pack 即 category）。
+
+    旧版在 JSON 层做「扫所有卷找 owner → 摘原卷 → 写目标卷」三步移动；
+    DB 真源后 char_id 全库唯一、category 就是那一列——移动=改 category，
+    一步 `store.save_entry` 完成，且保留 merge_saved_entry 的资产合并语义
+    （strategy.refs / cover / profile / avatar 不丢）。
+    """
     body = await _body()
     pack_name = str(body.get("pack") or "").strip()
     entry = body.get("entry")
     if not pack_name or not isinstance(entry, dict):
         return err("缺少 pack 或 entry 字段")
-    # v0.68.0：卷收敛后 pack = 类型（key），只接受类型注册表里的值——堵住
-    # 「随手 POST 一个新卷名」再造出一次性卷的口子
     if pack_name not in {t["key"] for t in load_type_registry(plugin)}:
         return err(f"未知类型：{pack_name}（请先在「类型管理」里添加）")
     normalized = pool.normalize_entry(entry, pack_name)
     if normalized is None:
         return err("条目不完整：id / name / tags_en 必填")
-    loaded = _load_pack_file(plugin, pack_name)
-    if loaded is None:
-        return err(f"卷不存在：{pack_name}")
-    path, data = loaded
-    entries = data.get("entries") if isinstance(data.get("entries"), list) else []
-    # v0.67.0：跨卷移动支持。旧版查重扫「除目标卷外的所有卷」，而角色在新表里
-    # 全库唯一（char_id UNIQUE）——改卷保存时它自己在**原卷**的行必然被扫出来，
-    # 报「id 与卷 X 中的角色重复」：所有跨卷移动全被拦死，且错误里点的卷名是
-    # 角色当前所在卷（用户去目标卷里找当然「搜不到」）。
-    # 现语义：id 已在别的卷 = 这次保存是「移动」——从原卷摘除并写入目标卷。
-    owner_pack = ""
-    owner_raw = None
-    for pack in pool.load_packs(_pools_dir(plugin), logger):
-        if pack["pack"] == pack_name:
-            continue
-        for raw in pack["entries"]:
-            other = pool.normalize_entry(raw, pack["pack"])
-            if other and other["id"] == normalized["id"]:
-                owner_pack = pack["pack"]
-                owner_raw = raw
-                break
-        if owner_pack:
-            break
-    replaced = False
-    saved = normalized
-    for i, raw in enumerate(entries):
-        existing = pool.normalize_entry(raw, pack_name)
-        if existing and existing["id"] == normalized["id"]:
-            # 表单只托管部分字段：整体替换会静默清空 strategy.refs / cover，
-            # 用户「改个名字保存」后参考图就全不见了（v0.9.10 修复）。
-            entries[i] = pool.merge_saved_entry(raw, normalized)
-            saved = entries[i]
-            replaced = True
-            break
-    # v0.67.2：移动 / JSON 级重复自愈都必须带上旧条目的完整字段——表单只托管
-    # 部分字段（strategy 重建、cover / profile / avatar 不托管），v0.67.0 直接
-    # append normalized 把参考图绑定 / 头像 / 资料 / 封面全丢了（用户实测：
-    # 鸣潮卷移到游戏卷后资料全没）。merge_saved_entry 与同卷编辑同一套合并语义。
-    merged = normalized
-    if isinstance(owner_raw, dict):
-        merged = pool.merge_saved_entry(owner_raw, normalized)
+    st = getattr(plugin, "_store", None)
+    if st is None or not hasattr(st, "save_entry"):
+        return err("角色库尚未初始化（DB 不可用）")
+    existing = st.find_entry(normalized["id"])
+    merged = pool.merge_saved_entry(existing, normalized) if existing else normalized
     if not str(merged.get("added_at") or "").strip():
         try:
             merged["added_at"] = plugin._today()
         except Exception:
             merged["added_at"] = time.strftime("%Y-%m-%d")
-    moved_from = ""
-    if owner_pack:
-        # 原卷还有同 id（移动 / 历史原因造成的 JSON 级重复）：先摘原卷并落盘
-        # （同步钩子删掉旧表行），再写目标卷（同步钩子按新卷重建行）。
-        # 顺序不能反——char_id 全库唯一 + 冲突「先同步的卷胜」，反了行会留在
-        # 旧卷、界面上角色纹丝不动。
-        loaded_old = _load_pack_file(plugin, owner_pack)
-        if loaded_old is not None:
-            opath, odata = loaded_old
-            oentries = (odata.get("entries")
-                        if isinstance(odata.get("entries"), list) else [])
-            kept_old = [r for r in oentries
-                        if not (isinstance(r, dict) and str(r.get("id") or "").strip()
-                                == normalized["id"])]
-            if len(kept_old) != len(oentries):
-                odata["entries"] = kept_old
-                _json_save(opath, odata)
-                moved_from = owner_pack
-                logger.info(f"[{PLUGIN_NAME}] 角色跨卷移动：{normalized['id']}"
-                            f" {owner_pack} -> {pack_name}")
-    if not replaced:
-        entries.append(merged)
-        saved = merged
-    data["entries"] = entries
-    _json_save(path, data)
-    return ok({"replaced": replaced, "moved_from": moved_from, "entry": saved})
+    res = st.save_entry(merged, pack_name)
+    if res.get("moved_from"):
+        logger.info(f"[{PLUGIN_NAME}] 角色跨类型移动：{normalized['id']}"
+                    f" {res['moved_from']} -> {pack_name}")
+    return ok({"replaced": res["replaced"], "moved_from": res["moved_from"],
+               "entry": res["entry"]})
+
+
+async def h_export_pack(plugin) -> dict:
+    """v0.69.0：DB→JSON 导出（备份 / 分享用）。
+
+    JSON 在这里只是**导出格式**，不是真源——与 `/pools/import` 对称：导入是
+    JSON→DB 的边界转换，导出是 DB→JSON 的边界转换。返回与 seed_pool.json
+    同构的卷数组（pack/title/enabled/entries），调用方可存文件或分享。
+    可选 body.type：只导出指定类型卷。
+    """
+    store_obj = getattr(plugin, "_store", None)
+    if store_obj is None or not hasattr(store_obj, "export_packs"):
+        return err("角色库尚未初始化（DB 不可用）")
+    packs = store_obj.export_packs()
+    try:
+        body = await _body()
+        only = str(body.get("type") or "").strip()
+        if only:
+            packs = [p for p in packs if str(p.get("pack") or "") == only]
+    except Exception:
+        pass  # 无 body / GET 调用时导出全部
+    return ok({"packs": packs, "total": sum(len(p.get("entries") or []) for p in packs)})
 
 
 async def h_import_pack(plugin) -> dict:
@@ -842,7 +839,8 @@ async def h_category_rename(plugin) -> dict:
         if t.get("key") == key:
             t["key"], t["title"] = new_key, name
     _save_type_registry(plugin, custom)
-    _rename_pack_file(plugin, key, new_key, name)
+    # v0.69.0 DB 真源：store.rename_pack 已同步改卷名 + 角色 category，
+    # 旧 JSON 底稿原地冻结，不再做文件改名/回收站搬运。
     if plugin._store:
         plugin._store.rename_pack(key, new_key, name)
     return ok({"items": load_type_registry(plugin), "renamed": new_key})
@@ -859,10 +857,15 @@ async def h_category_delete(plugin) -> dict:
     if cur.get("builtin"):
         return err("内置类型（动漫 / 游戏 / 其他）不能删除")
     count = 0
-    for pack in pool.load_packs(_pools_dir(plugin), logger):
-        if pack["pack"] == key:
-            count = len(pack["entries"])
-            break
+    st = getattr(plugin, "_store", None)
+    if st is not None and hasattr(st, "load_pack_data"):
+        d = st.load_pack_data(key)
+        count = len(d["entries"]) if d else 0
+    else:
+        for pack in pool.load_packs(_pools_dir(plugin), logger):
+            if pack["pack"] == key:
+                count = len(pack["entries"])
+                break
     if count:
         return err(f"类型「{cur['title']}」还有 {count} 个角色，"
                    "请先在编辑抽屉里改类型移走后再删除")
@@ -872,9 +875,7 @@ async def h_category_delete(plugin) -> dict:
         custom = []
     custom = [t for t in custom if isinstance(t, dict) and t.get("key") != key]
     _save_type_registry(plugin, custom)
-    fp = Path(plugin._data_dir) / "pools" / f"{key}.json"
-    if fp.is_file():
-        _trash_files(plugin, [f"pools/{key}.json"])
+    # v0.69.0：旧 JSON 底稿原地冻结，不再移回收站；DB 侧删空卷记录即可
     if plugin._store:
         plugin._store.delete_pack(key)
     return ok({"items": load_type_registry(plugin), "deleted": key})
@@ -3237,9 +3238,13 @@ async def h_works_discover(plugin) -> dict:
 
 def _discover_add_core(plugin, pack_name: str, rows: list) -> dict:
     """勾选草稿批量入库（同步 core，脱离 quart 可直测）。"""
+    # v0.69.0：DB 真源下 _load_pack_file 对空 category 也返回结构，
+    # 「目标是否存在」改按类型注册表判定。
+    if pack_name not in {t["key"] for t in load_type_registry(plugin)}:
+        return {"error": "类型不存在：" + pack_name}
     loaded = _load_pack_file(plugin, pack_name)
     if loaded is None:
-        return {"error": "卷不存在：" + pack_name}
+        return {"error": "类型不存在：" + pack_name}
     path, data = loaded
     entries = data.get("entries") if isinstance(data.get("entries"), list) else []
     existing_ids = set()
@@ -6076,7 +6081,10 @@ def _profile_import_new_entry(plugin, item: dict, pack_name: str,
         "name": item["name"],
         "series": item.get("series") or series_hint,
         "pack": pack_name,
-        "category": item.get("category") or "other",
+        # v0.69.0：卷维度删、category 是唯一分组——新建角色归入目标类型
+        # （pack_name），否则 category=other 会被随后 other 卷的整卷写入当
+        # 「消失角色」删掉（实测新建角色秒丢）。
+        "category": pack_name,
         "tier": inc.get("tier") or "",
         "strategy": {"type": "base"},
         "tags_en": item["tags_en"],
@@ -6252,9 +6260,15 @@ async def h_profile_import(plugin) -> dict:
                         "written": written, "skipped": skipped})
 
     if dirty:
+        st = getattr(plugin, "_store", None)
         for name in dirty:
             path, data = idx["packs"][name]
-            _json_save(path, data)
+            # v0.69.0：显式走 store 写 DB，不依赖全局 _PACK_SAVE 钩子
+            # （钩子可能在 profile import 之前被别的流程重置，导致新建角色丢失）
+            if st is not None and hasattr(st, "save_pack_data"):
+                st.save_pack_data(data)
+            else:
+                _json_save(path, data)
     return ok({
         "created": created, "updated": updated,
         "written": written_total, "skipped_fields": skipped_total,
@@ -6720,12 +6734,15 @@ def register(plugin) -> None:
         logger.warning(f"[{PLUGIN_NAME}] 自定义素材 provider 挂载失败\n"
                        f"{traceback.format_exc()}")
     # v0.25.0：读路径已切新表，写 JSON 后必须同步，否则会出现「改完看不到」
+    # v0.69.0：真源切 DB——写入直接 save_pack_data，不再经过 JSON 文件
     try:
         store_obj = getattr(plugin, "_store", None)
         set_pack_sync(getattr(store_obj, "sync_pack_file", None)
                       if store_obj is not None else None)
+        set_pack_save(getattr(store_obj, "save_pack_data", None)
+                      if store_obj is not None else None)
     except Exception:
-        logger.warning(f"[{PLUGIN_NAME}] 卷同步钩子设置失败\n"
+        logger.warning(f"[{PLUGIN_NAME}] 卷写入钩子设置失败\n"
                        f"{traceback.format_exc()}")
     routes = [
         ("/pools", h_pools, ["GET"]),
@@ -6759,6 +6776,7 @@ def register(plugin) -> None:
         ("/categories/rename", h_category_rename, ["POST"]),
         ("/categories/delete", h_category_delete, ["POST"]),
         ("/pools/import", h_import_pack, ["POST"]),
+        ("/pools/export", h_export_pack, ["GET", "POST"]),
         # v0.29.0：角色详情页印象语——只改 quote/quotes 的轻量保存 + 逐句校对
         ("/pools/quote_save", h_quote_save, ["POST"]),
         ("/quote_check", h_quote_check, ["POST"]),

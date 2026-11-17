@@ -131,6 +131,8 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
     pools = root / "pools"
     pools.mkdir()
     st = store.Store(root / "t.db")
+    # v0.69.0 DB 真源：_json_save 写 pools 卷走此钩子（生产由 register 挂）
+    webui_api.set_pack_save(st.save_pack_data)
     plugin = FakePlugin(root, st)
     game_path = pools / "game.json"
     other_path = pools / "other.json"
@@ -144,6 +146,8 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
     _dump(other_path, "other", [
         E("nanally", "娜娜莉", "异环"),
     ])
+    # v0.69.0 DB 真源：_load_pack_file 走 store，测试须先灌库（生产由 initialize 做）
+    st.migrate_relational(pools, root)
     payload = json.dumps({"entries": [
         {"id": "mint", "bio": "新简介", "height": "152cm", "tagline": "卡面一句",
          "quotes": "新台词一\n新台词二", "tier": "S"},
@@ -180,7 +184,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
                           {"text": payload, "conflict": "skip"}))
     check("skip 模式执行成功", r["status"] == "ok", str(r)[:200])
     d = r["data"]
-    mint = _entry(game_path, "mint")
+    mint = st.find_entry("mint")   # v0.69.0 DB 真源：执行后读 DB
     check("skip 不动已有简介", mint["profile"]["bio"] == "旧简介", str(mint))
     check("skip 补上空的身高", mint["profile"]["height"] == "152cm")
     check("skip 补上空的 tagline（卡面一句话简介）",
@@ -190,7 +194,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
     check("资产字段原样保留",
           mint["strategy"] == assets and mint["cover"] == "cover.png"
           and mint["verified"] is True, str(mint))
-    nanally = _entry(other_path, "nanally")
+    nanally = st.find_entry("nanally")
     check("另一卷也按名字匹配写入", nanally["profile"].get("cv") == "宋媛媛")
     names = [e["id"] for e in _load(pools / "imported.json")["entries"]] \
         if (pools / "imported.json").exists() else []
@@ -204,7 +208,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
                            {"text": payload, "conflict": "overwrite",
                             "create_missing": True, "pack": "异环卷"}))
     d2 = r2["data"]
-    mint = _entry(game_path, "mint")
+    mint = st.find_entry("mint")   # v0.69.0 DB 真源：执行后读 DB
     check("overwrite 覆盖简介", mint["profile"]["bio"] == "新简介", str(mint))
     check("overwrite 替换印象语",
           mint.get("quotes") == ["新台词一", "新台词二"]
@@ -213,16 +217,19 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
     check("overwrite 仍不碰资产字段",
           mint["strategy"] == assets and mint["cover"] == "cover.png")
     check("create_missing 建出新角色", d2["created"] >= 1, str(d2["created"]))
-    new_pack = _load(pools / "异环卷.json")
-    zaowu = next(e for e in new_pack["entries"] if e["name"] == "早雾")
+    # v0.69.0：新建角色写 DB，不再落 JSON 文件；从全库按名字找
+    zaowu_rows = st._conn.execute(
+        "SELECT char_id FROM characters WHERE name='早雾'").fetchall()
+    check("新建角色进 DB", len(zaowu_rows) == 1, str([dict(r) for r in zaowu_rows]))
+    zaowu = st.find_entry(zaowu_rows[0]["char_id"]) if zaowu_rows else {}
     check("新建条目带上 tags_en / 资料 / 作品",
           zaowu["tags_en"] == "1girl, twintails"
           and zaowu["profile"].get("bio") == "小霸王"
           and zaowu["series"] == "异环", str(zaowu))
     check("新建条目未验证（待人工过目）", zaowu["verified"] is False)
     check("新建条目有入库日期", bool(zaowu.get("added_at")))
-    check("缺 tags_en 的条目不建", not any(e["name"] == "无名氏"
-                                     for e in new_pack["entries"]))
+    check("缺 tags_en 的条目不建",
+          st._conn.execute("SELECT 1 FROM characters WHERE name='无名氏'").fetchone() is None)
 
     # ---------- 5) 维度开关 ----------
     payload2 = json.dumps([{"id": "mint", "bio": "只该写简介", "tier": "D",
@@ -230,7 +237,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
     asyncio.run(_call(webui_api.h_profile_import, plugin,
                       {"text": payload2, "conflict": "overwrite",
                        "fields": ["bio"]}))
-    mint = _entry(game_path, "mint")
+    mint = st.find_entry("mint")   # v0.69.0 DB 真源：执行后读 DB
     check("未启用的维度绝不写库", mint["profile"]["bio"] == "只该写简介"
           and mint.get("tier") == "S" and mint.get("quotes") == ["新台词一", "新台词二"],
           str(mint))
@@ -246,8 +253,8 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
     asyncio.run(_call(webui_api.h_profile_import, plugin,
                       {"text": payload3, "conflict": "overwrite",
                        "only": [key_mint]}))
-    check("勾选的写了", _entry(game_path, "mint")["profile"].get("memo") == "勾选")
-    check("没勾的不动", "memo" not in (_entry(other_path, "nanally")["profile"]))
+    check("勾选的写了", st.find_entry("mint")["profile"].get("memo") == "勾选")
+    check("没勾的不动", "memo" not in (st.find_entry("nanally")["profile"]))
 
     # ---------- 7) 全空的导入被拒 ----------
     empty = asyncio.run(_call(webui_api.h_profile_import, plugin,

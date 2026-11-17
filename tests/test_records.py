@@ -387,6 +387,9 @@ def test_first_char_in_records(tmp: Path):
 def test_discover_add_core(tmp: Path):
     """v0.18.0：作品发现入库 core——草稿 unverified、跨卷查重、坏条目丢弃。"""
     st, plugin = fresh(tmp)
+    # v0.69.0 DB 真源：灌库（测试用 anime.json 造数据）+ 挂写钩子
+    api.set_pack_save(st.save_pack_data)
+    st.migrate_relational(tmp / "pools", tmp)
     rows = [
         {"id": "new1", "name": "草稿甲", "series": "新作", "category": "gal",
          "tier": "A", "tags_en": "black hair, purple eyes, miko", "color": "#B28DCC"},
@@ -394,11 +397,10 @@ def test_discover_add_core(tmp: Path):
         {"id": "bad", "name": "缺tags", "series": "新作"},
     ]
     r = api._discover_add_core(plugin, "anime", rows)
-    check("草稿入库计数（含跨卷查重）", r == {"added": 1, "dup": 1}, str(r))
-    loaded = api._load_pack_file(plugin, "anime")
-    data = json.loads(loaded[0].read_text(encoding="utf-8"))
-    new_row = [e for e in data["entries"] if e["id"] == "new1"]
-    check("入库条目存在且 unverified", new_row and new_row[0]["verified"] is False)
+    check("草稿入库计数（含跨类型查重）", r == {"added": 1, "dup": 1}, str(r))
+    # v0.69.0 DB 真源：入库直接写 DB，不再落 JSON 文件
+    new_row = st.find_entry("new1")
+    check("入库条目存在且 unverified", new_row and new_row["verified"] is False)
     r2 = api._discover_add_core(plugin, "不存在卷", rows)
     check("卷不存在报错", "error" in r2)
     st.close()

@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
-"""卷收敛 / 类型注册表 / 标签过滤守卫（v0.68.0，可直接运行，退出码即结论）。
+"""卷收敛 / 类型注册表 / 标签过滤守卫（v0.68.0；v0.69.0 DB 真源改写，退出码即结论）。
 
 用户口径：①卷收敛为「类型」，类型可自定义添加（内置 动漫/游戏/其他）；
 ②gal 归入游戏；③标签替代卷的启停粒度（停用标签的角色不入抽卡）；
-④作品（series）永不受限——新表 scope 门禁移除，任何新作品都可见。
-守卫点：
-  ① migrate_pack_collapse：非标准卷按条目类型并入 + gal→game + 回收站备份 +
-    幂等；同 id 冲突保留资产分高的一份；
+④作品（series）永不受限。
+v0.69.0 真源切换：卷收敛改在 DB 上做（先灌库再收敛），旧 JSON 底稿原地冻结
+不读不写不进回收站。守卫点相应改为断言 DB：
+  ① migrate_pack_collapse：非标准卷按条目类型并入 + gal→game + 幂等 +
+    旧 JSON 冻结不动；同 id 冲突保留资产分高的一份；
   ② 类型注册表：默认三类型、添加 / 改名 / 删除（空类型才可删、内置不可动）；
-  ③ store.rename_pack / delete_pack / prune_packs；
+  ③ store.rename_pack（含角色 category 同步）/ delete_pack / prune_packs；
   ④ candidates_for 的 disabled_tags 过滤。
 """
 import asyncio
@@ -58,6 +59,19 @@ def cat_of(path: Path, cid: str):
                  if e.get("id") == cid), None)
 
 
+def db_pack(st, name: str) -> dict:
+    return st.load_pack_data(name) or {"entries": []}
+
+
+def db_ids(st, name: str) -> list:
+    return [e["id"] for e in db_pack(st, name)["entries"]]
+
+
+def db_cat(st, name: str, cid: str):
+    return next((e.get("category") for e in db_pack(st, name)["entries"]
+                 if e["id"] == cid), None)
+
+
 async def call(handler, payload, plugin):
     async def fake_body():
         return payload
@@ -89,41 +103,50 @@ def test_collapse_migration(td: Path):
         {"id": "nomax", "name": "无类型", "series": "某作",
          "tags_en": "1girl", "strategy": {}}], title="演示卷")
 
-    plugin = SimpleNamespace(_data_dir=td, _store=None,
+    st = store.Store(td / "waifu.db")
+    plugin = SimpleNamespace(_data_dir=td, _store=st,
                              _today=lambda s: "2026-11-17")
-    res = api.migrate_pack_collapse(plugin)
-    check("迁移并入了非标准卷角色", res["merged"] == 3, str(res))
-    check("移除了全部非标准卷",
-          sorted(res["removed_packs"]) ==
-          ["demo", "gal", "wuthering_waves"], str(res))
-    for f in ("wuthering_waves.json", "gal.json", "demo.json"):
-        check(f"{f} 已离开 pools/", not (pools / f).is_file())
-    check("game.json 收下鸣潮卷角色", "moning" in ids_of(pools / "game.json"))
-    check("gal 角色并入游戏卷且类型改写",
-          "atri" in ids_of(pools / "game.json")
-          and cat_of(pools / "game.json", "atri") == "game")
-    check("无类型角色落入其他卷",
-          "nomax" in ids_of(pools / "other.json")
-          and cat_of(pools / "other.json", "nomax") == "other")
-    check("动漫卷不受影响", "miku" in ids_of(pools / "anime.json"))
-    # 回收站备份
-    trash_files = [str(p) for p in (td / "_trash").rglob("wuthering_waves.json")]
-    check("原卷文件在回收站可找回", len(trash_files) == 1, str(trash_files))
-    # 幂等：第二次运行不再有合并
-    res2 = api.migrate_pack_collapse(plugin)
-    check("重复迁移幂等", res2["merged"] == 0 and res2["removed_packs"] == [],
-          str(res2))
+    try:
+        # v0.69.0：真源在 DB、卷维度删。灌库时按角色**自身 category** 归位：
+        #   moning(category=game)→game、miku(anime)→anime；
+        #   atri(category=gal)→gal、nomax(无 category)→卷名 demo 兜底；
+        # 卷收敛再把 gal→game、demo(非标准)→other。wuthering_waves 卷的角色
+        # 自带 category=game，灌库那一刻就归到 game，不产生非标准卷。
+        st.migrate_relational(pools, td)
+        check("灌库即按 category 归位（鸣潮角色进 game）", "moning" in db_ids(st, "game"))
+        before = {f.name: f.read_text(encoding="utf-8") for f in pools.glob("*.json")}
+        res = api.migrate_pack_collapse(plugin)
+        check("卷收敛合并 gal/demo 两个非标准类型", res["merged"] == 2, str(res))
+        check("移除非标准类型", sorted(res["removed_packs"]) == ["demo", "gal"], str(res))
+        check("收敛后非标准类型从 DB 消失",
+              db_pack(st, "demo")["entries"] == []
+              and db_pack(st, "gal")["entries"] == [])
+        check("gal 角色并入游戏且类型改写",
+              "atri" in db_ids(st, "game") and db_cat(st, "game", "atri") == "game")
+        check("无类型角色落入其他类型",
+              "nomax" in db_ids(st, "other") and db_cat(st, "other", "nomax") == "other")
+        check("动漫类型不受影响", "miku" in db_ids(st, "anime"))
+        # 旧 JSON 底稿原地冻结：字节不变、不进回收站
+        after = {f.name: f.read_text(encoding="utf-8") for f in pools.glob("*.json")}
+        check("旧 JSON 底稿冻结不动（不删不改不进回收站）",
+              after == before and not (td / "_trash").exists(), str(after.keys()))
+        # 幂等：第二次运行不再合并
+        res2 = api.migrate_pack_collapse(plugin)
+        check("重复迁移幂等", res2["merged"] == 0 and res2["removed_packs"] == [],
+              str(res2))
 
-    # 同 id 冲突：保留资产分高的一份（带 cover 的胜出）
-    dump(pools / "zstray.json", "zstray", [
-        {"id": "old_yh", "name": "旧角色加强版", "series": "鸣潮",
-         "category": "game", "tags_en": "1girl", "cover": "refs/x.png",
-         "strategy": {}}], title="游散卷")
-    api.migrate_pack_collapse(plugin)
-    kept = next(e for e in read(pools / "game.json")["entries"]
-                if e["id"] == "old_yh")
-    check("同 id 冲突保留资产分高的一份", kept.get("cover") == "refs/x.png",
-          str(kept))
+        # 同 id 冲突：保留资产分高的一份（带 cover 的胜出）→ 直接写 DB
+        st.save_pack_data({"pack": "zstray", "title": "游散卷", "enabled": True,
+                           "entries": [{"id": "old_yh", "name": "旧角色加强版",
+                                        "series": "鸣潮", "category": "game",
+                                        "tags_en": "1girl", "cover": "refs/x.png",
+                                        "strategy": {}}]})
+        api.migrate_pack_collapse(plugin)
+        kept = next(e for e in db_pack(st, "game")["entries"] if e["id"] == "old_yh")
+        check("同 id 冲突保留资产分高的一份", kept.get("cover") == "refs/x.png",
+              str(kept))
+    finally:
+        st.close()
 
 
 def test_type_registry(td: Path):
@@ -156,18 +179,16 @@ def test_type_registry(td: Path):
         res = asyncio.run(call(api.h_category_rename,
                                {"key": "小说", "name": "轻小说"}, plugin))
         check("自定义类型改名成功", res["status"] == "ok", str(res))
-        check("卷文件随改名移动",
-              (pools / "轻小说.json").is_file() and not (pools / "小说.json").exists())
-        check("改名后条目保留",
-              "b1" in ids_of(pools / "轻小说.json"))
-        prow = st._conn.execute(
-            "SELECT name, title FROM packs WHERE name='轻小说'").fetchone()
-        check("新表 packs 行原位改名", prow and prow["title"] == "轻小说",
-              str(dict(prow) if prow else None))
+        check("DB 卷改名后条目保留", "b1" in db_ids(st, "轻小说"))
+        check("旧卷名从 DB 消失", db_pack(st, "小说")["entries"] == [])
+        check("改名后角色 category 同步改成新键",
+              db_cat(st, "轻小说", "b1") == "轻小说")
+        check("旧 JSON 底稿冻结（改名不动文件）",
+              (pools / "小说.json").is_file())
         cres = st._conn.execute(
-            "SELECT p.name FROM characters c JOIN packs p ON p.id=c.pack_id"
-            " WHERE c.char_id='b1'").fetchone()
-        check("角色仍挂在新命名的卷上", cres and cres["name"] == "轻小说",
+            "SELECT category FROM characters WHERE char_id='b1'").fetchone()
+        check("角色 category 已改成新键（卷维度删，直接存 category）",
+              cres and cres["category"] == "轻小说",
               str(dict(cres) if cres else None))
         res2 = asyncio.run(call(api.h_category_rename,
                                 {"key": "anime", "name": "动画"}, plugin))
@@ -203,15 +224,10 @@ def test_prune_and_tags(td: Path):
             title="旧卷")
         st.sync_pack_file(pools / "game.json")
         st.sync_pack_file(pools / "stale.json")
-        st.sync_pack_file(pools / "game.json")   # 收敛后 game 重复同步重建角色
-        res = st.prune_packs({"game"})
-        check("prune_packs 移除 stale 卷", "stale" in res["removed"], str(res))
-        check("stale 卷角色行已清（随后续 sync 重建到新卷）",
-              st._conn.execute("SELECT 1 FROM characters WHERE char_id='gone1'")
-              .fetchone() is None)
-        check("keep 卷角色不受影响",
-              st._conn.execute("SELECT 1 FROM characters WHERE char_id='keep1'")
-              .fetchone() is not None)
+        # v0.69.0 卷维度删：prune_packs 空操作（无 packs 表可剪）。
+        # 整卷替换语义下最后一次 sync 决定该 category 内容——这里只守卫空操作，
+        # 具体角色归属由 test_db_source / 上面 collapse 场景覆盖。
+        check("prune_packs 空操作（无卷表可剪）", st.prune_packs({"game"}) == {"removed": []})
 
         # 标签过滤：命中停用标签的角色不入候选
         packs = [

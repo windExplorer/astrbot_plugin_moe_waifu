@@ -106,29 +106,36 @@ class MoeWaifuPlugin(Star):
         try:
             self._data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
             bundled = Path(__file__).resolve().parent / "seed_pool.json"
-            pool.install_seed_pool(self._data_dir / "pools", bundled, logger)
-            # v0.68.0：卷收敛（JSON 层，先于 Store 迁移）——非标准卷按条目类型
-            # 并入固定类型卷（anime/game/other + 自定义），原卷文件进回收站备份；
-            # stale 卷记录在 migrate_relational 之后 prune_packs 清理。
+            # v0.69.0：角色库真源切到 SQLite。启动顺序（关键，别乱动）：
+            #   1) 先建 Store
+            #   2) 老用户一次性把冻结的旧 JSON 底稿灌进 DB（DB 非空则跳过，
+            #      绝不二次覆盖真源）
+            #   3) DB 版卷收敛 / prune
+            #   4) 种子对比补新（直接读写 DB）
+            #   5) 挂读 provider + 写 save 钩子
+            self._store = store.Store(self._data_dir / "waifu.db")
+            try:
+                mig = self._store.migrate_relational(
+                    self._data_dir / "pools", self._data_dir, logger=logger,
+                    only_if_empty=True)
+                if mig.get("skipped_packs") == "db_nonempty":
+                    logger.info(f"[{PLUGIN_NAME}] 角色库已是 DB 真源，跳过 JSON 灌库")
+                else:
+                    logger.info(f"[{PLUGIN_NAME}] 旧角色库 JSON 已一次性灌入 DB"
+                                f"（characters={mig.get('characters')}）")
+            except Exception:
+                logger.error(f"[{PLUGIN_NAME}] 关系模型迁移失败\n{traceback.format_exc()}")
+            # DB 版卷收敛（非标准卷按类型并入，旧 JSON 底稿冻结不动）
             try:
                 from . import webui_api as _wa
                 res = _wa.migrate_pack_collapse(self)
                 if res.get("removed_packs"):
                     logger.info(f"[{PLUGIN_NAME}] 卷收敛完成：并入 "
                                 f"{res.get('merged')} 个角色，移除卷 "
-                                f"{res.get('removed_packs')}（原文件在回收站）")
+                                f"{res.get('removed_packs')}（旧 JSON 底稿冻结）")
             except Exception:
                 logger.error(f"[{PLUGIN_NAME}] 卷收敛迁移失败\n{traceback.format_exc()}")
-            self._store = store.Store(self._data_dir / "waifu.db")
-            # v0.24.0 关系模型迁移：幂等（v0.68.0 起纳入全部作品）。表已由
-            # Store.__init__ 建好；地基失败不能阻塞插件启动。
-            try:
-                self._store.migrate_relational(
-                    self._data_dir / "pools", self._data_dir, logger=logger)
-            except Exception:
-                logger.error(f"[{PLUGIN_NAME}] 关系模型迁移失败\n{traceback.format_exc()}")
-            # v0.68.0：卷收敛后清理不再存在的卷记录（其角色已随合并迁到类型卷，
-            # migrate_relational 刚按新卷重建过，这里只删 stale packs 行）。
+            # 清理不再存在的卷记录
             try:
                 from . import webui_api as _wa
                 keep = {t["key"] for t in _wa.load_type_registry(self)}
@@ -137,7 +144,15 @@ class MoeWaifuPlugin(Star):
                     logger.info(f"[{PLUGIN_NAME}] 卷收敛清理旧卷记录：{pruned['removed']}")
             except Exception:
                 logger.warning(f"[{PLUGIN_NAME}] stale 卷记录清理失败（忽略）\n{traceback.format_exc()}")
-            # v0.25.0：读路径切到新表（空表 / 异常时 pool 内部自动回退 JSON）
+            # 种子对比补新：DB 真源，读/写都走 store，旧 JSON 文件不碰
+            try:
+                pool.install_seed_pool(
+                    self._data_dir / "pools", bundled, logger,
+                    read_pack=self._store.load_pack_data,
+                    save_pack=self._store.save_pack_data)
+            except Exception:
+                logger.error(f"[{PLUGIN_NAME}] 种子补新失败\n{traceback.format_exc()}")
+            # 读路径：DB 真源（空表 / 异常时 pool 内部回退 JSON，仅极端兜底）
             try:
                 pool.set_packs_provider(self._store.load_packs)
             except Exception:

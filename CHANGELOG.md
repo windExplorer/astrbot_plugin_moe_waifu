@@ -2,6 +2,28 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.69.0 (2026-11-17)
+
+**角色库真源切到 SQLite，`packs` 卷维度彻底删除——角色只按 `category`（类型）存。**
+
+- **需求（用户）**：「一些数据没存数据库存 json，为什么不入库」→ 选定「角色库彻底改 DB 真源、去掉 pools/*.json 写入」；随后追加「卷这个维度应该删掉了，没有这个维度了」→ 选定「彻底删：角色只按 category 存，DB 内部不读写 pack_id/packs 表」。
+- **边界决策（用户拍板）**：① JSON 格式（seed_pool.json / 导入 / 导出）的 `pack` 字段**保留兼容**（值=category），只是内部 DB 按 category 存；② `pack_id` 列与 `packs` 表**物理保留但代码完全不读写**，老库零迁移风险；③ 老用户升级后旧 JSON 只读冻结、种子继续对比补新、保留 DB→JSON 导出接口。
+- **改动（store.py）**：
+  - `save_pack_data(data)` 按 `data["pack"]`（=category）归位，不再写 packs 表；`_upsert_character` 去掉 pack_id，分组只用 `category`。
+  - 灌库 `sync_pack_file` 传 `ignore_existing=True`（先到先得、后到的残留卷不洗掉先到者的 strategy/verified —— 实测不这么做会把富资产条目洗成空）。
+  - `load_packs` / `load_pack_data` 按 `category` 分组，不再 join packs 表；抽 `_row_to_entry` 公共装配。
+  - 新增 `find_entry` / `find_entry_category` / `save_entry`（单条跨类型移动，冲突即改 category）；`rename_pack` 直接改 characters.category；`delete_pack` / `prune_packs` 降为空操作（保留签名兼容）。
+  - `migrate_relational(only_if_empty=True)`：仅 characters 空时灌 JSON，防止升级后二次启动用冻结底稿覆盖真源编辑。
+- **改动（webui_api.py）**：
+  - 两个总闸 `_load_pack_file` 改从 DB 读、`_json_save` 对 pools 卷直接写 DB（新增 `set_pack_save` 钩子），30+ 写入调用方零改动。
+  - `migrate_pack_collapse` 改 DB 版（灌库时按自身 category 已自动收敛）；`h_save_entry` 简化成 `store.save_entry` 一步移动；`h_category_rename/delete` 去掉文件操作（底稿冻结）。
+  - `h_import_pack` / 资料导入 / 作品发现 / 去重全部随两个总闸自动走 DB；修掉「资料导入新建角色 category=other 被随后 other 卷整卷写入删掉」的资产丢失（新建角色归入目标 pack）。
+  - 新增 `/pools/export`（DB→JSON 导出）；调试模拟同口径。
+- **改动（pool.py / main.py）**：`install_seed_pool` 加 `read_pack`/`save_pack` 回调，种子对比补新直接读写 DB；main 启动顺序重排为「建 Store → 一次性灌库 → DB 版卷收敛 → prune → 种子补新 → 挂 provider/save → register」。
+- **升级后不能回滚到 v0.68.x**：旧版读 `data/pools/*.json`，而这些文件升级后冻结；升级后的编辑只在新 DB 里。旧 JSON 原样保留作人工底稿。
+- **守卫**：新增 `test_db_source`（灌库一次/冻结底稿不污染/写入落 DB 不落文件/重开不回滚/导出/改名同步 category）；`test_drawable_candidates`；改写 `test_pack_collapse` / `test_relational` / `test_import_pack` / `test_profile_import` / `test_records` / `test_dedupe` 的断言为 category/DB 口径。`test_db_source`、`test_pack_collapse`、`test_import_pack`、`test_profile_import`、`test_records`、`test_store_extra`、`test_pool`、`test_drawable_candidates`、`test_dedupe`、`test_draw`、`test_fairness`、`test_webui_contract`、`test_schema`、`test_template_structure`、`test_html_integrity`、`test_inline_js`、`test_today_stats` 全过；`test_relational` 逻辑断言全过，仅 Windows 临时目录清理偶发文件锁噪音（既有环境问题）。
+- 版本 v0.68.1 -> v0.69.0。
+
 ## v0.68.1 (2026-11-17)
 
 **废除「当日已有立绘（复用）」：同一角色多人抽到，人人从立绘库随机挑不同的图。**

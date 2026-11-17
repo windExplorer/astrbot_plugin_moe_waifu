@@ -755,23 +755,32 @@ class Store:
         return out
 
     def migrate_relational(self, pools_dir, data_dir,
-                           series_scope=None, logger=None) -> dict:
+                           series_scope=None, logger=None,
+                           only_if_empty: bool = False) -> dict:
         """幂等迁移：卷 JSON → packs/works/characters，图片 → assets。
 
-        v0.68.0 起**纳入全部作品**——「只认原神/鸣潮/异环」的 scope 门禁移除
-        （用户口径：以后有其他作品不能看不见；scope 外作品此前整卷在读路径
-        消失）。重复启动不产生重复行，新表可随时重建。JSON 仍是真源。
-        `series_scope` 参数保留兼容旧调用，已不再生效。
+        v0.68.0 起**纳入全部作品**（scope 门禁移除）。
+        v0.69.0 DB 真源：`only_if_empty=True` 时仅当 characters 表为空才灌卷 JSON
+        ——老用户升级一次性灌库用。之后的启动 DB 已是真源，绝不能再读冻结的旧
+        JSON 覆盖新编辑（否则工坊改动会在重启后回滚）。`series_scope` 保留兼容。
+        图片/资产登记（阶段 2-4）与卷无关，任何模式都跑、幂等。
         """
         pools_dir, data_dir = Path(pools_dir), Path(data_dir)
         stats = {"scope": ["all"], "skipped": 0}
-        # 1) 卷 / 作品 / 角色：统一走 sync_pack_file（同一套 upsert + 清理逻辑，
-        #    确保「启动迁移」与「工坊写完同步」不会出现两套口径）
-        for path in (sorted(pools_dir.glob("*.json"))
-                     if pools_dir.is_dir() else []):
-            res = self.sync_pack_file(path)
-            stats["skipped"] += int(res.get("skipped") or 0)
-        self._conn.commit()
+        # 1) 卷 / 作品 / 角色
+        skip_packs = False
+        if only_if_empty:
+            n = int(self._conn.execute(
+                "SELECT COUNT(*) AS n FROM characters").fetchone()["n"])
+            if n > 0:
+                skip_packs = True
+                stats["skipped_packs"] = "db_nonempty"
+        if not skip_packs:
+            for path in (sorted(pools_dir.glob("*.json"))
+                         if pools_dir.is_dir() else []):
+                res = self.sync_pack_file(path)
+                stats["skipped"] += int(res.get("skipped") or 0)
+            self._conn.commit()
         # 2) 立绘行：登记并回填 asset_id
         for row in self._conn.execute(
                 "SELECT file, width, height FROM portraits").fetchall():
@@ -807,11 +816,14 @@ class Store:
             logger.info(f"[moe_waifu] 关系模型迁移（阶段 1）：{stats}")
         return stats
 
-    def _upsert_character(self, raw, pack_id: int, scope=None) -> str:
+    def _upsert_character(self, raw, scope=None, move: bool = False,
+                          ignore_existing: bool = False) -> str:
         """upsert 单条角色（含作品），返回 char_id；不合法 → ""。
 
-        v0.68.0：作品 scope 门禁移除——所有作品的角色都入新表（`scope` 参数
-        保留兼容旧调用，已不生效）。
+        v0.68.0：作品 scope 门禁移除（`scope` 保留兼容，不生效）。
+        v0.69.0 卷维度删：分组只用 `characters.category`，不再写 pack_id
+        （列物理保留但恒为 NULL）。`move=True`：冲突时允许改 category——
+        卷收敛跨类型迁移用；默认先到先得、不改归属。
         """
         if not isinstance(raw, dict):
             return ""
@@ -820,11 +832,11 @@ class Store:
         series = str(raw.get("series") or "").strip()
         if not cid or not name:
             return ""
+        category = str(raw.get("category") or "other").strip() or "other"
         self._conn.execute(
             "INSERT OR IGNORE INTO works(name, category, color, created_at) "
             "VALUES(?,?,?,?)",
-            (series, str(raw.get("category") or "other"),
-             str(raw.get("color") or ""), _now()))
+            (series, category, str(raw.get("color") or ""), _now()))
         wrow = self._conn.execute(
             "SELECT id FROM works WHERE name=?", (series,)).fetchone()
         work_id = int(wrow["id"]) if wrow else 0
@@ -834,34 +846,49 @@ class Store:
         single = str(raw.get("quote") or "").strip()
         if single and single not in quotes:
             quotes.insert(0, single)
-        # v0.40.0：非固定列字段（keep_* 人设固装 / profile / avatar / added_at
-        # / 未来的扩展字段）整体进 extra_json——固定列丢字段是固装开关保存
-        # 后重开即丢的根因
         _char_known = ("id", "name", "series", "pack", "category", "tier",
                        "tags_en", "verified", "strategy", "cover", "quote",
                        "quotes", "color")
         extra = {k: v for k, v in raw.items() if k not in _char_known}
+        # 同 id 冲突：
+        #   - move=True（跨类型移动/编辑保存）→ 全字段更新到目标 category；
+        #   - 默认（灌库/整卷同步）→ 先到先得，完全保留已有行。
+        #     v0.69.0：category 真源下同 id 全库唯一，后到的残留卷若也带这个
+        #     id，旧实现虽保留 category 却覆盖 strategy/verified，把先到的
+        #     富资产洗掉（test_dedupe 实锤）。灌库场景一律 DO NOTHING。
+        if not move and ignore_existing:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO characters(char_id, work_id, name, tags_en,"
+                " verified, strategy_json, cover_path, category, tier, quote,"
+                " quotes_json, color, extra_json, created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (cid, work_id, name, str(raw.get("tags_en") or ""),
+                 1 if raw.get("verified") else 0,
+                 json.dumps(st, ensure_ascii=False),
+                 str(raw.get("cover") or ""), category,
+                 str(raw.get("tier") or ""),
+                 single or (quotes[0] if quotes else ""),
+                 json.dumps(quotes, ensure_ascii=False),
+                 str(raw.get("color") or ""),
+                 json.dumps(extra, ensure_ascii=False), _now()))
+            return cid
         self._conn.execute(
-            "INSERT INTO characters(char_id, pack_id, work_id, name, tags_en,"
+            "INSERT INTO characters(char_id, work_id, name, tags_en,"
             " verified, strategy_json, cover_path, category, tier, quote,"
             " quotes_json, color, extra_json, created_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
-            # 跨卷重复 id：先同步到的卷胜。game 卷按文件名排在 genshin /
-            # wuthering_waves 等遗留卷之前，后到的旧卷不能把角色抢过去，
-            # 否则异环 20 位会挂在遗留卷上、工坊卷筛选错乱（v0.25.1）。
-            "ON CONFLICT(char_id) DO UPDATE SET pack_id=characters.pack_id,"
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(char_id) DO UPDATE SET category=excluded.category,"
             " work_id=excluded.work_id, name=excluded.name,"
             " tags_en=excluded.tags_en, verified=excluded.verified,"
             " strategy_json=excluded.strategy_json,"
-            " cover_path=excluded.cover_path, category=excluded.category,"
+            " cover_path=excluded.cover_path,"
             " tier=excluded.tier, quote=excluded.quote,"
             " quotes_json=excluded.quotes_json, color=excluded.color,"
             " extra_json=excluded.extra_json",
-            (cid, pack_id, work_id, name, str(raw.get("tags_en") or ""),
+            (cid, work_id, name, str(raw.get("tags_en") or ""),
              1 if raw.get("verified") else 0,
              json.dumps(st, ensure_ascii=False),
-             str(raw.get("cover") or ""),
-             str(raw.get("category") or "other"),
+             str(raw.get("cover") or ""), category,
              str(raw.get("tier") or ""),
              single or (quotes[0] if quotes else ""),
              json.dumps(quotes, ensure_ascii=False),
@@ -869,159 +896,210 @@ class Store:
              json.dumps(extra, ensure_ascii=False), _now()))
         return cid
 
-    def sync_pack_file(self, path, series_scope=None) -> dict:
-        """单个卷 JSON → 新表（upsert + 删除该卷里已消失的角色），幂等。
+    def find_entry_category(self, char_id: str) -> str | None:
+        """v0.69.0：查角色当前所属 category（全库唯一 char_id），不存在返回 None。"""
+        row = self._conn.execute(
+            "SELECT category FROM characters WHERE char_id=?",
+            (str(char_id or "").strip(),)).fetchone()
+        return (row["category"] or "other") if row else None
 
-        v0.25.0 切读路径后，工坊所有写操作仍落 JSON（真源不动），写完经
-        `webui_api._json_save` 钩子调这里，读路径立刻能看到改动。
-        v0.68.0：作品 scope 门禁移除，全部角色入表（`series_scope` 参数保留
-        兼容旧调用，已不生效）。
+    def find_entry(self, char_id: str) -> dict | None:
+        """v0.69.0：按 char_id 读单条角色（与卷 JSON 同构，category=所属类型）。"""
+        row = self._conn.execute(
+            "SELECT c.*, w.name AS work_name FROM characters c "
+            "LEFT JOIN works w ON w.id=c.work_id WHERE c.char_id=?",
+            (str(char_id or "").strip(),)).fetchone()
+        return self._row_to_entry(row, row["category"] or "other") if row else None
+
+    def save_entry(self, entry: dict, category: str) -> dict:
+        """v0.69.0：单条角色保存/跨类型移动（卷维度删后 h_save_entry 的落库口）。
+
+        char_id 全库唯一：冲突即改 category（移动）。不删同类型其它角色——
+        单条保存不是整卷替换。返回 {"replaced": 是否原已存在,
+        "moved_from": 原 category（跨类型时，否则 ""）, "entry": 读回的条目}。
+        """
+        category = str(category or "").strip() or "other"
+        e = dict(entry or {})
+        e["category"] = category
+        cid = str(e.get("id") or "").strip()
+        old_cat = self.find_entry_category(cid)
+        replaced = old_cat is not None
+        self._upsert_character(e, move=True)   # 冲突改到目标 category
+        self._conn.commit()
+        return {"replaced": replaced,
+                "moved_from": old_cat if (old_cat and old_cat != category) else "",
+                "entry": self.find_entry(cid)}
+
+    def sync_pack_file(self, path, series_scope=None) -> dict:
+        """单个卷 JSON → 新表（启动迁移 / 种子灌库用；v0.69.0 起不再是真源写路径）。
+
+        兼容保留：老用户升级时 `migrate_relational` 用它把只读 JSON 底稿灌进 DB，
+        `install_seed_pool` 种子灌库也复用。真机日常写入已改走 `save_pack_data`。
         """
         path = Path(path)
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             return {"error": "json"}
+        return self.save_pack_data(data, fallback_name=path.stem,
+                                   ignore_existing=True)
+
+    def save_pack_data(self, data: dict, fallback_name: str = "",
+                       move: bool = False,
+                       ignore_existing: bool = False) -> dict:
+        """v0.69.0 DB 真源写入：整卷 dict → 角色表（按 category 分组），幂等。
+
+        **卷维度已删（v0.69.0）**：`characters.category` 是唯一分组维度，
+        `pack_id`/`packs` 表物理保留但代码完全不读写。数据按 `data["pack"]`
+        归到 category（卷名==类型 key，seed/导入/导出 JSON 的 pack 值即 category），
+        不再经 packs 表。`move`/`fallback_name` 保留签名兼容（move 语义见
+        `_upsert_character`：跨类型迁移时允许改 category）。
+        """
         if not isinstance(data, dict) or not isinstance(data.get("entries"), list):
             return {"error": "shape"}
-        pack_name = str(data.get("pack") or path.stem).strip()
-        if not pack_name:
+        category = str(data.get("pack") or fallback_name or "").strip()
+        if not category:
             return {"error": "pack"}
-        title = str(data.get("title") or pack_name)
-        enabled = 1 if data.get("enabled", True) else 0
-        self._conn.execute(
-            "INSERT OR IGNORE INTO packs(name, title, enabled) VALUES(?,?,?)",
-            (pack_name, title, enabled))
-        self._conn.execute(
-            "UPDATE packs SET title=?, enabled=? WHERE name=?",
-            (title, enabled, pack_name))
-        prow = self._conn.execute(
-            "SELECT id FROM packs WHERE name=?", (pack_name,)).fetchone()
-        pack_id = int(prow["id"]) if prow else 0
         kept, skipped = set(), 0
         for raw in data["entries"]:
-            cid = self._upsert_character(raw, pack_id)
+            if isinstance(raw, dict):
+                raw = dict(raw)
+                # 卷维度删：每个角色的类型取自身 category（历史卷里 category 是
+                # 真实类型，如 wuthering_waves 卷里角色 category=game）；缺失才
+                # 用卷名兜底。绝不用卷名覆盖，否则卷收敛会丢失原始类型。
+                if not str(raw.get("category") or "").strip():
+                    raw["category"] = category
+            cid = self._upsert_character(raw, move=move,
+                                         ignore_existing=ignore_existing)
             if cid:
                 kept.add(cid)
             else:
                 skipped += 1
+        # 整卷写入：删除「此前归属这个 category、但这次没带上」的角色行。
+        # 用 kept 里实际落库的 category 分桶——因为卷里条目可能带各自的 category。
+        # 兼容：旧调用把整卷当成一个类型，category 参数仍作为兜底分组键。
         existing = {r["char_id"] for r in self._conn.execute(
-            "SELECT char_id FROM characters WHERE pack_id=?", (pack_id,))}
+            "SELECT char_id FROM characters WHERE category=?", (category,))}
         gone = existing - kept
         for cid in gone:
             self._conn.execute("DELETE FROM characters WHERE char_id=?", (cid,))
-        # v0.25.2：该卷没有任何合法角色（空卷 / 全是脏条目）→ 删掉 packs 记录，
-        # 前端卷筛选不再出现一堆 0 条目的空卷。**卷 JSON 文件保持不动**。
-        if not kept:
-            self._conn.execute("DELETE FROM packs WHERE id=?", (pack_id,))
         self._conn.commit()
-        return {"pack": pack_name, "kept": len(kept), "skipped": skipped,
-                "removed": len(gone), "pack_dropped": not kept}
+        return {"category": category, "kept": len(kept), "skipped": skipped,
+                "removed": len(gone), "pack": category}
 
     def rename_pack(self, old_name: str, new_name: str, title: str = "") -> dict:
-        """重命名卷（v0.68.0 类型改名用）：packs 行原位改名，characters 的
-        pack_id 指向不变。只改 DB；卷 JSON 文件的改名由调用方负责。"""
+        """重命名类型（v0.69.0 卷维度删）：直接把 characters.category 从旧键
+        改成新键，不碰 packs 表（物理留着但代码不用）。旧 JSON 底稿冻结不动。
+        """
         old_name, new_name = str(old_name).strip(), str(new_name).strip()
         if not old_name or not new_name or old_name == new_name:
             return {"error": "name"}
         row = self._conn.execute(
-            "SELECT 1 FROM packs WHERE name=?", (new_name,)).fetchone()
+            "SELECT 1 FROM characters WHERE category=? LIMIT 1",
+            (new_name,)).fetchone()
         if row:
             return {"error": "exists"}
         self._conn.execute(
-            "UPDATE packs SET name=?, title=CASE WHEN ?='' THEN title ELSE ? END"
-            " WHERE name=?", (new_name, str(title or ""), str(title or ""),
-                              old_name))
+            "UPDATE characters SET category=? WHERE category=?",
+            (new_name, old_name))
         self._conn.commit()
         return {"renamed": old_name, "to": new_name}
 
     def delete_pack(self, name: str) -> dict:
-        """删除空卷的 packs 记录（v0.68.0 类型删除用；调用方须先确认卷内
-        无角色，角色行不会由此删除）。"""
-        self._conn.execute("DELETE FROM packs WHERE name=?", (str(name).strip(),))
-        self._conn.commit()
+        """删除空类型（v0.69.0）：类型无独立表，注册表在 JSON，DB 侧为空操作
+        （调用方已确认该 category 无角色）。保留方法兼容调用。"""
         return {"deleted": str(name).strip()}
 
     def prune_packs(self, keep_names: set) -> dict:
-        """删除不在 keep 集合里的卷记录及其角色行（v0.68.0 卷收敛用）。
+        """v0.69.0 卷维度删后为空操作（不再有 packs 表）。保留签名兼容启动序列。"""
+        return {"removed": []}
 
-        调用方须保证这些卷的 JSON 已并入 keep 对应的卷——角色行删除后，
-        随后的 sync/迁移会按合并后的卷文件以新卷归属重建。
-        """
-        removed = []
-        for r in self._conn.execute(
-                "SELECT id, name FROM packs").fetchall():
-            if r["name"] in keep_names:
-                continue
-            self._conn.execute(
-                "DELETE FROM characters WHERE pack_id=?", (r["id"],))
-            self._conn.execute("DELETE FROM packs WHERE id=?", (r["id"],))
-            removed.append(r["name"])
-        if removed:
-            self._conn.commit()
-        return {"removed": removed}
+    def _row_to_entry(self, r, category: str) -> dict:
+        """characters 行 → 与卷 JSON 同构的条目 dict（供 load_packs / load_pack_data）。"""
+        try:
+            st = json.loads(r["strategy_json"] or "{}")
+        except Exception:
+            st = {}
+        if not isinstance(st, dict):
+            st = {}
+        try:
+            quotes = json.loads(r["quotes_json"] or "[]")
+        except Exception:
+            quotes = []
+        if not isinstance(quotes, list):
+            quotes = []
+        e = {"id": r["char_id"], "name": r["name"],
+             "series": str(r["work_name"] or ""),
+             "pack": category, "category": category,
+             "tier": r["tier"] or "", "tags_en": r["tags_en"] or "",
+             "verified": bool(r["verified"]), "strategy": st,
+             "color": r["color"] or "#E8B4C8"}
+        # v0.40.0：扩展字段（keep_* 人设固装 / profile / avatar /
+        # added_at…）从 extra_json overlay 回条目
+        try:
+            extra = json.loads(r["extra_json"] or "{}")
+        except Exception:
+            extra = {}
+        if isinstance(extra, dict):
+            for k, v in extra.items():
+                e.setdefault(k, v)
+        if r["quote"]:
+            e["quote"] = r["quote"]
+        if quotes:
+            e["quotes"] = quotes
+        if r["cover_path"]:
+            e["cover"] = r["cover_path"]
+        return e
 
     def load_packs(self) -> list:
-        """按 `pool.load_packs` 同构返回：卷 → 条目（原始形状，供 normalize_entry）。
+        """按 `pool.load_packs` 同构返回：类型（category）→ 条目。
 
-        v0.68.0 起包含全部作品的角色（scope 门禁移除）；空库返回 []，调用方
-        据此回退 JSON。字段与卷 JSON 一一对应，工坊 / 抽卡代码零改动。
+        v0.69.0 卷维度删：按 `characters.category` 分组，不再 join packs 表。
+        输出的 `pack` 字段 = category（JSON 边界格式保留 pack，值即类型 key），
+        title = category 本身，enabled 恒 True（启停已由标签替代，v0.68.0）。
+        空库返回 []，调用方据此可回退（仅极端兜底）。
         """
+        cats = [r["category"] or "other" for r in self._conn.execute(
+            "SELECT DISTINCT category FROM characters ORDER BY category")]
         out = []
-        prows = self._conn.execute(
-            "SELECT id, name, title, enabled FROM packs ORDER BY name").fetchall()
-        for p in prows:
+        for cat in cats:
             rows = self._conn.execute(
                 "SELECT c.*, w.name AS work_name FROM characters c "
-                "LEFT JOIN works w ON w.id = c.work_id "
-                "WHERE c.pack_id=? ORDER BY c.char_id", (p["id"],)).fetchall()
-            entries = []
-            for r in rows:
-                try:
-                    st = json.loads(r["strategy_json"] or "{}")
-                except Exception:
-                    st = {}
-                if not isinstance(st, dict):
-                    st = {}
-                try:
-                    quotes = json.loads(r["quotes_json"] or "[]")
-                except Exception:
-                    quotes = []
-                if not isinstance(quotes, list):
-                    quotes = []
-                e = {"id": r["char_id"], "name": r["name"],
-                     "series": str(r["work_name"] or ""),
-                     "pack": p["name"],
-                     "category": r["category"] or "other",
-                     "tier": r["tier"] or "",
-                     "tags_en": r["tags_en"] or "",
-                     "verified": bool(r["verified"]),
-                     "strategy": st,
-                     "color": r["color"] or "#E8B4C8"}
-                # v0.40.0：扩展字段（keep_* 人设固装 / profile / avatar /
-                # added_at…）从 extra_json overlay 回条目——固定列只装核心
-                # 字段，其余字段「同步写 extra、读回 overlay」，与卷 JSON 同构
-                try:
-                    extra = json.loads(r["extra_json"] or "{}")
-                except Exception:
-                    extra = {}
-                if isinstance(extra, dict):
-                    for k, v in extra.items():
-                        e.setdefault(k, v)
-                if r["quote"]:
-                    e["quote"] = r["quote"]
-                if quotes:
-                    e["quotes"] = quotes
-                if r["cover_path"]:
-                    e["cover"] = r["cover_path"]
-                entries.append(e)
+                "LEFT JOIN works w ON w.id=c.work_id "
+                "WHERE c.category=? ORDER BY c.char_id", (cat,)).fetchall()
+            entries = [self._row_to_entry(r, cat) for r in rows]
             if not entries:
-                # v0.25.2 兜底：历史版本可能留下 0 条目的卷记录（JSON 已删 /
-                # 角色全被合并到别的卷），不进筛选，避免界面上一排空卷。
                 continue
-            out.append({"pack": p["name"], "title": p["title"] or p["name"],
-                        "enabled": bool(p["enabled"]), "entries": entries})
+            out.append({"pack": cat, "title": cat, "enabled": True,
+                        "entries": entries})
         return out
+
+    def load_pack_data(self, name: str) -> dict | None:
+        """v0.69.0 DB 真源：按卷名读**单个**卷 dict（与卷 JSON 同构），不存在返回 None。
+
+        供 `webui_api._load_pack_file` 用——调用方拿到的是内存 dict，不再是磁盘文件。
+        空卷（0 条目）也返回结构（与 load_packs 跳过空卷不同）：编辑/导入路径可能正
+        在往一个空类型卷里写第一条，此时必须能拿到可写的 dict。
+        """
+        name = str(name or "").strip()
+        if not name:
+            return None
+        # v0.69.0 卷维度删：name 即 category，按 category 查角色，不 join packs 表。
+        # 空卷（0 条目）也返回结构：编辑/导入路径可能正往空类型写第一条。
+        rows = self._conn.execute(
+            "SELECT c.*, w.name AS work_name FROM characters c "
+            "LEFT JOIN works w ON w.id=c.work_id "
+            "WHERE c.category=? ORDER BY c.char_id", (name,)).fetchall()
+        entries = [self._row_to_entry(r, name) for r in rows]
+        return {"pack": name, "title": name, "enabled": True, "entries": entries}
+
+    def export_packs(self) -> list:
+        """v0.69.0：DB→JSON 导出（备份 / 分享用），返回与 seed_pool.json 同构的卷数组。
+
+        JSON 在这里只是**导出格式**，不再是真源。结构直接复用 `load_packs`
+        （每条已是 normalize 可用的原始形状），导出落盘由调用方负责。
+        """
+        return self.load_packs()
 
     def portrait_by_file(self, file: str) -> dict | None:
         """按相对路径取立绘行（转参考图时把 prompt/theme/seed 带走）。"""
