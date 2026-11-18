@@ -4,7 +4,8 @@
 盯住最容易「改一处漏一处」的四条线：
   1) 后端四条路由 + store 表/方法齐全；
   2) 前端两处 swap 模式都把 refs 拼成 [全局, 角色]（顺序=画布/身份，反了功能全废）；
-  3) 固定 Qwen 双图编辑指令用 <image1>/<image2>，且 raw_prompt 直通不被 prompt_gen 覆盖；
+  3) 固定 Qwen 双图编辑指令用自然语言「图1/图2」引用（v0.71.4 起，弃 <image1> 标记），
+     且 raw_prompt 直通不被 prompt_gen 覆盖；
   4) 菜单 / 上传端点新参数 / 两段删除确认都落地。
 """
 import re
@@ -89,9 +90,10 @@ def main():
           'v-if="galMode === \'img2img\' || galMode === \'swap\'" v-model:value="galDenoise"' not in page
           and 'v-model:value="trySwapDenoise"' not in page)
 
-    # 3) 固定编辑指令：Qwen 双图标签，两处都用同一常量
-    check("编辑指令用 <image1> 画布 + <image2> 身份",
-          "<image1>" in page and "<image2>" in page
+    # 3) 固定编辑指令：双图自然语言引用「图1/图2」（v0.71.4 弃 <image1> 标记），两处都用同一常量
+    check("编辑指令用 图1 画布 + 图2 身份（不再用 <imageN> 标记）",
+          "图1" in page and "图2" in page
+          and "<image1>" not in page and "<image2>" not in page
           and "画布" in page and "身份" in page)
     # v0.61.0：三档方案（face 保守 / appearance 标准默认 / full 彻底），
     # 用户实测「只换脸不够——体型、头发、头顶悬浮物/头环要跟图2」，故默认 appearance。
@@ -99,12 +101,12 @@ def main():
     schemes = sw.group(1) if sw else ""
     check("三档替换方案齐全（face/appearance/full）",
           all('key: "%s"' % k in schemes for k in ("face", "appearance", "full")), schemes[:120])
-    check("标准档含体型/发型/头顶饰物跟随 image2",
+    check("标准档含体型/发型/头顶饰物跟随图2",
           "体型" in schemes and "发型发色" in schemes
-          and "头顶悬浮饰物" in schemes and "头环" in schemes, schemes[:120])
+          and "头顶悬浮饰物、头环、发饰" in schemes, schemes[:120])
     check("三档的服装/动作/表情仍归画布",
-          "以 <image1> 画布为准" in schemes
-          and "不要带 <image2> 的服装、动作或表情" in schemes, schemes[:120])
+          "以 图1 画布为准" in schemes
+          and "不要带 图2 的服装、动作或表情" in schemes, schemes[:120])
     check("默认方案是标准档 appearance",
           'Vue.ref("appearance")' in page)
     check("按 key 取指令的函数存在且回退标准档",

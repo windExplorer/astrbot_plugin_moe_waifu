@@ -2,6 +2,27 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.71.4 (2026-11-19)
+
+**角色替换固定指令文案优化：图片引用改自然语言「图1/图2」，罗列分隔「 / 」改顿号「、」。**
+
+- **需求（用户）**：角色替换三档指令里的 `<image1>` / `<image2>` 标记改成「图1」「图2」这种
+  自然语言引用；「头顶悬浮饰物 / 头环 / 发饰」这类罗列里的「 / 」改成「、」。
+- **改动（仅 `pages/waifu-console/index.html` 的 `SWAP_SCHEMES` 一处，试画台与角色详情共用）**：
+  - 三档 prompt（face / appearance / full）里全部 `<image1>` → 图1、`<image2>` → 图2；
+  - appearance / full 两档的「头顶悬浮饰物 / 头环 / 发饰」→「头顶悬浮饰物、头环、发饰」；
+  - 下拉提示文案（hint）同步：face 的「只换五官 / 脸型」、appearance 的
+    「头顶悬浮物 / 头环」也统一顿号（提示文案本来就是图2/画布的自然语言口径）。
+- **注意事项**：anima 侧（v7.8.21）Qwen 编辑规范文档写的是「多图必须用 `<image1>` 标记、
+  禁用图1 类自然语言引用」——那只是它的 LLM 润色规范文案（代码层无任何 `<imageN>` 替换逻辑，
+  本插件 raw_prompt=True 也绕过润色直送模型），与本次改动不冲突；真机出图效果如异常可回退本版。
+  anima 仓库的规范文案是否同步改，由用户另行决定（不在本仓库范围）。
+- **验证**：`tests/test_global_refs_swap.py` 守卫翻转——断言三档指令含「图1/图2」且全页不再出现
+  `<image1>`/`<image2>` 标记（防回退），罗列断言收紧为「头顶悬浮饰物、头环、发饰」；
+  `test_global_refs_swap` / `test_html_integrity` / `test_inline_js` / `test_template_compile` /
+  `test_template_structure` / `test_webui_contract` 全过。
+- 版本 v0.71.3 -> v0.71.4。
+
 ## v0.71.3 (2026-11-18)
 
 **立绘卡片「停用」与「删除」拆开：停用不再二次确认，新增独立删除图标（保留两段确认）。**
