@@ -2,6 +2,31 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.71.6 (2026-11-19)
+
+**修复拖拽提示层再次卡死：新增「心跳兜底」，任何漏事件路径 1.2 秒内自愈 + Esc 手动收尾。**
+
+- **现象（用户）**：没拖文件，页面却挂着「松手上传参考图 → xxx（角色详情·参考图）」
+  的全屏提示层，切页也关不掉（v0.71.2 修过一次同类卡死，这次是另一条漏网路径）。
+- **根因**：遮罩显隐靠 `dragenter`/`dragleave` 的**深度配平**收尾。但拖拽途中页面
+  DOM 会被 Vue 重渲染（缩略图加载、tooltip 挂载等），悬停下的元素被删后它那条
+  `dragleave` 永远不会来——深度恒 >0，遮罩就永久留着；且 `relatedTarget` 指向已删
+  节点时既不是「离开窗口」（空值才强制收尾）也没有后续事件，v0.71.2 的捕获级
+  drop/dragend 兜底同样接不到（OS 来源的拖拽根本不发 dragend）。触发本身不需要
+  用户「真的拖文件」：任何带 Files 的拖拽掠过窗口即可点亮（误触 + 断配平 = 卡死）。
+- **修复（`pages/waifu-console/index.html`）**：**心跳兜底**——真拖拽期间 `dragover`
+  会持续高频触发，所以只要遮罩开着就盯一个 1.2s 看门狗：超过 1.2s 没有任何
+  `dragover` 必然不是活拖拽，`resetDragVisual()` 强制收尾。实现：dragenter 点亮
+  遮罩时布防、dragover 持续记录 `lastDragTs` 并保活、超时或遮罩已关即停；
+  `resetDragVisual` 顺手清掉定时器；另挂 `keydown` Esc 手动收尾（沙箱无 alert，
+  键盘事件可用）。这是最后一道防线，与既有的 drop/dragend 捕获兜底、
+  relatedTarget 空值强制收尾共存——任何一条先到都能收，心跳负责兜住其余全部。
+- **验证**：`tests/test_drag_overlay.py` 新增第 6 组守卫（心跳时间戳 / 超时收尾 /
+  dragenter 布防 / dragover 保活 / 收尾清定时器 / Esc）；`test_drag_overlay` /
+  `test_html_integrity` / `test_inline_js` / `test_template_compile` /
+  `test_template_structure` / `test_webui_contract` / `test_mobile_responsive` 全过。
+- 版本 v0.71.5 -> v0.71.6。
+
 ## v0.71.5 (2026-11-19)
 
 **修复覆盖安装 / 重启「转圈半天」：资产登记改增量，启动不再全量重读图片库算哈希。**

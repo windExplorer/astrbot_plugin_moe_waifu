@@ -66,6 +66,25 @@ def main():
           bool(drop) and "zoneHandled = e.defaultPrevented" in drop.group(1)
           and "if (zoneHandled) return" in drop.group(1))
 
+    # 6) v0.71.6 心跳兜底：深度配平在拖拽途中 DOM 被 Vue 重渲染时会断对
+    #    （元素被删 → 对应 dragleave 永远不来 → 深度恒 >0，遮罩卡死无关闭入口，
+    #    真机复现）。活拖拽期间 dragover 持续高频触发，遮罩开着却 1.2s 没有
+    #    dragover 必然是卡死，强制收尾自愈。
+    check("dragover 心跳时间戳", "lastDragTs = Date.now()" in page)
+    check("心跳检查函数超时强制收尾",
+          bool(re.search(r"function dragHeartbeatCheck\(\)\s*\{.*?"
+                         r"Date\.now\(\) - lastDragTs > 1200.*?resetDragVisual\(\)",
+                         page, re.S)))
+    de2 = re.search(r'document\.addEventListener\("dragenter",\s*function \(e\) \{(.*?)\n      \}\);', page, re.S)
+    check("dragenter 点亮遮罩时布防心跳",
+          bool(de2) and "armDragWatchdog()" in de2.group(1), de2.group(1) if de2 else "")
+    do2 = re.search(r'document\.addEventListener\("dragover",\s*function \(e\) \{(.*?)\n      \}\);', page, re.S)
+    check("dragover 持续保活心跳",
+          bool(do2) and "armDragWatchdog()" in do2.group(1), do2.group(1) if do2 else "")
+    check("收尾函数清掉心跳定时器",
+          "clearTimeout(dragWatchdog)" in page and "dragWatchdog = null" in page)
+    check("Esc 键可手动收尾", '"Escape"' in page)
+
     print("test_drag_overlay: " + ("ALL OK" if not FAILURES else f"{len(FAILURES)} FAILED"))
     sys.exit(0 if not FAILURES else 1)
 

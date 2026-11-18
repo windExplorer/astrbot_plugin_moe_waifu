@@ -5522,12 +5522,35 @@
       // stopPropagation，document 冒泡级 drop 收不到 → 全屏遮罩卡死且跨页残留。
       // 捕获级先于目标组件执行，stopPropagation 拦不住，任何上传框落拖都能收尾。
       // 这里只清视觉、不路由文件，避免与小 dropzone 双传。
+      // v0.71.6：心跳兜底。dragenter/dragleave 靠深度配平收尾，但拖拽途中 DOM
+      // 被 Vue 重渲染（元素被删）会断对——缺一条 dragleave 深度就恒 >0，遮罩
+      // 卡死且没有关闭入口（真机复现：进角色详情就挂着「松手上传参考图 →
+      // xxx（角色详情·参考图）」关不掉）。真拖拽期间 dragover 持续高频触发，
+      // 所以遮罩开着却 1.2s 没有任何 dragover，必然不是活拖拽，强制收尾自愈。
+      // 这是最后一道防线，任何漏配平 / 漏事件路径都能恢复；Esc 也可手动关。
+      var dragWatchdog = null;
+      var lastDragTs = 0;
       function resetDragVisual() {
         dragDepth = 0;
         dragOverlay.value = false;
+        if (dragWatchdog) clearTimeout(dragWatchdog);
+        dragWatchdog = null;
       }
       window.addEventListener("drop", resetDragVisual, true);
       window.addEventListener("dragend", resetDragVisual, true);
+      window.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") { resetDragVisual(); }
+      });
+      function dragHeartbeatCheck() {
+        dragWatchdog = null;
+        if (!dragOverlay.value) return;
+        if (Date.now() - lastDragTs > 1200) { resetDragVisual(); return; }
+        dragWatchdog = setTimeout(dragHeartbeatCheck, 1200);
+      }
+      function armDragWatchdog() {
+        if (!dragOverlay.value || dragWatchdog) return;
+        dragWatchdog = setTimeout(dragHeartbeatCheck, 1200);
+      }
       function fileFromDragEvent(e) {
         var dt = e && e.dataTransfer;
         if (!dt) return null;
@@ -5597,6 +5620,9 @@
       document.addEventListener("dragover", function (e) {
         // 必须 preventDefault，否则浏览器会打开被拖入的文件
         e.preventDefault();
+        // v0.71.6：心跳——遮罩开着时记录最近 dragover 并保持 watchdog 在岗
+        lastDragTs = Date.now();
+        if (dragOverlay.value) { armDragWatchdog(); }
       });
       document.addEventListener("dragenter", function (e) {
         if (!hasFiles(e)) return;
@@ -5614,6 +5640,8 @@
             : "当前页面不接收文件";
         }
         dragOverlay.value = true;
+        lastDragTs = Date.now();
+        armDragWatchdog();
       });
       document.addEventListener("dragleave", function (e) {
         if (!hasFiles(e)) return;
