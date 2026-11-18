@@ -2,6 +2,33 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.71.2 (2026-11-18)
+
+**修复全局图库拖拽上传后「当前页面不接收文件」全屏遮罩卡死、跨页关不掉。**
+
+- **现象（用户）**：在全局图库把图拖进上传框上传完，整个工坊页一直盖着
+  「当前页面不接收文件」的粉色全屏提示层，切到任何页签都还在，点不掉。
+- **根因**：提示层（`dragOverlay`）此前只靠 document 冒泡级 `drop` / `dragleave`
+  收尾；而全局图库的 `w-upload-panel` 在 `onDrop` 里先 `preventDefault()` 再
+  `stopPropagation()`，drop 根本到不了 document，`dragDepth` 没归零、
+  `dragOverlay` 一直是 `true`。该层是 `position:fixed; z-index:9999;
+  pointer-events:none` 且没有关闭按钮，于是跨页残留、无从关闭。另外全局图库页
+  不在 `dropTargetInfo()` 的白名单里，拖到上传框上方时文案也误报「不接收文件」。
+- **修复（前端单文件 `pages/waifu-console/index.html`）**：
+  - 新增 `resetDragVisual()` 统一清零 `dragDepth` / 关遮罩，并在 `window` 上用
+    **捕获级** `drop` / `dragend` 监听兜底——捕获阶段先于目标组件执行，
+    `stopPropagation` 拦不住，任何上传框完成拖拽都能收尾。此处只清视觉、不路由
+    文件，避免与小 dropzone 双传；冒泡级 drop 的 `defaultPrevented` 防双传逻辑原样保留。
+  - `dragleave` 在 `relatedTarget` 为空（拖拽离开窗口 / 取消）时直接强制收尾，
+    堵住 `dragenter`/`dragleave` 配不平导致遮罩残留的另一条路径。
+  - `dragenter` 落在 `.dropzone` 上时文案改为「松手上传到上传框」，不再误报
+    「当前页面不接收文件」；非上传框区域仍保留原兜底文案。
+- **验证**：新增 `tests/test_drag_overlay.py` 守卫；`test_drag_overlay` /
+  `test_global_refs_swap` / `test_html_integrity` / `test_inline_js` /
+  `test_template_compile` / `test_template_structure` / `test_webui_contract` /
+  `test_mobile_responsive` / `test_theme_options` 全过。
+- 版本 v0.71.1 -> v0.71.2。
+
 ## v0.71.1 (2026-11-18)
 
 **修复 `/签到` 不触发联动：正则同时认裸词与带斜杠命令，优先级提到最高。**

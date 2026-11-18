@@ -5506,6 +5506,16 @@
       var dragOverlay = Vue.ref(false);
       var dragOverlayText = Vue.ref("松手上传参考图");
       var dragDepth = 0;
+      // v0.71.2：统一收尾拖拽视觉状态。全局图库等页的 w-upload-panel 在 onDrop 里
+      // stopPropagation，document 冒泡级 drop 收不到 → 全屏遮罩卡死且跨页残留。
+      // 捕获级先于目标组件执行，stopPropagation 拦不住，任何上传框落拖都能收尾。
+      // 这里只清视觉、不路由文件，避免与小 dropzone 双传。
+      function resetDragVisual() {
+        dragDepth = 0;
+        dragOverlay.value = false;
+      }
+      window.addEventListener("drop", resetDragVisual, true);
+      window.addEventListener("dragend", resetDragVisual, true);
       function fileFromDragEvent(e) {
         var dt = e && e.dataTransfer;
         if (!dt) return null;
@@ -5580,19 +5590,29 @@
         if (!hasFiles(e)) return;
         dragDepth += 1;
         var target = dropTargetInfo();
-        dragOverlayText.value = target
-          ? "松手上传参考图 → " + target.label
-          : "当前页面不接收文件";
+        // v0.71.2：拖到页面自带的上传框（全局图库等）时其实收文件，别误报"不接收"
+        var inZone = false;
+        try { inZone = !!(e.target && e.target.closest && e.target.closest(".dropzone")); }
+        catch (err) { /* target 可能是文本节点 */ }
+        if (inZone) {
+          dragOverlayText.value = "松手上传到上传框";
+        } else {
+          dragOverlayText.value = target
+            ? "松手上传参考图 → " + target.label
+            : "当前页面不接收文件";
+        }
         dragOverlay.value = true;
       });
       document.addEventListener("dragleave", function (e) {
         if (!hasFiles(e)) return;
+        // v0.71.2：离开窗口/取消拖拽时 relatedTarget 为空——强制收尾，
+        // 避免 dragenter/dragleave 配不平导致遮罩残留
+        if (!e.relatedTarget) { resetDragVisual(); return; }
         dragDepth = Math.max(0, dragDepth - 1);
         if (dragDepth === 0) { dragOverlay.value = false; }
       });
       document.addEventListener("drop", function (e) {
-        dragDepth = 0;
-        dragOverlay.value = false;
+        resetDragVisual();
         // ⚠️ 先读 defaultPrevented 再 preventDefault——顺序反了的话，
         // 自己的 preventDefault 会让自己误判「区域已处理」而永远跳过路由
         var zoneHandled = e.defaultPrevented;
