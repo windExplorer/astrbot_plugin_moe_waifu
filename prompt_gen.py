@@ -1049,6 +1049,66 @@ def identity_feature_text(entry: dict, lang: str = "zh") -> str:
     return "、".join(zh for _en, zh in feats)
 
 
+# ---------- 挑染 / 多色头发（v0.71.7） ----------
+# 编辑模型重绘头发时极易把挑染 / 渐变 / 双色调抹成单一发色——句尾笼统的
+# 「发型发色保持不变」对此执行很弱（与尾巴/兽耳同类：必须逐项点名才有效，
+# 见 v0.25.7）。danbooru 的证据链：multicolored hair / two-tone hair /
+# gradient hair 等形状 tag + 若干「X hair」颜色 tag（pink hair, red hair…）。
+_HAIR_MULTI_RES = (
+    ("multicolored hair", "挑染"),
+    ("two-tone hair", "双色调"),
+    ("gradient hair", "渐变"),
+    ("streaked hair", "条状挑染"),
+    ("colored inner hair", "内侧染色"),
+    ("colored tips", "发梢染色"),
+    ("split-colored hair", "分色染"),
+)
+# 只认这张表里的颜色词（排除 long hair / short hair / hair ornament 之类）；
+# 不认识的词直接忽略，不瞎猜颜色。
+_HAIR_COLOR_ZH = {
+    "pink": "粉", "blue": "蓝", "blonde": "金", "yellow": "黄", "red": "红",
+    "black": "黑", "white": "白", "brown": "棕", "purple": "紫", "green": "绿",
+    "orange": "橙", "grey": "灰", "gray": "灰", "silver": "银", "aqua": "水色",
+    "cyan": "青", "light blue": "浅蓝", "light purple": "浅紫",
+    "light brown": "浅棕", "dark blue": "深蓝", "dark purple": "深紫",
+}
+
+
+def hair_multicolor_info(entry: dict) -> dict:
+    """检测 tags_en 里的挑染证据，返回 {"shapes": [zh…], "colors": [zh…]}。纯函数。
+
+    shapes：multicolored hair 等形状 tag 的中文；colors：从「X hair」颜色 tag
+    抽出的颜色（按出现顺序去重）。两者都空 = 该角色没有多色头发。
+    """
+    tags = str((entry or {}).get("tags_en") or "").lower()
+    if not tags:
+        return {"shapes": [], "colors": []}
+    shapes = [zh for en, zh in _HAIR_MULTI_RES
+              if re.search(r"\b" + re.escape(en) + r"\b", tags)]
+    colors = []
+    for m in re.finditer(r"([a-z]+(?: [a-z]+)?)\s+hair\b", tags):
+        zh = _HAIR_COLOR_ZH.get(m.group(1))
+        if zh and zh not in colors:
+            colors.append(zh)
+    return {"shapes": shapes, "colors": colors}
+
+
+def hair_highlight_clause(entry: dict) -> str:
+    """挑染发色保全子句（img2img 指令尾 / 元提示词字段共用）。空串 = 无多色头发。
+
+    触发条件：有形状 tag，或颜色 tag ≥ 2 个（blonde hair + red hair 这种
+    双色组合本身就是挑染证据）。colors 只有 1 个（纯单色发）不加子句——
+    保留描述本身也有把头发拉去重绘的风险（v0.38.0 教训），无关角色不加噪。
+    """
+    info = hair_multicolor_info(entry)
+    if not info["shapes"] and len(info["colors"]) < 2:
+        return ""
+    shape = info["shapes"][0] if info["shapes"] else "挑染"
+    detail = "、".join(info["colors"][:3]) if info["colors"] else "多种发色"
+    return (f"头发带{shape}（{detail}），各发色的分布、分界与挑染条纹必须"
+            "原样保留，不得把头发涂成单一发色")
+
+
 # ---------- 画风主题权重（v0.25.7） ----------
 # `art_*` 纯画风主题在批量补图里等权洗牌时，复古 / 工艺类占了多数（用户反馈
 # 「大部分太复古」）。这里给每个主题一个权重：现代系 3、中性 2、复古工艺 1。
@@ -1955,6 +2015,12 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "",
     if feat_zh:
         tail += (f"角色固有的「{feat_zh}」必须原样保留、清晰可见，"
                  f"不得丢失、缩减或改写成别的部件；")
+    # v0.71.7：挑染 / 渐变 / 双色调发色的角色——编辑模型重绘头发时极易把
+    # 多色抹成单色，笼统的「发型发色不变」不够，必须逐项点名（与尾巴/兽耳
+    # 同机制）。只在 tags 里有挑染证据时才加，无关角色不加噪。
+    hair_zh = hair_highlight_clause(entry)
+    if hair_zh:
+        tail += f"{hair_zh}；"
     # v0.13.3：非多视图指令必须显式处理「源是多视图设定稿」的情况——
     # 编辑类模型（Qwen 2.1 Edit）会强烈复刻输入图布局，只说「输出单人
     # 完整竖版立绘」拉不回单图，必须写明「只保留一个视角、去掉拼接」。
@@ -1985,7 +2051,8 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "",
                   + _ref_clause_single_view(mode))
     if not parts:
         keep = ("，保持人物的面部特征、发型发色与角色辨识度不变"
-                + (f"，角色固有的「{feat_zh}」必须原样保留" if feat_zh else ""))
+                + (f"，角色固有的「{feat_zh}」必须原样保留" if feat_zh else "")
+                + (f"；{hair_zh}" if hair_zh else ""))
         if mode == "none":
             return ("直接生成该角色的单人竖版立绘"
                     + (f"（{framing_zh}）" if framing_zh else "")
@@ -2148,6 +2215,9 @@ _SYSTEM_PROMPT = (
     "若给定了「角色固有特征」（尾巴、兽耳、角、翅膀、光环等），必须逐项写明"
     "「原样保留、清晰可见、不得丢失或改写」——编辑模型最容易把这些非人类"
     "部件洗掉，笼统的「保持辨识度」不够。"
+    "若给定了「挑染发色保全」（multicolored / gradient 等多色头发），必须把"
+    "它的要求写进指令（各发色的分布、分界与挑染条纹原样保留，不得涂成单一"
+    "发色）——编辑模型重绘头发时最爱把挑染抹成单色。"
     "若改动维度里有「画风」，把它写成「把整体画风改为…（人物面部与发型保持可辨认）」，"
     "画风类改动最容易把脸画丢，必须点明保持辨识度。"
     "若改动维度里有「构图取景」，明确写出裁切范围（半身 / 胸像特写 / 膝上 /"
@@ -2165,7 +2235,7 @@ _SYSTEM_PROMPT = (
     "改动姿势时以新姿势为唯一姿势，绝不能把原姿势与新姿势同时画出来"
     "（两个头/两个身体/分身都是严重错误）。"
     "输出纪律：只输出一条简体中文编辑指令本身——不要解释、不要引号、"
-    "不要 markdown、不要分点，总长不超过 300 字。"
+    "不要 markdown、不要分点，总长不超过 330 字。"
 )
 
 # 文生图（natural 系底模，如 Moss-Image）：MOSS-Image 规范 A 档——英文 caption、
@@ -2404,12 +2474,15 @@ def build_meta_prompt(entry: dict, picks: dict, custom: str = "",
                     "单张立绘（保留其中一个视角，通常是正面），不要保留拼接布局。")
     else:
         ref_para = "本轮没有参考图：直接按角色 tags 与设定生成。"
+    hair_zh = hair_highlight_clause(entry)
     lines = [
         f"角色：{name}（出自 {series}），特征 tags：{tags}。",
         # v0.25.7：尾巴/兽耳/角/翅膀这类部件必须在指令里逐项点名保留
         (f"必须保留的固有特征：{identity_feature_text(entry, 'zh')}"
          "（原样保留、清晰可见，不得丢失或改写）。"
          if identity_feature_text(entry, "zh") else ""),
+        # v0.71.7：挑染 / 多色头发单独给字段——编辑模型最爱把头发重涂成单色
+        (f"挑染发色保全：{hair_zh}。" if hair_zh else ""),
         ref_para + "本轮由抽签决定的改动维度：",
     ]
     zh_list = variation_zh_list(picks)
@@ -2739,8 +2812,10 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
             return build_local_instruction(entry, picks, custom), "local"
         # v0.37.0：限额 150→340——system 纪律放宽到 300 字（130 字装不下
         # 7 个改动子句，LLM 被迫丢子句，背景/光照/姿势在图生图里被整条砍掉）
+        # v0.71.7：340→380——新增「挑染发色保全」必写子句（~40 字），纪律
+        # 同步放宽到 330 字；预算不动的话 sanitize 会把新子句整条截掉
         text = sanitize_llm_output(getattr(resp, "completion_text", "") or "",
-                                   limit=340)
+                                   limit=380)
         if text:
             return text, "llm"
         logger.warning("[moe_waifu] 提示词 LLM 返回为空，回落本地模板")

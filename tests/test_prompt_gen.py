@@ -942,6 +942,46 @@ check("复数形态 fox tails 仍命中尾巴",
       ("tail", "尾巴") in prompt_gen.identity_features({"tags_en": "1girl, fox tails"}))
 check("antennae 复数命中触角",
       ("antenna", "触角") in prompt_gen.identity_features({"tags_en": "1girl, antennae"}))
+
+# ②b 挑染 / 多色头发保全（v0.71.7）：编辑模型重绘头发时极易把挑染抹成单色，
+# 笼统的「发型发色不变」不够——tags 里有证据时必须逐项点名
+_hl_entry = {"id": "m7", "name": "三月七",
+             "tags_en": "march 7th, pink hair, multicolored hair, gradient hair, ice"}
+_hl2_entry = {"id": "cl", "name": "长离",
+              "tags_en": "changli, multicolored hair, blonde hair, red hair"}
+_hl3_entry = {"id": "tc", "name": "双色",
+              "tags_en": "1girl, blonde hair, red hair, twintails"}
+_info = prompt_gen.hair_multicolor_info(_hl_entry)
+check("挑染形状 tag 识别", _info["shapes"] == ["挑染", "渐变"], str(_info))
+check("发色从 X hair tag 抽取且去重", _info["colors"] == ["粉"], str(_info))
+check("双发色即挑染证据（无形状 tag 也触发）",
+      prompt_gen.hair_multicolor_info(_hl3_entry)["colors"] == ["金", "红"])
+check("单色发不触发挑染子句",
+      prompt_gen.hair_highlight_clause(
+          {"tags_en": "1girl, pink hair, long hair"}) == "")
+check("纯黑发不触发", prompt_gen.hair_highlight_clause(
+    {"tags_en": "1girl, black hair"}) == "")
+_hl_clause = prompt_gen.hair_highlight_clause(_hl_entry)
+check("挑染子句带形状与颜色", "挑染" in _hl_clause and "粉" in _hl_clause
+      and "单一发色" in _hl_clause, _hl_clause)
+_inst_hl = prompt_gen.build_local_instruction(
+    _hl_entry, prompt_gen.pick_variations(42))
+check("编辑指令锚定挑染保全", "挑染" in _inst_hl and "单一发色" in _inst_hl,
+      _inst_hl[:150])
+check("长离的双发色进指令", "金" in prompt_gen.build_local_instruction(
+    _hl2_entry, prompt_gen.pick_variations(42)))
+check("无挑染角色指令不带挑染条款",
+      "挑染" not in prompt_gen.build_local_instruction(
+          ENTRY, prompt_gen.pick_variations(42)))
+check("hair ornament 不误判为发色",
+      prompt_gen.hair_multicolor_info(
+          {"tags_en": "1girl, hair ornament, black hair"})["colors"] == ["黑"])
+_meta_hl = prompt_gen.build_meta_prompt(
+    _hl_entry, prompt_gen.pick_variations(42))
+check("元提示词带挑染发色保全字段", "挑染发色保全" in _meta_hl, _meta_hl[:200])
+check("元提示词无挑染角色不带该字段",
+      "挑染发色保全" not in prompt_gen.build_meta_prompt(
+          ENTRY, prompt_gen.pick_variations(42)))
 check("真尾巴角色照常命中",
       "尾巴" in prompt_gen.identity_feature_text(_tail_entry))
 
@@ -1301,8 +1341,11 @@ _pk4["background"] = {"zh": "教室", "en": "classroom"}
 check("图生图：无 light 条目维持原句式",
       "整体光照与色调" not in prompt_gen.build_local_instruction(
           {"id": "x", "name": "魔女", "tags_en": ""}, _pk4))
-check("图生图：编辑指令纪律放宽到 300 字",
-      "总长不超过 300 字" in prompt_gen._SYSTEM_PROMPT)
+check("图生图：编辑指令纪律放宽到 330 字（v0.71.7 挑染子句占预算）",
+      "总长不超过 330 字" in prompt_gen._SYSTEM_PROMPT)
+check("图生图：挑染保全写进 system",
+      "挑染发色保全" in prompt_gen._SYSTEM_PROMPT
+      and "挑染抹成单色" in prompt_gen._SYSTEM_PROMPT)
 check("图生图：氛围要求写进 system（只换地点不换光）",
       "只换地点不换光" in prompt_gen._SYSTEM_PROMPT)
 check("图生图：改动子句不可丢写进 system",
