@@ -345,7 +345,9 @@ class MoeWaifuPlugin(Star):
     #
     # 当天已抽过的静默跳过（不重发旧卡）；用户手发 /今日老婆 仍走原来的重发逻辑。
 
-    CHECKIN_LINK_RE = r"^签到$"
+    # 同时接受裸词「签到」与带唤醒前缀的「/签到」——AstrBot 多数版本在 filter
+    # 前会剥掉 wake_prefix，但个别平台/配置下 message_str 仍是原文，两种都认。
+    CHECKIN_LINK_RE = r"^/?签到$"
     CHECKIN_LINK_EXTRA = "_moe_checkin_link"
     STAR_WHISPER_PLUGIN = "astrbot_plugin_moe_star_whisper"
 
@@ -356,7 +358,9 @@ class MoeWaifuPlugin(Star):
         except Exception:
             return False
 
-    @filter.regex(CHECKIN_LINK_RE, priority=20)
+    # priority 提到 999：确保抢在任何插件的 /签到 command（含高优先级实现）之前
+    # 建好后台任务；get_px 随后 stop_event 也不影响已经 create_task 的联动。
+    @filter.regex(CHECKIN_LINK_RE, priority=999)
     async def checkin_link_entry(self, event: AstrMessageEvent):
         """「签到」联动入口：只建后台任务，立即返回（绝不阻塞签到卡）。"""
         if not self.checkin_link_ready():

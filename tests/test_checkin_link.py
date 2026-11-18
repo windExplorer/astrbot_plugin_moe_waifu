@@ -51,8 +51,14 @@ check("默认顺带触发星语", schema["checkin_link_include_star"].get("defau
 
 # ---------- 入口 ----------
 entry = body_of("checkin_link_entry")
-check("注册裸词「签到」入口", '@filter.regex(CHECKIN_LINK_RE, priority=20)' in src)
-check("入口优先级高于 get_px（>0）", "priority=20" in src)
+check("注册「签到」入口", '@filter.regex(CHECKIN_LINK_RE, priority=999)' in src)
+check("入口优先级最高（999，抢在 get_px 之前）", "priority=999" in src)
+# /签到 必须能触发联动（裸词与带唤醒前缀都认）
+check("正则同时接受 /签到 与裸词", "CHECKIN_LINK_RE = r\"^/?签到$\"" in src)
+_pat = re.compile(r"^/?签到$")
+check("裸词匹配", bool(_pat.search("签到")))
+check("斜杠命令匹配", bool(_pat.search("/签到")))
+check("其它指令不匹配", not _pat.search("/今日老婆") and not _pat.search("签到啦"))
 check("入口不吞事件", "stop_event" not in entry)
 check("入口是普通协程（不 yield）", "yield" not in entry)
 check("入口只建后台任务", "create_task" in entry)
