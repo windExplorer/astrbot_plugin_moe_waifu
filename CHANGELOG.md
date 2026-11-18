@@ -2,6 +2,29 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.71.8 (2026-11-19)
+
+**紧急修复 v0.71.7 引入的整页白屏：SWAP_SCHEMES 相邻字符串缺 `+`（JS 不支持隐式拼接）。**
+
+- **现象（用户）**：工坊页直接 `Uncaught SyntaxError: Unexpected string`（注入页 5233 行）
+  ——整段内联脚本无法解析，页面白屏。
+- **根因**：v0.71.7 给角色替换三档指令补挑染条款时，把 JS 多行字符串写成了 Python
+  风格——`"...发型发色（含挑染、"` 换行后直接跟 `"渐变等多色发色的分布…"`,
+  **JS 相邻字符串字面量不会像 Python 那样自动拼接，缺 `+` 就是语法错**。face /
+  appearance / full 三档各一处，共 3 处；一处就足以让整个 `<script>` 块解析失败。
+- **为何测试没拦住（流程教训）**：`test_inline_js`（node --check）能精确抓住这类
+  错误，但 v0.71.7 发版时只跑了 `test_prompt_gen` / `test_webui_contract` /
+  `test_global_refs_swap`——后两者只做正则断言不解析 JS，`test_template_compile`
+  只编译 Vue 模板也不查脚本语法。**改 `index.html` 后必须跑 `test_inline_js`**，
+  这条已作为硬规矩记入发版清单。
+- **修复**：三处补上 `+`。文案内容与 v0.71.7 完全一致（挑染保全条款不变）。
+- **验证**：`test_inline_js`（node --check 语法实检）/ `test_html_integrity` /
+  `test_template_compile` / `test_template_structure` / `test_webui_contract` /
+  `test_global_refs_swap` / `test_drag_overlay` / `test_mobile_responsive` /
+  `test_theme_options` 九套全过；挑染条款经生产入口 `build_generation_prompt`
+  实跑验证（local 链路指令含「头发带挑染…不得把头发涂成单一发色」）。
+- 版本 v0.71.7 -> v0.71.8。
+
 ## v0.71.7 (2026-11-19)
 
 **修复挑染 / 多色头发图生图被洗成单色：tags 有挑染证据时指令逐项点名保全发色分布。**
