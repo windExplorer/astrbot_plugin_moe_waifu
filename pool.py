@@ -520,6 +520,9 @@ def normalize_entry(entry: dict, pack_name: str) -> dict | None:
     # v0.68.0：user_tags（用户标签，逗号分隔 / list）随条目透传——新表经
     # extra_json overlay 往返，不占固定列
     out["user_tags"] = parse_user_tags(entry.get("user_tags"))
+    # v0.71.9：发色备注（挑染/渐变描述）随条目透传——同 user_tags 走
+    # extra_json overlay，图生图 / 角色替换生成提示词时注入发色保全条款
+    out["hair_note"] = str(entry.get("hair_note") or "").strip()
     return out
 
 

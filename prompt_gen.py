@@ -1096,10 +1096,16 @@ def hair_multicolor_info(entry: dict) -> dict:
 def hair_highlight_clause(entry: dict) -> str:
     """挑染发色保全子句（img2img 指令尾 / 元提示词字段共用）。空串 = 无多色头发。
 
-    触发条件：有形状 tag，或颜色 tag ≥ 2 个（blonde hair + red hair 这种
-    双色组合本身就是挑染证据）。colors 只有 1 个（纯单色发）不加子句——
-    保留描述本身也有把头发拉去重绘的风险（v0.38.0 教训），无关角色不加噪。
+    v0.71.9：角色条目的 `hair_note`（发色备注，编辑抽屉可填）优先——用户写
+    什么就按什么注入（不受 tags 证据限制，手写描述比 tag 推断更准）。
+    其次才是 tags 证据：有形状 tag，或颜色 tag ≥ 2 个（blonde hair + red hair
+    这种双色组合本身就是挑染证据）。单一发色 / 无备注 / 无证据 → 空串：
+    保留描述本身有把头发拉去重绘的风险（v0.38.0 教训），无关角色不加噪。
     """
+    note = str((entry or {}).get("hair_note") or "").strip()
+    if note:
+        return (f"头发发色按角色设定为{note}，各发色的分布、分界与挑染条纹必须"
+                "原样保留，不得把头发涂成单一发色")
     info = hair_multicolor_info(entry)
     if not info["shapes"] and len(info["colors"]) < 2:
         return ""
@@ -1107,6 +1113,17 @@ def hair_highlight_clause(entry: dict) -> str:
     detail = "、".join(info["colors"][:3]) if info["colors"] else "多种发色"
     return (f"头发带{shape}（{detail}），各发色的分布、分界与挑染条纹必须"
             "原样保留，不得把头发涂成单一发色")
+
+
+def ensure_hair_clause(text: str, entry: dict) -> str:
+    """LLM 输出保底注入（v0.71.9）：LLM 可能把「挑染发色保全」润色丢——
+    产出文本里没有该子句时强制拼到尾部。有（哪怕措辞被改）就不再叠加，
+    避免同一要求出现两遍。纯函数。"""
+    body = str(text or "").strip()
+    hair = hair_highlight_clause(entry)
+    if not body or not hair or hair in body:
+        return body
+    return body.rstrip("。；;、") + "；" + hair + "。"
 
 
 # ---------- 画风主题权重（v0.25.7） ----------
@@ -2817,7 +2834,9 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
         text = sanitize_llm_output(getattr(resp, "completion_text", "") or "",
                                    limit=380)
         if text:
-            return text, "llm"
+            # v0.71.9：发色备注/挑染保底——LLM 可能把这条要求润没了，
+            # 产出里没有就强制拼到尾部（有则不叠加）
+            return ensure_hair_clause(text, entry), "llm"
         logger.warning("[moe_waifu] 提示词 LLM 返回为空，回落本地模板")
         return build_local_instruction(entry, picks, custom), "local"
     except Exception:

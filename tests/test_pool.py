@@ -210,4 +210,19 @@ check("base 模式下旧主参考/重绘强度仍保留",
       and merged["strategy"]["denoise"] == 0.7)
 check("原条目不被修改", old["strategy"]["refs"] == ["refs/a.png", "refs/b.png"])
 
+# hair_note（v0.71.9：发色备注）——normalize 透传 + 编辑保存随表单更新
+old_note = {"id": "c2", "name": "挑染酱", "tags_en": "x",
+            "hair_note": "金发、发梢渐变红",
+            "strategy": {"type": "img2img", "refs": ["refs/a.png"]}}
+form_note = {"id": "c2", "name": "挑染酱", "tags_en": "x",
+             "hair_note": "粉发带蓝挑染",
+             "strategy": {"type": "img2img"}, "strategy_type": "img2img"}
+norm_note = pool.normalize_entry(form_note, "anime")
+check("normalize 透传 hair_note", norm_note["hair_note"] == "粉发带蓝挑染")
+merged_note = pool.merge_saved_entry(old_note, norm_note)
+check("编辑保存更新发色备注", merged_note["hair_note"] == "粉发带蓝挑染")
+check("编辑保存保留旧参考图绑定", merged_note["strategy"]["refs"] == ["refs/a.png"])
+norm_no = pool.normalize_entry({"id": "c3", "name": "无备注", "tags_en": "x"}, "anime")
+check("无备注条目 hair_note 为空串", norm_no["hair_note"] == "")
+
 print("test_pool: ALL OK")

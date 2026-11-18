@@ -2,6 +2,38 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.71.9 (2026-11-19)
+
+**发色备注做成角色级配置项：编辑抽屉可填，普通图生图 / 抽卡 / 角色替换的提示词自动注入。**
+
+- **需求（用户）**：v0.71.7 的 tags 证据推断不够用——挑染条款没出现在提示词里
+  （手导入角色没有多色 hair tags 就无从识别；tag 也写不出「发梢渐变红」这类
+  精确分布）。要求做成可配置项：角色单独配置，生成提示词时注入。
+- **实现（`prompt_gen.py`）**：
+  - `hair_highlight_clause` 增加 `hair_note`（发色备注）优先级——条目上有备注
+    就按备注注入（`头发发色按角色设定为「金发、发梢渐变红」…不得把头发涂成
+    单一发色`），**不依赖 tags 证据**；无备注回落 v0.71.7 的 tags 推断。
+  - 新增纯函数 `ensure_hair_clause`：LLM 输出保底——产出文本里没有该子句时
+    强制拼到尾部（LLM 可能把必写要求润没了；已有则不叠加）。接线 img2img
+    LLM 分支 sanitize 之后。
+  - 注入面（同一 `hair_highlight_clause` 出口，全部自动生效）：普通图生图
+    本地指令尾 / LLM 元提示词字段 / LLM 输出保底 / 抽卡主链路与批量补图
+    （同走 `build_generation_prompt`）。
+- **实现（`pool.py` + 编辑抽屉）**：`normalize_entry` 透传 `hair_note`
+  （同 user_tags 走 extra_json overlay 往返，不占固定列）；编辑抽屉新增
+  「发色备注」输入框（user_tags 下方），emptyForm / formToEntry /
+  entryToForm 三处接线；`merge_saved_entry` 无需改动（表单托管字段随保存更新）。
+- **实现（角色替换，`index.html`）**：新增 `swapPromptWithHair` 助手，swap
+  三处提示词组装点（trySwapPrompt / 方案切换 watch / genPromptPreview）按
+  当前角色注入发色备注——与后端普通图生图同口径。
+- **验证**：`test_prompt_gen` 新增 hair_note 优先级 / 注入 / ensure 保底与不叠加
+  共 9 项；`test_pool` 新增 normalize 透传与编辑保存往返 4 项；
+  `test_global_refs_swap` 三处 swap 组装点形状断言同步（并新增 hair_note 注入
+  守卫）；`test_inline_js`（node --check）/ `test_html_integrity` /
+  `test_template_compile` / `test_template_structure` / `test_webui_contract` /
+  `test_drag_overlay` 全过。
+- 版本 v0.71.8 -> v0.71.9。
+
 ## v0.71.8 (2026-11-19)
 
 **紧急修复 v0.71.7 引入的整页白屏：SWAP_SCHEMES 相邻字符串缺 `+`（JS 不支持隐式拼接）。**

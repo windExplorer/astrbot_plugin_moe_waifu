@@ -4581,6 +4581,9 @@
           <!-- v0.68.0：用户标签（替代卷的启停粒度）——命中「停用标签」的角色不入抽卡 -->
           <n-input v-model:value="form.user_tags"
                    placeholder="标签（可选；逗号分隔，如：测试, 未完工）——命中配置页「停用标签」的角色不参与抽卡"></n-input>
+          <!-- v0.71.9：发色备注——挑染/渐变角色单独配置，生成提示词时注入保全条款 -->
+          <n-input v-model:value="form.hair_note" type="textarea" :rows="2"
+                   placeholder="发色备注（可选）：挑染 / 渐变等发色描述，如「金发、发梢渐变红」「粉发带蓝挑染」——图生图与角色替换的提示词会自动注入发色保全条款；留空则按 tags 自动识别"></n-input>
           <n-input v-model:value="form.quote" type="textarea" :rows="3"
                    placeholder="角色印象语（可选，显示在卡片上）：每行一句，可写多条——卡片会按抽签随机显示其中一句；只写一句则固定显示"></n-input>
           <n-space align="center">
@@ -5254,6 +5257,14 @@
       if (SWAP_SCHEMES[i].key === key) { return SWAP_SCHEMES[i].prompt; }
     }
     return SWAP_SCHEMES[1].prompt;
+  }
+  // v0.71.9：swap 指令按角色注入发色备注（hair_note，与后端普通图生图同口径）
+  function swapPromptWithHair(base, e) {
+    var note = String((e && e.hair_note) || "").trim();
+    if (!note) return base;
+    return String(base || "").replace(/。+$/, "") +
+      "。头发发色按角色设定为" + note +
+      "，各发色的分布、分界与挑染条纹必须原样保留，不得把头发涂成单一发色。";
   }
   // v0.60.4 的纯换脸指令保留为 face 档，兼容旧引用
   var SWAP_INSTRUCTION = swapSchemePrompt("face");
@@ -6225,7 +6236,9 @@
           strategy_denoise: null,
           tags_en: "", user_tags: "", quote: "", color: "#E8B4C8", verified: false,
           // v0.54.8：头饰默认固定（帽类外观多为角色特征，默认不摘换）
-          keep_footwear: false, keep_headwear: true, keep_outerwear: false
+          keep_footwear: false, keep_headwear: true, keep_outerwear: false,
+          // v0.71.9：发色备注（挑染/渐变描述，生成提示词时注入保全条款）
+          hair_note: ""
         };
       };
       var form = Vue.ref(emptyForm());
@@ -6263,7 +6276,9 @@
           quotes: quotes,
           color: f.color || "#E8B4C8", verified: !!f.verified,
           keep_footwear: !!f.keep_footwear, keep_headwear: !!f.keep_headwear,
-          keep_outerwear: !!f.keep_outerwear
+          keep_outerwear: !!f.keep_outerwear,
+          // v0.71.9：发色备注随表单提交（normalize/extra_json 往返）
+          hair_note: String(f.hair_note || "").trim()
         };
       }
       function entryToForm(e) {
@@ -6285,7 +6300,8 @@
           // 老条目可能没这个字段（后端 normalize 默认 true），这里同样默认开
           keep_headwear: (e.keep_headwear === undefined || e.keep_headwear === null)
             ? true : !!e.keep_headwear,
-          keep_outerwear: !!e.keep_outerwear
+          keep_outerwear: !!e.keep_outerwear,
+          hair_note: e.hair_note || ""
         };
       }
       function openNew() {
@@ -6774,7 +6790,10 @@
         }
         return "";
       }
-      function trySwapPrompt() { return swapSchemePrompt(swapScheme.value); }
+      function trySwapPrompt() {
+        return swapPromptWithHair(swapSchemePrompt(swapScheme.value),
+                                  tryEntry.value);
+      }
       // v0.61.0：换方案立刻同步两处已生成的提示词——用户改方案后不必手动重进第2步。
       // 只改 prompt 文本，不触碰 tryStep / galPromptConfirmed，避免打断正在编辑的内容。
       Vue.watch(swapScheme, function () {
@@ -6783,7 +6802,8 @@
           tryPromptSource.value = "角色替换 · " + swapSchemeHint.value + "（可手动改）";
         }
         if (galMode.value === "swap" && String(galPrompt.value || "").trim()) {
-          galPrompt.value = swapSchemePrompt(swapScheme.value);
+          galPrompt.value = swapPromptWithHair(swapSchemePrompt(swapScheme.value),
+                                               detailEntry.value);
           galPromptSource.value = "角色替换 · " + swapSchemeHint.value + "（可手动改）";
         }
       });
@@ -8406,7 +8426,8 @@
         galArtistMade.value = false;   // v0.40.0：重新走池子预览 = 不再是画师产出
         // v0.56.0 角色替换：固定 Qwen 双图编辑指令，不经过 prompt_gen（manual 直通）
         if (galMode.value === "swap") {
-          galPrompt.value = swapSchemePrompt(swapScheme.value);
+          galPrompt.value = swapPromptWithHair(swapSchemePrompt(swapScheme.value),
+                                               detailEntry.value);
           galPromptSource.value = "角色替换 · " + swapSchemeHint.value + "（可手动改）";
           galDims.value = []; galThemeResolved.value = null;
           galPromptKey = galPromptKeyNow();

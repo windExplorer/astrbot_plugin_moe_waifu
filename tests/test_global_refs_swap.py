@@ -121,13 +121,19 @@ def main():
     check("换方案会同步刷新两处提示词",
           "Vue.watch(swapScheme, function ()" in page
           and "tryPrompt.value = trySwapPrompt()" in page
-          and "galPrompt.value = swapSchemePrompt(swapScheme.value)" in page)
+          and "swapPromptWithHair(swapSchemePrompt(swapScheme.value)" in page)
     check("方案状态已暴露给模板",
           'swapScheme: swapScheme, swapSchemeOpts: swapSchemeOpts, swapSchemeHint: swapSchemeHint' in page)
     check("试画台 swap 提示词走方案函数",
-          "function trySwapPrompt() { return swapSchemePrompt(swapScheme.value); }" in page)
+          "function trySwapPrompt() {" in page
+          and "swapPromptWithHair(swapSchemePrompt(swapScheme.value),\n                                  tryEntry.value)" in page)
     check("角色详情 swap 提示词走方案函数",
-          "galPrompt.value = swapSchemePrompt(swapScheme.value)" in page)
+          page.count("swapPromptWithHair(swapSchemePrompt(swapScheme.value),") >= 2
+          and "swapPromptWithHair(swapSchemePrompt(swapScheme.value),\n                                               detailEntry.value)" in page)
+    check("swap 按角色注入发色备注（v0.71.9 hair_note）",
+          "function swapPromptWithHair(base, e)" in page
+          and "e.hair_note" in page
+          and "不得把头发涂成单一发色" in page)
 
     # 4) 菜单 / 上传端点 / 两段删除
     check("前端新增全局图库页签", 'key: "global_refs"' in page)

@@ -982,6 +982,33 @@ check("元提示词带挑染发色保全字段", "挑染发色保全" in _meta_h
 check("元提示词无挑染角色不带该字段",
       "挑染发色保全" not in prompt_gen.build_meta_prompt(
           ENTRY, prompt_gen.pick_variations(42)))
+
+# ②c 发色备注（v0.71.9）：角色单独配置的 hair_note 优先于 tags 证据，
+# 不依赖 tags 也能注入；LLM 输出丢了子句时 ensure_hair_clause 保底拼回
+_note_entry = {"id": "hn", "name": "自定", "strategy_type": "img2img",
+               "tags_en": "1girl, black hair",
+               "hair_note": "金发、发梢渐变红", "strategy": {"ref": "refs/a.png"}}
+check("hair_note 不依赖 tags 证据即触发",
+      "金发、发梢渐变红" in prompt_gen.hair_highlight_clause(_note_entry))
+check("hair_note 子句带保全要求",
+      "单一发色" in prompt_gen.hair_highlight_clause(_note_entry))
+_inst_note = prompt_gen.build_local_instruction(
+    _note_entry, prompt_gen.pick_variations(42))
+check("编辑指令注入发色备注", "金发、发梢渐变红" in _inst_note, _inst_note[:150])
+_meta_note = prompt_gen.build_meta_prompt(
+    _note_entry, prompt_gen.pick_variations(42))
+check("元提示词带发色备注字段", "挑染发色保全" in _meta_note
+      and "金发、发梢渐变红" in _meta_note, _meta_note[:200])
+_plain_out = "把背景改为教室，其余保持不变。"
+_ens = prompt_gen.ensure_hair_clause(_plain_out, _note_entry)
+check("LLM 输出丢失子句时保底拼回",
+      _ens.startswith(_plain_out.rstrip("。")) and "金发、发梢渐变红" in _ens, _ens)
+_ens2 = prompt_gen.ensure_hair_clause(
+    "把背景改为教室。" + prompt_gen.hair_highlight_clause(_note_entry) + "。",
+    _note_entry)
+check("LLM 输出已含子句时不叠加", _ens2.count("金发、发梢渐变红") == 1, _ens2)
+check("无备注无证据 ensure 原样返回",
+      prompt_gen.ensure_hair_clause("把背景改为教室。", ENTRY) == "把背景改为教室。")
 check("真尾巴角色照常命中",
       "尾巴" in prompt_gen.identity_feature_text(_tail_entry))
 
