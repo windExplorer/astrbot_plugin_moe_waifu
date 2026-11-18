@@ -113,6 +113,20 @@ with tempfile.TemporaryDirectory() as td:
     check("card_ver 落库", st.get_draw("u2", TODAY)["card_ver"] == 2,
           st.get_draw("u2", TODAY)["card_ver"])
 
+    # v0.71.10：总览「今日抽签」数据源 = draw_events 时间线——换老婆后
+    # 首抽事件仍在（draws 行已被覆盖，events 只追加不覆盖）
+    ev_today, _ev_total = st.list_events(50, 0, date=TODAY)
+    u1_ev = [r for r in ev_today if r["user_id"] == "u1"]
+    check("换签后首抽事件仍在时间线里",
+          len(u1_ev) == 2
+          and [r["char_name"] for r in sorted(u1_ev, key=lambda r: r["id"])]
+              == ["x", "y"]
+          and [int(r["nonce"]) for r in sorted(u1_ev, key=lambda r: r["id"])]
+              == [0, 1],
+          [(r["char_name"], r["nonce"]) for r in u1_ev])
+    check("事件行带时间与群字段（总览行渲染所需）",
+          all(r.get("created_at") and "group_id" in r for r in u1_ev))
+
     check("user_char_count 可用（无记录=0）", st.user_char_count("u1", "y") == 0,
           st.user_char_count("u1", "y"))
     st.bump_user_char("u1", "y")

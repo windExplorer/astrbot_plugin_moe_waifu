@@ -2,6 +2,34 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.71.10 (2026-11-19)
+
+**总览「今日抽签」改按事件时间线展示：首抽与每次换签都在（不只最后一次）。**
+
+- **需求（用户）**：有人换老婆之后，之前的记录也应该展示——按时间线全部展示，
+  而不是只展示最后一次抽取记录（首抽那位在总览里「消失」了）。
+- **根因**：总览 `today_recent` 读的是 `draws` 表——**一人一天一行，换老婆原地
+  覆盖**，于是列表里只剩每人最后一次的结果；完整时间线在只追加的 `draw_events`
+  流水表里（v0.54.4 给「抽签记录」页配过 `first_event`，总览一直没跟上）。
+- **修复（`webui_api.py`）**：`today_recent` 数据源换 `list_events(date=today)`
+  ——首抽（nonce=0）与每次换签（nonce=1,2…）按时间倒序全部进列表。事件行补两样：
+  - `nickname`：draw_events 不存昵称，用当日 draws 的最新昵称按 user_id 回填；
+  - 卡面缩略只给每人「当前 nonce」的那条事件——`update_draw_card` 本来就只回填
+    最新事件，且旧事件的 card_path 指向的是被覆盖后的同一张卡文件，展示出来
+    张冠李戴。
+  头部统计口径不变（`N 人 / M 次`：人数来自 draws、次数来自 count_events）。
+- **修复（前端 `index.html`）**：行 `:key` 从 `user_id + date` 改事件 `id`
+  （同一人今天多条事件，旧 key 会撞重渲染告警）；时间字段改 `created_at`
+  （事件行没有 updated_at，兼容写法 `r.created_at || r.updated_at`）。
+- **顺手修**：`tests/test_ui_v042.py` 的 `fake_gen` 桩缺 `progress` kwarg
+  （draw 侧 v0.66.0 加排队回调时桩没跟上）——该文件从 159 行起崩溃，**后面
+  全部断言（含总览行守卫）从未真正执行过**。补上参数后整套跑通。
+- **验证**：`test_today_stats` 新增时间线守卫（换签后首抽事件仍在、nonce 序列
+  0→1、事件行带时间与群字段）；`test_ui_v042` 全套复活后全过（含 3 条总览行
+  断言更新）；`test_inline_js` / `test_html_integrity` / `test_template_compile` /
+  `test_webui_contract` / `test_records` 全过。
+- 版本 v0.71.9 -> v0.71.10。
+
 ## v0.71.9 (2026-11-19)
 
 **发色备注做成角色级配置项：编辑抽屉可填，普通图生图 / 抽卡 / 角色替换的提示词自动注入。**

@@ -1131,8 +1131,11 @@
                     <span class="txt">正在载入…</span>
                   </div>
                   <div v-if="!ovLoading && !ov.today_recent.length" style="font-size:12px; opacity:.6;">今天还没有人抽签</div>
-                  <!-- v0.54.0：今日抽签——谁抽到了谁 / 哪个群 / 首抽还是换签 / 时分秒 -->
-                  <div v-for="r in ov.today_recent" :key="r.user_id + r.date" class="ov-today-row">
+                  <!-- v0.54.0：今日抽签——谁抽到了谁 / 哪个群 / 首抽还是换签 / 时分秒
+                       v0.71.10：数据源改 draw_events 时间线——首抽与每次换签都展示
+                       （draws 一人一天一行会被换老婆覆盖），key 用事件 id 防重、
+                       时间用 created_at（事件行没有 updated_at） -->
+                  <div v-for="r in ov.today_recent" :key="r.id" class="ov-today-row">
                     <img v-if="avatarOf(r.user_id)" class="avatar zoomable" :src="avatarOf(r.user_id)"
                          style="width:26px; height:26px;" alt=""
                          title="点击查看头像大图"
@@ -1161,7 +1164,7 @@
                           <span>{{ groupNameOf(r.group_id, r.group_name) }}</span>
                         </span>
                         <span class="ov-flag" :class="{ reroll: Number(r.nonce || 0) > 0 }">{{ rerollLabel(r.nonce) }}</span>
-                        <span class="ov-today-time" :title="fmtTime(r.updated_at)">{{ fmtClock(r.updated_at) }}</span>
+                        <span class="ov-today-time" :title="fmtTime(r.created_at || r.updated_at)">{{ fmtClock(r.created_at || r.updated_at) }}</span>
                       </div>
                     </div>
                     <img v-if="r.card_thumb" class="ov-card-thumb" :src="r.card_thumb"

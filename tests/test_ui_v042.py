@@ -139,7 +139,11 @@ with tempfile.TemporaryDirectory() as td2:
     real_event = api._synthetic_event
     api._synthetic_event = lambda: None   # 本机没有 astrbot 运行时，别刷合成事件日志
 
-    async def fake_gen(context, cfg, entry, seed, event, prompt=""):
+    # v0.71.10：补 progress kwarg——draw 侧签名早已带 progress 回调（排队状态
+    # 透传），桩没跟上导致本文件在 159 行崩溃、后面全部断言（含总览行守卫）
+    # 从未被执行
+    async def fake_gen(context, cfg, entry, seed, event, prompt="",
+                       progress=None):
         seen["entry"] = entry
         seen["prompt"] = prompt
         seen["cfg"] = cfg
@@ -404,11 +408,15 @@ check("印象语给到 10 句量级（rows 6 + 实时句数）",
 
 # ---------- ⑩ v0.54.0：总览补全统计 / 今日抽签 / 记录页群与时间 / 头像 ----------
 check("总览改「今日抽签」且时间到时分秒",
-      "ov.today_recent" in PAGE and "fmtClock(r.updated_at)" in PAGE
+      "ov.today_recent" in PAGE and "fmtClock(r.created_at || r.updated_at)" in PAGE
       and "今日抽签" in PAGE and "ov.recent" not in PAGE)
 check("今日抽签带群名 + 首抽/换签标注",
       "groupNameOf(r.group_id, r.group_name)" in PAGE
       and "rerollLabel(r.nonce)" in PAGE)
+# v0.71.10：数据源改 draw_events 时间线——首抽与每次换签都展示（draws 一人
+# 一天一行会被换老婆覆盖），key 用事件 id 防重
+check("今日抽签按事件时间线展示（key=事件 id）",
+      ':key="r.id"' in PAGE and "list_events(" in API)
 check("总览补全清单（立绘/头像/印象语）可点进角色详情",
       all(k in PAGE for k in ("ov.quota_short", "ov.no_avatar", "ov.no_quote"))
       and "gotoGallery(c.id)" in PAGE)

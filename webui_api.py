@@ -3922,15 +3922,31 @@ async def h_overview(plugin) -> dict:
         today = plugin._today()
         today_recent, today_draws, total_draws, today_draw_times = [], 0, 0, 0
         if plugin._store:
-            today_recent = plugin._store.list_records(1, TODAY_ROWS, today, today)["rows"]
+            # v0.71.10：今日抽签改读 draw_events 时间线——draws 一人一天一行，
+            # 换老婆原地覆盖，总览里「首抽抽到了谁」直接消失（用户口径：按
+            # 时间线全部展示，不只最后一次）。事件行补两样东西：
+            #   nickname（events 不存昵称，用当日 draws 的最新昵称回填）；
+            #   卡面缩略只给每人「当前 nonce」那条事件——update_draw_card 只
+            #   回填最新事件，且旧事件的 card_path 指向的是被覆盖后的同一张
+            #   卡文件，展示出来张冠李戴。
             today_draws = plugin._store.list_records(1, 1, today, today)["total"]
             total_draws = plugin._store.list_records(1, 1)["total"]
             today_draw_times = plugin._store.count_events(today)
-            # 今日抽签的行附卡面缩略（15 张以内、120px data URL），前端直接当
-            # 缩略图展示、点开走 openViewer(card_path) 看原图
+            today_rows = plugin._store.list_records(1, 500, today, today)["rows"]
+            nick_of = {r["user_id"]: (r.get("nickname") or "")
+                       for r in today_rows}
+            cur_nonce = {r["user_id"]: int(r.get("nonce") or 0)
+                         for r in today_rows}
+            today_recent, _ev_total = plugin._store.list_events(
+                limit=TODAY_ROWS, date=today)
             for row in today_recent:
-                fp = _safe_data_file(plugin, row.get("card_path"))
-                row["card_thumb"] = _thumb_cached(str(fp), 120) if fp else ""
+                uid = str(row.get("user_id") or "")
+                row["nickname"] = nick_of.get(uid, "")
+                if uid in cur_nonce and int(row.get("nonce") or 0) == cur_nonce[uid]:
+                    fp = _safe_data_file(plugin, row.get("card_path"))
+                    row["card_thumb"] = _thumb_cached(str(fp), 120) if fp else ""
+                else:
+                    row["card_thumb"] = ""
         try:
             anima_ready = draw._get_tool_handler(plugin.context, "comfyui_draw") is not None
         except Exception:
