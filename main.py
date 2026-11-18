@@ -514,12 +514,15 @@ class MoeWaifuPlugin(Star):
                 entry = dict(entry)
                 entry["quote"] = pool.pick_quote(entry, seed_bytes)
                 try:
+                    # v0.71.11：卡面文件名带 nonce——换签各自成文件保留，旧卡
+                    # 不再被覆盖（总览时间线 / 记录详情流水都能回看每张卡）
                     card_path = await asyncio.to_thread(
                         card.render_card, self._data_dir / rel["file"], entry,
                         date_str=date, same_count=same, total_count=max(1, total),
                         today_rank=rank,
                         rerolled=bool(existing["rerolled"]),
-                        out_path=str(self._data_dir / "cards" / f"{uid}_{date}.png"),
+                        out_path=str(self._data_dir / "cards"
+                                     / f"{uid}_{date}_{int(existing.get('nonce') or 0)}.png"),
                         data_dir=self._data_dir,
                         seal_pos=self._cfg("card_seal_pos", "name"),
                         scrim=self._cfg("card_scrim", 100),
@@ -1011,11 +1014,13 @@ class MoeWaifuPlugin(Star):
         cards_dir = self._data_dir / "cards"
         cards_dir.mkdir(parents=True, exist_ok=True)
         try:
+            # v0.71.11：卡面文件名带 nonce——换签各自的卡都保留可回看
             card_path = await asyncio.to_thread(
                 card.render_card, src, entry,
                 date_str=date, same_count=same, total_count=total, today_rank=rank,
                 rerolled=rerolled,
-                out_path=str(cards_dir / f"{uid}_{date}.png"), data_dir=self._data_dir,
+                out_path=str(cards_dir / f"{uid}_{date}_{int(nonce or 0)}.png"),
+                data_dir=self._data_dir,
                 seal_pos=self._cfg("card_seal_pos", "name"),
                 scrim=self._cfg("card_scrim", 100),
             )

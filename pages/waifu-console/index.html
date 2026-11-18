@@ -3365,12 +3365,17 @@
                 <div>
                   <div class="sec-title">当天抽签流水 <span class="cnt">换老婆前的角色也在这里</span></div>
                   <table class="rec-table" v-if="recDetail.events.length">
-                    <thead><tr><th>时间</th><th>类型</th><th>角色</th><th>nonce</th><th>种子</th><th>立绘来源</th></tr></thead>
+                    <thead><tr><th>时间</th><th>类型</th><th>角色</th><th>nonce</th><th>种子</th><th>立绘来源</th><th>卡</th></tr></thead>
                     <tbody><tr v-for="e in recDetail.events" :key="e.id">
                       <td>{{ fmtTime(e.created_at) }}</td><td>{{ e.kind === "reroll" ? "重抽" : "首抽" }}</td>
                       <td>{{ e.char_name || e.char_id }}</td><td>{{ e.nonce }}</td>
                       <td :title="e.seed_hex">{{ (e.seed_hex || "").slice(0, 10) || "—" }}</td>
                       <td>{{ decisionLabel(e.decision) }}</td>
+                      <!-- v0.71.11：卡面文件带 nonce 后每次换签的卡都保留，流水可逐条回看 -->
+                      <td><img v-if="e.card_thumb" class="ov-card-thumb" :src="e.card_thumb"
+                               style="width:44px;" alt="卡面" title="点击查看卡片大图"
+                               @click="e.card_path && openViewer(e.card_path, recDetail.draw.date + ' 卡片')"><span
+                            v-else style="opacity:.5;">—</span></td>
                     </tr></tbody>
                   </table>
                   <n-empty v-else description="该签早于 v0.9.0，没有流水" size="small"></n-empty>

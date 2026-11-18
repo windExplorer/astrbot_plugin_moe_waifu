@@ -333,6 +333,19 @@ def main():
     check("clear_portraits 不再挂在今日签快捷操作里",
           "doQuickAction('clear_portraits')" not in page)
 
+    # v0.71.11：换签旧卡保留——卡面文件名带 nonce（首抽/重发重渲染两处），
+    # 总览时间线与记录详情流水按事件附卡缩略；升级前共享文件名的旧路径
+    # （与更新的同用户事件重复）不展示缩略，防张冠李戴
+    main_src = (ROOT / "main.py").read_text(encoding="utf-8")
+    check("卡面文件名带 nonce（_produce 与重发重渲染两处）",
+          'f"{uid}_{date}_{int(nonce or 0)}.png"' in main_src
+          and "f\"{uid}_{date}_{int(existing.get('nonce') or 0)}.png\"" in main_src
+          and main_src.count('f"{uid}_{date}.png"') == 0,
+          main_src.count('f"{uid}_{date}.png"'))
+    check("总览/记录详情按事件附卡缩略（路径去重防覆盖张冠李戴）",
+          "newer_paths" in api and api.count("card_thumb") >= 4
+          and "card_thumb" in page and "openViewer(e.card_path" in page)
+
     if FAILURES:
         print(f"test_webui_contract: {len(FAILURES)} FAILED")
         sys.exit(1)

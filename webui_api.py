@@ -3924,29 +3924,31 @@ async def h_overview(plugin) -> dict:
         if plugin._store:
             # v0.71.10：今日抽签改读 draw_events 时间线——draws 一人一天一行，
             # 换老婆原地覆盖，总览里「首抽抽到了谁」直接消失（用户口径：按
-            # 时间线全部展示，不只最后一次）。事件行补两样东西：
-            #   nickname（events 不存昵称，用当日 draws 的最新昵称回填）；
-            #   卡面缩略只给每人「当前 nonce」那条事件——update_draw_card 只
-            #   回填最新事件，且旧事件的 card_path 指向的是被覆盖后的同一张
-            #   卡文件，展示出来张冠李戴。
+            # 时间线全部展示，不只最后一次）。事件行补 nickname（events 不存
+            # 昵称，用当日 draws 的最新昵称回填）。
+            # v0.71.11：卡面文件名带 nonce 后每个事件都有自己的卡文件，全部
+            # 事件都给缩略；升级前的旧数据共享同一个文件名（被覆盖过），按
+            # 「路径与更新的同用户事件重复则不展示」防张冠李戴。
             today_draws = plugin._store.list_records(1, 1, today, today)["total"]
             total_draws = plugin._store.list_records(1, 1)["total"]
             today_draw_times = plugin._store.count_events(today)
             today_rows = plugin._store.list_records(1, 500, today, today)["rows"]
             nick_of = {r["user_id"]: (r.get("nickname") or "")
                        for r in today_rows}
-            cur_nonce = {r["user_id"]: int(r.get("nonce") or 0)
-                         for r in today_rows}
             today_recent, _ev_total = plugin._store.list_events(
                 limit=TODAY_ROWS, date=today)
+            newer_paths = {}  # uid -> 该用户「更新事件」已出现的卡路径集合
             for row in today_recent:
                 uid = str(row.get("user_id") or "")
                 row["nickname"] = nick_of.get(uid, "")
-                if uid in cur_nonce and int(row.get("nonce") or 0) == cur_nonce[uid]:
-                    fp = _safe_data_file(plugin, row.get("card_path"))
-                    row["card_thumb"] = _thumb_cached(str(fp), 120) if fp else ""
+                cp = str(row.get("card_path") or "")
+                fp = _safe_data_file(plugin, cp) if cp else None
+                if fp is not None and cp not in newer_paths.get(uid, set()):
+                    row["card_thumb"] = _thumb_cached(str(fp), 120)
                 else:
                     row["card_thumb"] = ""
+                if cp:
+                    newer_paths.setdefault(uid, set()).add(cp)
         try:
             anima_ready = draw._get_tool_handler(plugin.context, "comfyui_draw") is not None
         except Exception:
@@ -4522,6 +4524,19 @@ def _record_detail_core(plugin, uid: str, date: str) -> dict | None:
     _enrich_char_rows([detail["draw"]], name_of)
     _enrich_char_rows(detail["events"], name_of)
     _enrich_char_rows(detail["jobs"], name_of)
+    # v0.71.11：流水事件附卡面缩略——卡面文件带 nonce 后每次换签的卡都保留
+    # 在 cards/ 里，详情页能逐条回看。升级前共享一个文件名（被覆盖过）：
+    # 「路径与更新的事件重复则不展示」防张冠李戴（events 按 id ASC，倒序收集）。
+    newer_paths = set()
+    for ev in reversed(detail["events"]):
+        cp = str(ev.get("card_path") or "")
+        fp = _safe_data_file(plugin, cp) if cp else None
+        if fp is not None and cp not in newer_paths:
+            ev["card_thumb"] = _thumb_cached(str(fp), 120)
+        else:
+            ev["card_thumb"] = ""
+        if cp:
+            newer_paths.add(cp)
     return detail
 
 
