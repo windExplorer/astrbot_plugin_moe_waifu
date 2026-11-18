@@ -2,6 +2,34 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.71.3 (2026-11-18)
+
+**立绘卡片「停用」与「删除」拆开：停用不再二次确认，新增独立删除图标（保留两段确认）。**
+
+- **需求（用户）**：立绘里删除和停用混在一起——同一个垃圾桶图标（tip 写「停用（软删除）」）
+  还要二次确认，语义不清：想快速下掉一张图嫌麻烦，想真删又怕点到「停用」以为删了。
+- **方案（前端 `pages/waifu-console/index.html`）**：
+  - 启用中立绘的操作条由 5 键变 6 键：详情 / 封面 / 出卡源 / 转参考图 / **停用（新 pause 双竖条图标，
+    点一下直接生效，不再两段确认——可随时恢复，误触无损失）** / **删除（垃圾桶，两段确认：
+    文件进回收站 + 删行）**。垃圾桶图标从此只代表真删除。
+  - `doDeletePortrait` 改名 `doDisablePortrait`（函数名跟上语义，删掉 `armDelete` 两段确认）；
+    删除按钮复用 `doDeletePortraitHard`（与已停用卡片的「彻底删除」同款，armed key 同为 `hard:<file>`，
+    两种卡片状态互斥不会冲突）。
+  - `ICONS` 新增 `pause` 图标（feather 风格双竖条，与既有线性图标同族）。
+- **方案（后端 `webui_api.py`）**：`/portraits/delete_hard` 原本拒绝启用中的行
+  （「请先停用再彻底删除」），前端拆开后该限制失去意义——删掉 active 校验，只保留
+  `confirm=true` 服务端强校验（两段确认仍是唯一防线）。被引用文件的安全网不变：
+  `_delete_portrait_core` 照旧先把被引用文件另存 refs/ 保活、改写封面 / 出卡源等指针，
+  删除走回收站可手动找回。
+- **验证**：`tests/test_refs_move.py` 新增 `test_hard_delete_active_row`（启用行带 confirm
+  直接彻底删除）；`test_webui_contract.py` 刷新链路守卫同步改名并纳入 `doDeletePortraitHard`。
+  实测：`test_refs_move` 两个目标用例（点名直跑，该文件 `test_move_to_ref` 等用例为
+  v0.68.0 卷收敛后的**预存失败**，与本版无关）/ `test_webui_contract` / `test_html_integrity` /
+  `test_inline_js` / `test_template_compile` / `test_template_structure` /
+  `test_mobile_responsive` / `test_theme_options` / `test_trash` 全过；
+  `test_portrait_delete_safety` 仅剩的失败为「只剩一处硬 unlink」计数守卫（master 预存）。
+- 版本 v0.71.2 -> v0.71.3。
+
 ## v0.71.2 (2026-11-18)
 
 **修复全局图库拖拽上传后「当前页面不接收文件」全屏遮罩卡死、跨页关不掉。**

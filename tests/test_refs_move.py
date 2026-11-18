@@ -118,7 +118,8 @@ def test_move_to_ref_carries_meta(root: Path):
 
 def test_soft_delete_flow(root: Path):
     """v0.21.0：删除接口=软删除（文件与行保留可溯源）；
-    彻底删除仅对停用行开放且必须 confirm=true。"""
+    彻底删除必须 confirm=true。v0.71.3 起不再要求「先停用」——
+    启用中的立绘也可直接彻底删除（前端两段确认是唯一防线）。"""
     plugin, st = make_plugin(root)
     rel = "portraits/c1/a.png"
     put_portrait(root, st, rel, b"DDD")
@@ -136,6 +137,21 @@ def test_soft_delete_flow(root: Path):
     check("停用后可彻底删除", r3["status"] == "ok", str(r3))
     check("彻底删除后行没了", st.portrait_by_file(rel) is None)
     check("文件已离开原位（进回收站）", not (root / rel).is_file())
+    st.close()
+
+
+def test_hard_delete_active_row(root: Path):
+    """v0.71.3：启用中的立绘直接彻底删除（不必先停用）——
+    前端删除图标与停用分开后，删除走两段确认即可直删。"""
+    plugin, st = make_plugin(root)
+    rel = "portraits/c1/b.png"
+    put_portrait(root, st, rel, b"EEE")
+    check("预置行处于启用态", int(st.portrait_by_file(rel)["active"]) == 1)
+    r = asyncio.run(call_handler(plugin, api.h_portrait_delete_hard,
+                                 {"file": rel, "confirm": True}))
+    check("启用行带 confirm 可直接彻底删除", r["status"] == "ok", str(r))
+    check("启用行删后行没了", st.portrait_by_file(rel) is None)
+    check("启用行文件进回收站", not (root / rel).is_file())
     st.close()
 
 
@@ -437,6 +453,7 @@ def main():
             ("move_to_ref_meta", test_move_to_ref_carries_meta),
             ("draw_serial_queue", test_draw_serial_queue),
             ("soft_delete_flow", test_soft_delete_flow),
+            ("hard_delete_active", test_hard_delete_active_row),
             ("roundtrip", test_roundtrip),
             ("delete_legacy", test_delete_legacy_dirty_data),
             ("delete_clean", test_delete_clean_portrait),

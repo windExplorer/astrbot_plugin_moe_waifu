@@ -1452,7 +1452,7 @@ def _restore_portrait_core(plugin, rel: str) -> dict:
 
 
 def _delete_portrait_core(plugin, rel: str) -> dict:
-    """彻底删除（v0.21.0 起仅对已停用的立绘开放，且走回收站可手动找回）；
+    """彻底删除（文件进回收站可手动找回；v0.71.3 起启用中 / 已停用均可）；
     若它还被参考图引用（老版脏数据），先另存到 refs/ 保活。"""
     if not _safe_portrait_rel(rel):
         raise ValueError("非法路径")
@@ -1526,8 +1526,10 @@ async def h_portraits_set_active(plugin) -> dict:
 
 
 async def h_portrait_delete_hard(plugin) -> dict:
-    """彻底删除（文件进回收站 + 删行）。只对已停用的立绘开放，且必须带
-    confirm=true（前端两段确认 + 服务端强校验，对齐调试区危险操作口径）。"""
+    """彻底删除（文件进回收站 + 删行）。v0.71.3 起不再要求「先停用」——启用中的
+    立绘也可直接删（前端两段确认 + 服务端 confirm 强校验，对齐调试区危险操作
+    口径）；仍被引用的文件由 `_delete_portrait_core` 另存保活并改写封面 / 出卡源
+    等指针，回收站可手动找回。"""
     body = await _body()
     if not body.get("confirm"):
         return err("缺少 confirm=true（彻底删除是不可逆操作）")
@@ -1535,11 +1537,8 @@ async def h_portrait_delete_hard(plugin) -> dict:
     try:
         if not plugin._store:
             return err("插件未初始化完成")
-        row = plugin._store.portrait_by_file(rel)
-        if row is None:
+        if plugin._store.portrait_by_file(rel) is None:
             return err("立绘行不存在")
-        if int(row.get("active") or 0) == 1:
-            return err("该立绘仍在启用中：请先停用（软删除）再彻底删除")
         return ok(await asyncio.to_thread(_delete_portrait_core, plugin, rel))
     except (ValueError, RuntimeError) as exc:
         return err(str(exc))

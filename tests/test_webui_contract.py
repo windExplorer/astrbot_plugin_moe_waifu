@@ -259,7 +259,8 @@ def main():
               ("async function refreshAll", "loadWorks()", "loadGallery()",
                "loadGalRefs()", "loadOverview()")))
     for fn in ("setPortraitCover", "setWorkCover", "doArchive", "doTryToRef",
-               "doDeletePortrait", "movePortraitToRef", "moveRefToPortrait"):
+               "doDisablePortrait", "doDeletePortraitHard",
+               "movePortraitToRef", "moveRefToPortrait"):
         body = re.search(
             r"(?:async )?function " + fn + r"\([^)]*\)\s*\{(.*?)\n      \}",
             page, re.S)

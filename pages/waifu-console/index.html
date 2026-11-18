@@ -2211,10 +2211,17 @@
                                   :tip="delArm === 'mv2ref:' + it.file
                                         ? '再点一次确认转移到参考图' : '转移到参考图（从立绘库移走）'"
                                   @click.stop="movePortraitToRef(it)"></w-icon-btn>
+                      <!-- v0.71.3：停用与删除分开——停用=软删除，点一下直接生效
+                           （可随时恢复，误触无损失，不二次确认）；
+                           删除=文件进回收站 + 删行，保留两段确认 -->
+                      <w-icon-btn icon="pause" size="tiny" type="warning"
+                                  tip="停用（不参与抽卡与配额，随时可恢复）"
+                                  @click.stop="doDisablePortrait(it)"></w-icon-btn>
                       <w-icon-btn icon="trash" size="tiny" type="error"
-                                  :armed="delArm === it.file"
-                                  :tip="delArm === it.file ? '再点一次确认停用' : '停用（软删除：不参与抽卡与配额，已抽到的记录可溯源，随时可恢复）'"
-                                  @click.stop="doDeletePortrait(it)"></w-icon-btn>
+                                  :armed="delArm === 'hard:' + it.file"
+                                  :tip="delArm === 'hard:' + it.file
+                                        ? '再点一次确认删除' : '删除（文件进回收站 + 删行）'"
+                                  @click.stop="doDeletePortraitHard(it)"></w-icon-btn>
                     </div>
                     <!-- v0.13.2：seed 只显前 8 位（全文挪 tooltip），meta 回到单行。
                          ⚠️ v0.13.5 修：库里 seed 是 INTEGER，旧写法对数字直接 .slice
@@ -5009,7 +5016,10 @@
     arrowLeft: '<line x1="20" y1="12" x2="4" y2="12"/><polyline points="10 6 4 12 10 18"/>',
     // v0.15.0：立绘详情（主题 / 提示词 / seed 全文）
     info: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/>' +
-          '<line x1="12" y1="8" x2="12.01" y2="8"/>'
+          '<line x1="12" y1="8" x2="12.01" y2="8"/>',
+    // v0.71.3：停用与删除分开——pause 双竖条给「停用」（软删除、可随时恢复），
+    // trash 垃圾桶只留给真「删除」（文件进回收站 + 删行），不再共用一个图标
+    pause: '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>'
   };
   function icon(name, size) {
     return h("svg", {
@@ -8592,14 +8602,14 @@
           if (seq === galLoadSeq) galSwitching.value = false;
         });
       });
-      async function doDeletePortrait(it) {
-        // v0.21.0：删除 = 软删除（停用）。文件与行保留、可溯源可恢复；
-        // 彻底删除只对已停用的图开放（走回收站 + 服务端 confirm 强校验）
-        if (!armDelete(it.file)) return;
+      // v0.71.3：停用与删除分开。停用 = 软删除，点一下直接生效、不再二次确认
+      // （可随时恢复，误触无损失）；真「删除」（文件进回收站 + 删行）保留
+      // 两段确认，走 doDeletePortraitHard。
+      async function doDisablePortrait(it) {
+        if (!it || !it.file) return;
         try {
           await apiPost("portraits/delete", { file: it.file });
           message.success("已停用 #" + it.display_no + "（不参与抽卡与配额；已抽到的记录不受影响，可在「查看已停用」中恢复）");
-          delArm.value = "";
           await refreshAll();
         } catch (e) { /* 已提示 */ }
       }
@@ -8612,7 +8622,8 @@
           await refreshAll();
         } catch (e) { /* 已提示 */ }
       }
-      // v0.21.0：彻底删除（仅已停用的立绘；文件进回收站 + 删行）
+      // v0.21.0：彻底删除（文件进回收站 + 删行）。v0.71.3 起启用中 / 已停用都
+      // 可以直接删（服务端不再要求先停用），两段确认是唯一防线
       async function doDeletePortraitHard(it) {
         if (!it || !it.file) return;
         if (!armDelete("hard:" + it.file)) return;
@@ -11964,7 +11975,7 @@
         queueTopCount: queueTopCount, queueTopText: queueTopText,
         queuePanelOpen: queuePanelOpen,
         queueTopBroken: queueTopBroken, queueRows: queueRows,
-        doDeletePortrait: doDeletePortrait, movePortraitToRef: movePortraitToRef,
+        doDisablePortrait: doDisablePortrait, movePortraitToRef: movePortraitToRef,
         moveRefToPortrait: moveRefToPortrait,
         loadGallery: loadGallery,
         charNameOf: charNameOf, decisionLabel: decisionLabel, barPct: barPct,
