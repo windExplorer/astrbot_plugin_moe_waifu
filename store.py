@@ -782,9 +782,21 @@ class Store:
                 stats["skipped"] += int(res.get("skipped") or 0)
             self._conn.commit()
         # 2) 立绘行：登记并回填 asset_id
+        #    v0.71.5 增量登记：assets 已有该路径且 sha256 非空、且立绘行已挂上
+        #    asset_id → 整行跳过。此前每次启动都把全部立绘重新读盘算 SHA-256
+        #    并逐条 UPDATE + COMMIT（register_asset 每调用一次提交一次），
+        #    图片库越大启动 / 覆盖安装越慢——真机几百张几 MB 的立绘要转圈数分钟。
+        #    立绘 rel 含日期+seq+seed，同路径即同内容，跳过安全。
         for row in self._conn.execute(
-                "SELECT file, width, height FROM portraits").fetchall():
+                "SELECT file, width, height, asset_id FROM portraits").fetchall():
             rel = str(row["file"] or "").replace("\\", "/")
+            if not rel:
+                continue
+            known = self._conn.execute(
+                "SELECT sha256 FROM assets WHERE path=?", (rel,)).fetchone()
+            if (known is not None and known["sha256"]
+                    and int(row["asset_id"] or 0) > 0):
+                continue
             aid = self.register_asset(
                 "portrait", rel, sha256=self._sha256_of(data_dir / rel),
                 width=int(row["width"] or 0), height=int(row["height"] or 0))
@@ -792,6 +804,8 @@ class Store:
                                (aid, row["file"]))
         self._conn.commit()
         # 3) data 目录下其它图片（参考图 / 卡片 / 试画缓存）
+        #    v0.71.5：同样增量——assets 已登记的路径不再重算 SHA-256；
+        #    卡图按天滚动新增，旧文件哈希没有任何消费方，无回算必要。
         exts = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
         for kind, sub in (("ref", "refs"), ("card", "cards"),
                           ("try", "try_cache")):
@@ -801,7 +815,12 @@ class Store:
             for f in sorted(folder.iterdir()):
                 if not f.is_file() or f.suffix.lower() not in exts:
                     continue
-                self.register_asset(kind, f"{sub}/{f.name}",
+                rel_path = f"{sub}/{f.name}"
+                known = self._conn.execute(
+                    "SELECT 1 FROM assets WHERE path=?", (rel_path,)).fetchone()
+                if known is not None:
+                    continue
+                self.register_asset(kind, rel_path,
                                     sha256=self._sha256_of(f))
         # 4) 角色封面（可能落在 portraits/ 与 refs/ 之外）
         for row in self._conn.execute(
