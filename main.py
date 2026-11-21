@@ -76,7 +76,8 @@ class WaifuApi:
         self._plugin = plugin
 
     def fingerprint(self) -> str:
-        return f"{self.API_VERSION}:1"
+        # v1.1：data[cid] 增补 avatar_thumb / portrait_thumb（缩略 data URL），主版不变
+        return f"{self.API_VERSION}:1.1"
 
     async def main_ref_map(self) -> dict:
         """角色 → 主参考图映射（只取 strategy.ref，不碰 refs/立绘/三视图）。
@@ -112,6 +113,27 @@ class WaifuApi:
                 aliases = e.get("aliases") or []
                 if isinstance(aliases, str):
                     aliases = [x.strip() for x in re.split(r"[,，\n;；]+", aliases) if x.strip()]
+                # v1.1：头像 / 立绘缩略图（给 Anima 角色卡页展示；带缓存，失败为 None）
+                avatar_thumb = None
+                portrait_thumbs: list[str] = []
+                try:
+                    from . import webui_api as _wa
+                    _avatar_rel = str(e.get("avatar") or "").strip()
+                    if _avatar_rel:
+                        _ap = _wa._safe_data_file(plugin, _avatar_rel)
+                        if _ap:
+                            avatar_thumb = _wa._thumb_cached(_ap, 160)
+                    # 只取第一张立绘做卡片缩略（按需再看详情，避免全量编码上千张）
+                    for _p in (store.list_portraits(cid) or [])[:1]:
+                        _prel = str(_p.get("file") or "").strip()
+                        if _prel:
+                            _pp = _wa._safe_data_file(plugin, _prel)
+                            if _pp:
+                                _t = _wa._thumb_cached(_pp, 420)
+                                if _t:
+                                    portrait_thumbs.append(_t)
+                except Exception:
+                    pass  # 缩略图失败不影响角色映射主数据
                 data[cid] = {
                     "char_id": cid,
                     "name": str(e.get("name") or "").strip(),
@@ -119,6 +141,8 @@ class WaifuApi:
                     "series": str(e.get("series") or e.get("work") or "").strip(),
                     "tags_en": str(e.get("tags_en") or "").strip(),
                     "ref": ref,
+                    "avatar_thumb": avatar_thumb,
+                    "portrait_thumb": portrait_thumbs[0] if portrait_thumbs else None,
                 }
                 if not ref:
                     missing.append(cid)

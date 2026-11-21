@@ -2,6 +2,20 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.71.13 (2026-11-21)
+
+**waifu.v1 契约小版本升到 1.1：`main_ref_map` 的每个角色增补头像 / 立绘缩略图。**
+
+- **需求（用户）**：萌绘角色卡页要展示角色的头像与立绘，并加头像列。
+- **改动（`WaifuApi._map_sync`）**：`data[cid]` 新增
+  `avatar_thumb`（头像 160px JPEG data URL）与 `portrait_thumb`（第一张立绘 420px
+  data URL）；复用 `webui_api._safe_data_file` 做路径白名单 + `_thumb_cached` 做
+  mtime/size 缓存。缩略图失败为 None，不影响角色映射主数据。只取第一张立绘，
+  避免全量编码上千张拖慢加载。
+- `fingerprint()` → `waifu.v1:1.1`（主版本不变，调用方 `startswith("waifu.v1")`
+  兼容）；契约测试同步更新并加字段断言。
+- 验证：`py_compile` + `test_waifu_api` 全过。
+
 ## v0.71.12 (2026-11-21)
 
 **给萌绘（astrbot-comfyui-anima）加跨插件契约 waifu.v1：读角色与主参考图。**

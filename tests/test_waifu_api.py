@@ -59,7 +59,7 @@ with tempfile.TemporaryDirectory() as td:
     fake_plugin = SimpleNamespace(_store=st, _data_dir=root)
     api = WaifuApi(fake_plugin)
 
-    check("fingerprint = waifu.v1:1", api.fingerprint() == "waifu.v1:1", api.fingerprint())
+    check("fingerprint = waifu.v1:1.1", api.fingerprint() == "waifu.v1:1.1", api.fingerprint())
 
     res = asyncio.run(api.main_ref_map())
     check("status ok", res.get("status") == "ok", str(res)[:200])
@@ -70,6 +70,7 @@ with tempfile.TemporaryDirectory() as td:
     check("tags_en 透传", data["char_a"]["tags_en"] == "1girl, blue eyes")
     check("别名透传", data["char_a"]["aliases"] == ["甲酱"])
     check("空主参考进 missing", res["missing"] == ["char_b"], str(res["missing"]))
+    check("头像/立绘字段存在", "avatar_thumb" in data["char_a"] and "portrait_thumb" in data["char_a"], str(data["char_a"]))
 
     # 未初始化时安全降级
     res2 = asyncio.run(WaifuApi(SimpleNamespace(_store=None, _data_dir=None)).main_ref_map())
