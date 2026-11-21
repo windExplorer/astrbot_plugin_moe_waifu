@@ -63,6 +63,68 @@ def _plugin_version() -> str:
         return "0.0.0"
 
 
+class WaifuApi:
+    """跨插件契约（waifu.v1），供萌绘（astrbot-comfyui-anima）读取角色与主参考图。
+
+    调用方：``context.get_registered_star("astrbot_plugin_moe_waifu").star_cls.api``。
+    取不到、版本不匹配、或返回 ``status != "ok"`` 时必须安全降级，不能当角色库存在。
+    """
+
+    API_VERSION = "waifu.v1"
+
+    def __init__(self, plugin: "MoeWaifuPlugin"):
+        self._plugin = plugin
+
+    def fingerprint(self) -> str:
+        return f"{self.API_VERSION}:1"
+
+    async def main_ref_map(self) -> dict:
+        """角色 → 主参考图映射（只取 strategy.ref，不碰 refs/立绘/三视图）。
+
+        返回 ``{"status": "ok", "data": {char_id: {...}}, "missing": [char_id...]}``：
+        - data[cid] = {"char_id","name","aliases","series","tags_en","ref"}；
+          ``ref`` 是可直接交给萌绘图生图的绝对路径 / URL，可能为空；
+        - missing = 主参考图为空或文件失效的角色 id（调用方 WebUI 据此提示）。
+        """
+        plugin = self._plugin
+        try:
+            return await asyncio.to_thread(self._map_sync)
+        except Exception as e:
+            return {"status": "error", "message": str(e), "data": {}, "missing": []}
+
+    def _map_sync(self) -> dict:
+        plugin = self._plugin
+        store = getattr(plugin, "_store", None)
+        data_dir = getattr(plugin, "_data_dir", None)
+        if store is None or data_dir is None:
+            return {"status": "error", "message": "老婆插件未初始化", "data": {}, "missing": []}
+        packs = store.load_packs() or []
+        data: dict = {}
+        missing: list = []
+        for pack in packs:
+            for e in (pack.get("entries") or []):
+                cid = str(e.get("id") or "").strip()
+                if not cid:
+                    continue
+                st = e.get("strategy") if isinstance(e.get("strategy"), dict) else {}
+                raw_ref = str(st.get("ref") or "").strip()
+                ref = draw._ref_path(raw_ref, data_dir)
+                aliases = e.get("aliases") or []
+                if isinstance(aliases, str):
+                    aliases = [x.strip() for x in re.split(r"[,，\n;；]+", aliases) if x.strip()]
+                data[cid] = {
+                    "char_id": cid,
+                    "name": str(e.get("name") or "").strip(),
+                    "aliases": [str(x).strip() for x in aliases if str(x).strip()],
+                    "series": str(e.get("series") or e.get("work") or "").strip(),
+                    "tags_en": str(e.get("tags_en") or "").strip(),
+                    "ref": ref,
+                }
+                if not ref:
+                    missing.append(cid)
+        return {"status": "ok", "data": data, "missing": missing}
+
+
 @register(PLUGIN_NAME, "windExplorer", "萌萌今日老婆：每日二次元角色抽卡", _plugin_version())
 class MoeWaifuPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
@@ -84,6 +146,8 @@ class MoeWaifuPlugin(Star):
         self._jobs: dict = {}
         # 批量补图队列（v0.16.0）：进程内存态，重启即清
         self._batch = None
+        # 跨插件契约（waifu.v1）：萌绘等插件经 star_cls.api 读取角色与主参考图
+        self.api = WaifuApi(self)
         self._reload_modules()
 
     # ---------- 生命周期 ----------

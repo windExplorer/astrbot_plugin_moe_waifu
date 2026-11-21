@@ -2,6 +2,27 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.71.12 (2026-11-21)
+
+**给萌绘（astrbot-comfyui-anima）加跨插件契约 waifu.v1：读角色与主参考图。**
+
+- **需求（用户）**：萌绘重构角色卡功能，要读老婆插件整理好的角色和主参考图，
+  走设定好的图生图工作流（Qwen Image 2.1 图生图）出图。其它立绘 / 三视图不读。
+- **新增（`main.py` 的 `WaifuApi`）**：契约 `waifu.v1`，调用方
+  `context.get_registered_star("astrbot_plugin_moe_waifu").star_cls.api`：
+  - `fingerprint()` → `waifu.v1:1`；
+  - `async main_ref_map()` → `{"status","data","missing"}`，
+    `data[char_id] = {char_id,name,aliases,series,tags_en,ref}`，`ref` 是
+    `strategy.ref` 经 `draw._ref_path` 解析后的绝对路径 / URL（失效为空），
+    空主参考的角色 id 进 `missing`（萌绘 WebUI 据此提示、不参与生图）。
+  - 只读 `strategy.ref`（主参考），**不碰** `refs` 资料库 / `gen_refs` / 立绘 / 三视图。
+  - 全部 async + `asyncio.to_thread`（DB 读不卡事件循环）；异常返回 error 信封，
+    调用方按 `status != "ok"` 安全降级（沿用 affinity.v1 的契约纪律）。
+- **不动**：抽签 / 出卡 / 角色库写入 / WebUI 一律不改；本版只是只读出口。
+- **验证**：新增 `tests/test_waifu_api.py`（fingerprint / 映射 / 只取 ref /
+  tags_en 与别名透传 / 空主参考进 missing / 未初始化降级）全过；`main.py` 编译通过。
+- 版本 v0.71.11 -> v0.71.12。
+
 ## v0.71.11 (2026-11-19)
 
 **换老婆后旧卡保留可回看：卡面文件名带 nonce，每次换签的卡各自成文件。**
