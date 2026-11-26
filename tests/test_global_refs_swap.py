@@ -95,18 +95,23 @@ def main():
           "图1" in page and "图2" in page
           and "<image1>" not in page and "<image2>" not in page
           and "画布" in page and "身份" in page)
-    # v0.61.0：三档方案（face 保守 / appearance 标准默认 / full 彻底），
-    # 用户实测「只换脸不够——体型、头发、头顶悬浮物/头环要跟图2」，故默认 appearance。
+    # v0.61.0 三档 → v0.76.0 六档（新增 hair / body / outfit），
+    # 默认仍是 appearance。提示词全部换成真机验证的 C 框架：动作先行 + 双向锚定。
     sw = re.search(r'var SWAP_SCHEMES = \[(.*?)\n  \];', page, re.S)
     schemes = sw.group(1) if sw else ""
-    check("三档替换方案齐全（face/appearance/full）",
-          all('key: "%s"' % k in schemes for k in ("face", "appearance", "full")), schemes[:120])
+    check("六档替换方案齐全（face/appearance/full/hair/body/outfit）",
+          all('key: "%s"' % k in schemes for k in
+              ("face", "appearance", "full", "hair", "body", "outfit")), schemes[:120])
     check("标准档含体型/发型/头顶饰物跟随图2",
-          "体型" in schemes and "发型发色" in schemes
-          and "头顶悬浮饰物、头环、发饰" in schemes, schemes[:120])
-    check("三档的服装/动作/表情仍归画布",
-          "以 图1 画布为准" in schemes
-          and "不要带 图2 的服装、动作或表情" in schemes, schemes[:120])
+          "体型身材" in schemes and "发型发色" in schemes
+          and "胸部的大小与丰满程度" in schemes, schemes[:120])
+    check("所有档都用 C 框架（动作先行 + 双向锚定，无旧版否定句）",
+          schemes.count("唯一的变化是") == 6
+          and "图1 是画布：保留" not in schemes
+          and "不要带 图2 的服装、动作或表情" not in schemes, schemes[:120])
+    check("新增档：发型 / 体型 / 穿搭",
+          "只换发型发色与头饰" in schemes and "只换身材比例" in schemes
+          and "只换衣服配饰" in schemes)
     check("默认方案是标准档 appearance",
           'Vue.ref("appearance")' in page)
     check("按 key 取指令的函数存在且回退标准档",

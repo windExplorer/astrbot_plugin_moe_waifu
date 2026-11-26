@@ -374,6 +374,22 @@ check("单图模板存在", tpl_single is not None)
 p1s = prompt_gen.pick_variations(42, tpl_single)
 check("单图模板强制单张全身构图", "单张全身立绘" in p1s["compose"]["zh"])
 check("单图模板灰底", "灰" in p1s["background"]["zh"])
+# v0.76.0：单图模板改用真机验证的专用指令（全身占满画幅 + 镜头拉近 + 面部清晰 +
+# 日系动漫画风），其它主题仍走通用拼装。
+inst_1s = prompt_gen.build_local_instruction(ENTRY, p1s, theme_id="tpl_single")
+check("单图模板指令占满画幅且面部清晰",
+      "角色占满画面高度" in inst_1s and "面部画得大而清晰" in inst_1s
+      and "标准日系动漫插画风格" in inst_1s, inst_1s[:140])
+check("单图模板指令仍带灰底 / 标准站姿 / 微笑 / 单人单头",
+      all(k in inst_1s for k in ("浅灰渐变摄影棚", "双臂自然下垂", "温柔微笑",
+                                "只保留一颗头部", "输出单人竖版立绘")))
+check("其它主题不受单图专用指令影响",
+      "角色占满画面高度" not in prompt_gen.build_local_instruction(
+          ENTRY, prompt_gen.pick_variations(42, tpl3), theme_id="tpl_3view"))
+check("单图专用指令无参考图时不提参考图",
+      _ref_clause := prompt_gen.build_local_instruction(
+          ENTRY, p1s, theme_id="tpl_single", ref_mode="none"),
+      "参考图" not in _ref_clause)
 campus = prompt_gen.get_theme("campus")
 campus_outfits = {prompt_gen.pick_variations(s, campus)["outfit"]["zh"] for s in range(400)}
 check("校园主题 JK 款式足够多样（>=5）", len(campus_outfits) >= 5)

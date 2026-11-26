@@ -1969,8 +1969,44 @@ def describe_variations(seed_int: int, theme_id: str = "", outfit: str = "",
 
 # ---------- 本地模板（无 LLM 兜底） ----------
 
+_TPL_SINGLE_BASE = (
+    "生成一张标准日系动漫插画风格的角色立绘：镜头拉近，角色占满画面高度，"
+    "头顶接近画面上沿、脚接近画面下沿，全身完整入画且不留大片空白；"
+    "面部画得大而清晰，五官锐利可辨，视觉焦点在人物脸部。"
+    "背景为浅灰渐变摄影棚。"
+    "角色双臂自然下垂，正面朝向镜头，以标准站姿站立，表情温柔微笑。"
+    "保持人物的面部特征、发型发色与角色辨识度不变。"
+    "画面中只出现这一个人物、只保留一颗头部，输出单人竖版立绘"
+)
+
+
+def _tpl_single_instruction(entry: dict, custom: str = "", ref_mode: str = "") -> str:
+    """tpl_single 固定底稿的图生图指令（v0.76.0，真机验证通过）。
+
+    只替换这个模板的通用拼装，不动其它主题：全身但占满画幅 + 镜头拉近 +
+    面部清晰 + 日系动漫画风，解决旧版「远景全身看不清脸」。固有特征 / 挑染 /
+    显式附加要求按既有口径追加；无参考图时不提参考图，单图源保留多视图收敛条款。
+    """
+    text = _TPL_SINGLE_BASE
+    addons = []
+    feat_zh = identity_feature_text(entry, "zh")
+    if feat_zh:
+        addons.append(f"角色固有的「{feat_zh}」必须原样保留、清晰可见，不得丢失")
+    hair_zh = hair_highlight_clause(entry)
+    if hair_zh:
+        addons.append(hair_zh)
+    extra = str(custom or "").strip().strip("。，,")
+    if extra:
+        addons.append(extra)
+    if addons:
+        text += "；" + "；".join(addons)
+    if ref_mode != "none":
+        text += _ref_clause_single_view(ref_mode)
+    return text + "。"
+
+
 def build_local_instruction(entry: dict, picks: dict, custom: str = "",
-                            ref_mode: str = "") -> str:
+                            ref_mode: str = "", theme_id: str = "") -> str:
     """img2img 用：本地拼一条 Qwen-Image-2.1 风格的自然语言编辑指令。
 
     结构遵循官方指南「动作 + 目标 + 约束」：先列改动，句尾统一强调保持不变。
@@ -1978,7 +2014,13 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "",
     ref_mode：参考图形态 none/single/multi（v0.29.4）；空串 = 按 entry 自动判定。
     无参考图时不写「根据参考图」、不带多视角源收敛条款；多张参考图时写明
     「各视角与对应参考图一致 / 以正面全身那张为主」。
+    theme_id="tpl_single"（v0.76.0）：固定底稿模板用真机验证过的专用指令——
+    全身但占满画幅 + 镜头拉近 + 面部清晰 + 标准日系动漫画风，绕开通用拼装
+    的「远景全身看不清脸」。其余主题一律走原拼装，不受影响。
     """
+    if str(theme_id or "") == "tpl_single":
+        return _tpl_single_instruction(entry, custom,
+                                       ref_mode or template_ref_mode(entry))
     parts = []
     for label, zh in variation_zh_list(picks):
         if label == "构图视图":
@@ -2807,11 +2849,14 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
         if not bool(cfg.get("prompt_llm_enabled", True)) or is_fixed:
             # v0.31.1：is_tpl 一并短路——模板的编辑指令走本地确定性拼装
             # v0.41.0：scene_ 完整场景同理（fixed_dims 细节不容 LLM 改写）
-            return build_local_instruction(entry, picks, custom), "local"
+            # v0.76.0：tpl_single 用真机验证过的专用固定指令（占满画幅 + 面部清晰）
+            return build_local_instruction(entry, picks, custom,
+                                           theme_id=theme_id), "local"
         provider = await _resolve_provider(context, cfg.get("prompt_llm_provider", ""))
         if provider is None:
             logger.warning("[moe_waifu] 未找到可用的对话模型，提示词回落本地模板")
-            return build_local_instruction(entry, picks, custom), "local"
+            return build_local_instruction(entry, picks, custom,
+                                           theme_id=theme_id), "local"
         timeout = int(cfg.get("prompt_llm_timeout", 30) or 30)
         if timeout <= 0:
             timeout = 30
@@ -2826,7 +2871,8 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
             )
         except asyncio.TimeoutError:
             logger.warning(f"[moe_waifu] 提示词 LLM 超时（>{timeout}s），回落本地模板")
-            return build_local_instruction(entry, picks, custom), "local"
+            return build_local_instruction(entry, picks, custom,
+                                           theme_id=theme_id), "local"
         # v0.37.0：限额 150→340——system 纪律放宽到 300 字（130 字装不下
         # 7 个改动子句，LLM 被迫丢子句，背景/光照/姿势在图生图里被整条砍掉）
         # v0.71.7：340→380——新增「挑染发色保全」必写子句（~40 字），纪律
@@ -2838,7 +2884,8 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
             # 产出里没有就强制拼到尾部（有则不叠加）
             return ensure_hair_clause(text, entry), "llm"
         logger.warning("[moe_waifu] 提示词 LLM 返回为空，回落本地模板")
-        return build_local_instruction(entry, picks, custom), "local"
+        return build_local_instruction(entry, picks, custom,
+                                       theme_id=theme_id), "local"
     except Exception:
         logger.error("[moe_waifu] 提示词生成异常，回落本地模板", exc_info=True)
         try:
@@ -2847,7 +2894,8 @@ async def build_generation_prompt(context, cfg: dict, entry: dict,
                 if not (theme and theme.get("compose_kw")):
                     picks = force_single_view(picks)
                 picks = apply_dim_state(picks, seed_int, dim_state, theme, keep)
-                return (build_local_instruction(entry, picks, custom), "local")
+                return (build_local_instruction(entry, picks, custom,
+                                                theme_id=theme_id), "local")
             return build_prompt_tags(entry), "static"
         except Exception:
             return "1girl, solo, best quality, looking at viewer", "static"
