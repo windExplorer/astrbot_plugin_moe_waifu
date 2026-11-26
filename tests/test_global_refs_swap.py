@@ -112,6 +112,14 @@ def main():
     check("新增档：发型 / 体型 / 穿搭",
           "只换发型发色与头饰" in schemes and "只换身材比例" in schemes
           and "只换衣服配饰" in schemes)
+    # v0.77.1：挑染句不能写死在固定指令里——纯色发角色会被强行要求挑染。
+    # 只由 swapPromptWithHair 按角色 hair_note 注入（有备注才加）。
+    check("固定档位不写死挑染/单一发色句",
+          "不得涂成单一发色" not in schemes
+          and "含挑染、渐变等多色发色的分布" not in schemes, schemes[:200])
+    check("挑染保全仍按角色 hair_note 注入",
+          "swapPromptWithHair(base, e)" in page and "e.hair_note" in page
+          and "不得把头发涂成单一发色" in page)
     check("默认方案是标准档 appearance",
           'Vue.ref("appearance")' in page)
     check("按 key 取指令的函数存在且回退标准档",
