@@ -173,9 +173,21 @@
     "type": "bool",
     "default": true
   },
+  "draw_exclude_male": {
+    "description": "排除男性特征",
+    "hint": "开启（默认）时在内置负面词里排除 1boy / male 等男性特征；关闭后不再强制排除，可画男性角色。仅当下方「负面提示词」留空（使用内置兜底）时生效；填了自定义负面词则完全以自定义词为准",
+    "type": "bool",
+    "default": true
+  },
+  "draw_exclude_nsfw": {
+    "description": "排除 NSFW",
+    "hint": "开启（默认）时在内置负面词里排除 nsfw；关闭后不再强制排除。与「排除男性特征」一样，仅在下方「负面提示词」留空时生效",
+    "type": "bool",
+    "default": true
+  },
   "draw_negative_prompt": {
     "description": "负面提示词",
-    "hint": "留空使用内置兜底（排除男性特征与 NSFW）；填写则整体覆盖",
+    "hint": "留空使用内置兜底（其中男性特征 / NSFW 由上面两个开关控制）；填写则整体覆盖，两个开关不再生效",
     "type": "string",
     "default": ""
   },

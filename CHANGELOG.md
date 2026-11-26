@@ -2,6 +2,25 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.75.0 (2026-11-26)
+
+**内置负面词里的「排除男性」与「排除 NSFW」改成可配置开关（不再固定排除）。**
+
+- **需求（用户）**：配置里加个开关控制是否排除 NSFW 和男性，现在是固定排除，不太好。
+- **现状**：`draw.DEFAULT_DRAW_NEGATIVE` 把男性词、`nsfw`、多视图词与质量词写死成一串；
+  `draw_negative_prompt` 留空时整体用它，用户没法只放开其中一类。
+- **改动**：
+  - `_conf_schema.json` 新增 `draw_exclude_male` / `draw_exclude_nsfw` 两个 bool 开关，
+    默认都 `true`（行为与旧版一致）；已登记到配置页「萌绘生图」分区。
+  - `draw.DEFAULT_DRAW_NEGATIVE` 拆成 `_NEG_MALE` / `_NEG_NSFW` / `_NEG_BASE` 三组，
+    `resolve_negative` 在内置兜底路径上按开关拼装；多视图底稿照旧剥掉
+    `multiple views / multiple girls`，质量词恒定保留。
+  - **自定义 `draw_negative_prompt` 仍整体覆盖**，两个开关不插手用户自己的词
+    （schema hint 与 README 都写明了优先级）。
+  - `main._draw_cfg()` 把两个开关传进出图配置，`README.md` 配置表同步。
+- **守卫**：`test_draw.py` 新增五条（默认不变、分别关闭、两个都关、自定义词优先）；
+  `test_draw` / `test_schema` / `test_webui_contract` 全过。
+
 ## v0.74.0 (2026-11-26)
 
 **卡面左上角加回「今日老婆」标识（v0.45.0 曾去掉，用户要求加回看看）。**

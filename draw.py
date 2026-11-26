@@ -37,12 +37,16 @@ except Exception:  # pragma: no cover - 本地平铺调试
 
 PLUGIN_SOURCE = "萌萌今日老婆"
 
-# 内置负面兜底：排除男性特征 + NSFW（星语 DEFAULT_DRAW_NEGATIVE 的角色卡子集）。
-DEFAULT_DRAW_NEGATIVE = (
-    "1boy, male, man, boy, masculine, male focus, multiple views, multiple girls, "
-    "nsfw, lowres, bad anatomy, bad hands, worst quality, low quality, "
+# 内置负面兜底（v0.75.0 拆组）：质量词 / 多视图词恒定，男性特征与 NSFW 由配置开关决定。
+# 默认两组都开，拼出来的串与旧版等价（只是 male 与 nsfw 相邻，顺序不影响模型）。
+_NEG_MALE = "1boy, male, man, boy, masculine, male focus"
+_NEG_NSFW = "nsfw"
+_NEG_BASE = (
+    "multiple views, multiple girls, "
+    "lowres, bad anatomy, bad hands, worst quality, low quality, "
     "watermark, signature, text, logo"
 )
+DEFAULT_DRAW_NEGATIVE = f"{_NEG_MALE}, {_NEG_NSFW}, {_NEG_BASE}"
 
 # 构图基础词：单人立绘（非外观特征，可与角色 tag 共存）
 _PROMPT_BASE = "1girl, solo, best quality, looking at viewer"
@@ -163,7 +167,18 @@ def build_prompt(entry: dict) -> str:
 def resolve_negative(cfg: dict, prompt: str = "") -> str:
     if not bool(cfg.get("draw_negative_enabled", True)):
         return ""
-    neg = str(cfg.get("draw_negative_prompt") or "").strip() or DEFAULT_DRAW_NEGATIVE
+    custom = str(cfg.get("draw_negative_prompt") or "").strip()
+    if custom:
+        # 自定义负面词整体覆盖；两个开关只管内置兜底，不插手用户自己的词
+        neg = custom
+    else:
+        parts = []
+        if bool(cfg.get("draw_exclude_male", True)):
+            parts.append(_NEG_MALE)
+        if bool(cfg.get("draw_exclude_nsfw", True)):
+            parts.append(_NEG_NSFW)
+        parts.append(_NEG_BASE)
+        neg = ", ".join(parts)
     # 多视图底稿：负面里的 multiple views / multiple girls 会压制「同框多视图」，
     # 检测到视图词就剥掉这两条（其余排除项保留）（v0.7.3）
     if detect_view_layout(prompt):

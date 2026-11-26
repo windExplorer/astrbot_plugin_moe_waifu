@@ -367,6 +367,8 @@ class MoeWaifuPlugin(Star):
             "anima_queue_wait": self._cfg("anima_queue_wait", 600),
             "draw_workflow": self._cfg("draw_workflow", ""),
             "draw_negative_enabled": self._cfg("draw_negative_enabled", True),
+            "draw_exclude_male": self._cfg("draw_exclude_male", True),
+            "draw_exclude_nsfw": self._cfg("draw_exclude_nsfw", True),
             "draw_negative_prompt": self._cfg("draw_negative_prompt", ""),
             "img2img_workflow": self._cfg("img2img_workflow", ""),
             "img2img_denoise": self._cfg("img2img_denoise", 0.65),

@@ -39,6 +39,23 @@ check("自定义覆盖", draw.resolve_negative(
     {"draw_negative_enabled": True, "draw_negative_prompt": "custom"}) == "custom")
 check("关闭则不传", draw.resolve_negative({"draw_negative_enabled": False}) == "")
 
+# v0.75.0：男性 / NSFW 排除改为可配置（默认都开，行为与旧版一致）
+n_male = draw.resolve_negative(dict(cfg, draw_exclude_male=False))
+check("关男性排除→男性词消失、NSFW 与质量词仍在",
+      "1boy" not in n_male and "male focus" not in n_male
+      and "nsfw" in n_male and "lowres" in n_male)
+n_nsfw = draw.resolve_negative(dict(cfg, draw_exclude_nsfw=False))
+check("关 NSFW 排除→nsfw 消失、男性词仍在",
+      "nsfw" not in n_nsfw and "1boy" in n_nsfw)
+n_both = draw.resolve_negative(dict(cfg, draw_exclude_male=False,
+                                    draw_exclude_nsfw=False))
+check("两个都关→只剩视图与质量词",
+      "1boy" not in n_both and "nsfw" not in n_both
+      and "multiple views" in n_both and "bad anatomy" in n_both)
+check("自定义负面词整体覆盖，两个开关不插手",
+      draw.resolve_negative(dict(cfg, draw_negative_prompt="custom, 1boy",
+                                 draw_exclude_nsfw=False)) == "custom, 1boy")
+
 # decision_of（v0.68.1：废除 reuse_today，today_row 不再参与决策）
 check("mix 当日已有立绘→不再复用（未满配额仍生成）",
       draw.decision_of("a", "d", {"file": "x"}, 3, 5) == "generate")
