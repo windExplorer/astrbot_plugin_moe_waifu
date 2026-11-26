@@ -716,6 +716,9 @@
   .gr-toolbar > * + * { margin-top: 10px; }
   /* v0.64.0：列数设置行——放在固定条内，滚动卡片墙时一起固定 */
   .gr-colset { display: flex; align-items: center; gap: 8px; }
+  /* v0.72.0：衣柜试穿面板的对齐行（不用 n-space 承载 v-if 子元素） */
+  .wd-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .wd-label { font-size: 13px; opacity: .75; min-width: 56px; }
   /* v0.62.0：瀑布流——CSS columns，列数由 grCols 给（手动 2~8 / 自适应 2~6）。
      break-inside:avoid 保证一张卡不被拆到两列；封面按原图比例，长短图都紧密排。 */
   .gr-waterfall { column-count: var(--gr-cols, 3); column-gap: 12px; }
@@ -804,6 +807,13 @@
     display: flex; align-items: center; justify-content: center;
     background: rgba(128,128,128,.12); font-size: 11px; opacity: .6; }
   .pick-thumb-txt { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+  /* v0.73.1：w-pick-thumb 里的图序徽章不能复用 .picker-strip-ord——那个 class
+     是给横向条带用的（flex:none + min-width），塞进纵向 pick-thumb-txt 会被
+     align-items:stretch 拉成一条全宽粉条。这里单独给小圆徽章并靠左。 */
+  .pick-thumb-ord { align-self: flex-start; display: inline-block; flex: none;
+    min-width: 17px; height: 17px; line-height: 17px; padding: 0 5px;
+    text-align: center; background: #ff7ab2; color: #fff; border-radius: 9px;
+    font-size: 10px; font-weight: 700; }
   .pick-thumb-label { font-size: 12px; font-weight: 600; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; }
   .pick-thumb-sub { font-size: 10px; opacity: .55; overflow: hidden;
@@ -1517,6 +1527,145 @@
               <template #action>
                 <n-button size="small" @click="grNoteOpen = false">取消</n-button>
                 <n-button size="small" type="primary" @click="saveGlobalRefNote">保存</n-button>
+              </template>
+            </n-modal>
+          </div>
+
+          <!-- ============ 衣柜（v0.72.0：选角色参考图 + 衣服试穿，缺上衣/鞋时扩写补全） ============ -->
+          <div v-if="menu === 'wardrobe'">
+            <n-card size="small" :bordered="true" title="衣柜 · 衣物图库">
+              <div class="gr-toolbar">
+                <div class="bind-tip" style="margin-top: 0;">
+                  这里放「衣服图」：一件上衣、一条裤子、一条裙子都行，整套也可以。
+                  试穿时 图1 是角色参考图、图2 起是衣服；若衣服图没有上衣或鞋子，
+                  选「扩写补全」方案，让模型按它的颜色 / 材质 / 风格配齐整套。
+                </div>
+                <w-upload-panel :multiple="true"
+                                hint="支持 png / jpg / jpeg / webp / gif，可多选；单张不超过 15MB。上传后在卡片上改名字与类型。"
+                                @files="onWardrobeFiles"></w-upload-panel>
+              </div>
+              <n-alert v-if="wardrobeLoading" type="info" :bordered="false">加载中…</n-alert>
+              <div v-if="wardrobeItems.length > 0" class="gr-waterfall" :style="{ '--gr-cols': 4 }">
+                <div v-for="(r, ri) in wardrobeItems" :key="r.path" class="gr-card">
+                  <div class="gr-card-cover" @click="openViewer(r.path, '衣物图')">
+                    <img v-if="r.thumb" :src="r.cover || r.thumb" alt="衣物图" title="点击查看大图">
+                    <div v-else class="picker-noimg">文件丢失</div>
+                    <span class="gr-card-idx">{{ ri + 1 }}</span>
+                  </div>
+                  <div class="gr-card-info">
+                    <div class="gr-card-note" :class="{ empty: !r.name }"
+                         :title="'点这里编辑第 ' + (ri + 1) + ' 件的名字 / 类型 / 备注'"
+                         @click="beginWardrobeEdit(r)">
+                      {{ r.name || "＋ 点这里命名" }}
+                    </div>
+                    <div class="gr-card-meta">
+                      <n-tag size="tiny" :bordered="false">{{ r.category_label }}</n-tag>
+                      {{ grSize(r.size) }}
+                    </div>
+                    <div class="gr-card-file" :title="r.note || ''">{{ r.note || (r.width && r.height ? r.width + ' × ' + r.height : '无备注') }}</div>
+                  </div>
+                  <div class="gr-card-ops">
+                    <w-icon-btn icon="edit" size="tiny" tip="编辑名字 / 类型 / 备注"
+                                @click="beginWardrobeEdit(r)"></w-icon-btn>
+                    <w-icon-btn icon="trash" size="tiny" type="error"
+                                :armed="wardDeleteArm === r.path"
+                                :tip="wardDeleteArm === r.path ? '再点一次确认删除' : '从衣柜移除'"
+                                @click="deleteWardrobe(r)"></w-icon-btn>
+                  </div>
+                </div>
+              </div>
+              <n-empty v-else description="衣柜还是空的：上传几张衣服图，再去下面选角色参考图试穿"></n-empty>
+            </n-card>
+
+            <n-card size="small" :bordered="true" title="角色试穿" style="margin-top: 12px;">
+              <div class="stack">
+                <div class="bind-tip" style="margin-top: 0;">
+                  出图走 Qwen-Image-2.1 多图编辑：图1 = 角色参考图（身份 / 姿势 / 背景保留），
+                  图2 起 = 衣服图。三视图当参考图时勾选下方开关：多视角只用于核对角色外观，
+                  最终出的仍是一张单人全身立绘（竖版），不会输出三视图拼图。
+                </div>
+                <div class="wd-row">
+                  <span class="wd-label">角色</span>
+                  <n-select v-model:value="wardCharId" :options="charOpts" filterable clearable
+                            placeholder="选一个角色（用于任务归档）" style="width: 300px;"></n-select>
+                </div>
+                <div class="wd-row">
+                  <w-pick-thumb :src="pickThumbOf(wardCharRef, wardRefSources)"
+                                :path="wardCharRef || ''"
+                                :label="wardCharRef ? '① 角色参考：' + wardRefNameOf(wardCharRef) : '① 点选角色参考图（图1）'"
+                                :sub="wardCharRef ? '图1 · 点图看大图 / 点文字重选' : '点文字选图'"
+                                :active="!!wardCharRef"
+                                @click="openWardCharRefPicker"
+                                @preview="onPickerPreview"></w-pick-thumb>
+                  <n-checkbox v-model:checked="wardMultiView">角色图是三视图（出图仍是单人照）</n-checkbox>
+                </div>
+                <div>
+                  <div class="bind-tip" style="margin-top: 0;">② 选衣服（可多选，点选顺序即 图2 / 图3 …）</div>
+                  <div class="wd-row" style="margin-top: 6px;">
+                    <w-pick-thumb v-for="(p, pi) in wardClothes" :key="p" :index="pi + 2"
+                                  :src="pickThumbOf(p, [wardrobeItems])" :path="p"
+                                  :label="wardClothNameOf(p)" sub="点文字移除"
+                                  :active="true" @click="removeWardCloth(p)"
+                                  @preview="onPickerPreview"></w-pick-thumb>
+                    <n-button size="small" dashed @click="wardClothesPickerOpen = true">＋ 选衣服</n-button>
+                  </div>
+                  <div class="bind-tip" v-if="!wardrobeItems.length">衣柜是空的：先在上面的衣物图库上传几张。</div>
+                </div>
+                <div class="wd-row">
+                  <n-select v-model:value="wardScheme" :options="wardSchemeOpts" style="width: 330px;"></n-select>
+                  <span class="bind-tip" style="margin: 0;">{{ wardSchemeHint }}</span>
+                </div>
+                <div class="wd-row">
+                  <span class="wd-label">衣物说明</span>
+                  <n-input v-model:value="wardDesc" size="small" style="max-width: 440px;"
+                           @blur="wardRebuildPrompt"
+                           placeholder="例如：白色蕾丝短裙，只有下装，没有上衣和鞋"></n-input>
+                  <n-button size="small" :loading="wardExpanding" @click="wardAiExpand">AI 扩写穿搭</n-button>
+                </div>
+                <div v-if="wardOutfitText" class="bind-tip">补充搭配建议（仅缺失部位，冲突以衣服图为准）：{{ wardOutfitText }}</div>
+                <div>
+                  <div class="wd-row" style="margin-bottom: 6px;">
+                    <span class="wd-label">编辑指令</span>
+                    <n-button size="tiny" quaternary @click="wardRebuildPrompt">按方案重建</n-button>
+                  </div>
+                  <n-input v-model:value="wardPrompt" type="textarea" :rows="5"
+                           placeholder="点「按方案重建」生成指令，可直接修改；按原文送进工作流"></n-input>
+                </div>
+                <div class="wd-row">
+                  <n-select v-model:value="wardWf" :options="wfOpts('img')" filterable tag clearable
+                            placeholder="Qwen Edit 工作流（留空=萌绘默认）" style="width: 300px;"></n-select>
+                  <n-button size="small" type="primary" :loading="wardRunning" @click="wardGenerate">开始试穿</n-button>
+                  <n-button v-if="wardPreview" size="small" @click="wardArchive">存入立绘库</n-button>
+                </div>
+                <div v-if="wardError" class="bind-tip" style="color: #e88080;">{{ wardError }}</div>
+                <img v-if="wardPreview" class="try-img clickable-img" :src="wardPreview"
+                     alt="试穿结果" title="点击查看大图" @click="openViewer(wardSrcPath, '试穿结果')">
+              </div>
+            </n-card>
+
+            <w-image-picker v-model:show="wardCharRefPickerOpen" :items="wardRefPickerItems"
+                            :value="wardCharRef ? [wardCharRef] : []" :multiple="false"
+                            title="选择角色参考图（图1）"
+                            hint="角色已绑定的参考图 / 立绘，以及全局图库里的单人图或三视图，都能选。"
+                            @update:value="onWardCharRefConfirm"
+                            @preview="onPickerPreview"></w-image-picker>
+            <w-image-picker v-model:show="wardClothesPickerOpen" :items="wardClothesPickerItems"
+                            :value="wardClothes" :multiple="true" :max="4"
+                            title="选择衣服（图2 起）"
+                            hint="可多选最多 4 件，点选顺序即 图2 / 图3…；先穿上的先写进指令。"
+                            @update:value="onWardClothesConfirm"
+                            @preview="onPickerPreview"></w-image-picker>
+            <n-modal v-model:show="wardEditOpen" preset="dialog" title="编辑衣物信息"
+                     style="width: 480px;">
+              <div v-if="wardEditRow" class="stack">
+                <n-input v-model:value="wardEditName" placeholder="衣服名，如「白色蕾丝连衣裙」"></n-input>
+                <n-select v-model:value="wardEditCat" :options="wardCatOpts"></n-select>
+                <n-input v-model:value="wardEditNote" type="textarea" :rows="2"
+                         placeholder="备注：颜色 / 材质 / 适合的角色等"></n-input>
+              </div>
+              <template #action>
+                <n-button size="small" @click="wardEditOpen = false">取消</n-button>
+                <n-button size="small" type="primary" @click="saveWardrobeEdit">保存</n-button>
               </template>
             </n-modal>
           </div>
@@ -2424,6 +2573,131 @@
                 </div>
                 <div v-else class="lib-empty">还没有立绘：到「立绘」页签补图，或去试画台试一张。</div>
               </div>
+              <div class="lib-sec">
+                <div class="lib-head">试穿成果 <span class="cnt">{{ galTryons.length }} 张 · 按分类存，不自动进立绘</span></div>
+                <div v-if="galTryons.length" class="lib-grid tall">
+                  <div v-for="r in galTryons" :key="'libtryon:' + r.id" class="gal-item">
+                    <img v-if="r.thumb" :src="r.thumb" class="clickable-img" alt="试穿成果"
+                         title="点击查看大图" @click.stop="openViewer(r.path, '试穿成果')">
+                    <div v-else class="gal-meta">文件丢失</div>
+                    <div class="gal-meta">{{ r.category_label }}{{ r.name ? ' · ' + r.name : '' }}{{ r.portrait_file ? ' · 已转立绘' : '' }}</div>
+                  </div>
+                </div>
+                <div v-else class="lib-empty">还没有试穿成果：到「试穿」页签选角色参考图和衣服生成。</div>
+              </div>
+            </div>
+
+            <!-- v0.73.0：试穿——图1 角色参考图 + 图2 起衣服图；成品按分类进图库，确认后才转立绘 -->
+            <div v-else-if="galTab === 'tryon'" class="stack">
+              <div class="bind-tip" style="margin-top: 0;">
+                选该角色的参考图（单人 or 三视图）+ 衣柜里的衣服图出试穿图。
+                成品按分类进下面的「试穿图库」，<b>不会自动进立绘</b>；点卡片上的「设为立绘」才正式入库。
+              </div>
+              <div class="wd-row">
+                <w-pick-thumb :src="pickThumbOf(galTryonCharRef, [genSources, globalRefs])"
+                              :path="galTryonCharRef || ''"
+                              :label="galTryonCharRef ? '① 角色参考：' + tryNameOf(galTryonCharRef) : '① 点选角色参考图（图1）'"
+                              :sub="galTryonCharRef ? '图1 · 点图看大图 / 点文字重选' : '点文字选图'"
+                              :active="!!galTryonCharRef"
+                              @click="galTryonCharPickerOpen = true"
+                              @preview="onPickerPreview"></w-pick-thumb>
+                <n-checkbox v-model:checked="galTryonMultiView">角色图是三视图（出图仍是单人照）</n-checkbox>
+              </div>
+              <div>
+                <div class="bind-tip" style="margin-top: 0;">② 选衣服（可多选，点选顺序即 图2 / 图3 …）</div>
+                <div class="wd-row" style="margin-top: 6px;">
+                  <w-pick-thumb v-for="(p, pi) in galTryonClothes" :key="p" :index="pi + 2"
+                                :src="pickThumbOf(p, [wardrobeItems])" :path="p"
+                                :label="galTryonClothNameOf(p)" sub="点文字移除"
+                                :active="true" @click="removeGalTryonCloth(p)"
+                                @preview="onPickerPreview"></w-pick-thumb>
+                  <n-button size="small" dashed @click="galTryonClothPickerOpen = true">＋ 选衣服</n-button>
+                </div>
+                <div class="bind-tip" v-if="!wardrobeItems.length">衣柜是空的：先到侧栏「衣柜」上传几件衣服。</div>
+              </div>
+              <div class="wd-row">
+                <n-select v-model:value="galTryonScheme" :options="wardSchemeOpts" style="width: 330px;"></n-select>
+                <span class="bind-tip" style="margin: 0;">{{ galTryonSchemeHint }}</span>
+              </div>
+              <div class="wd-row">
+                <span class="wd-label">衣物说明</span>
+                <n-input v-model:value="galTryonDesc" size="small" style="max-width: 440px;"
+                         @blur="galTryonRebuild"
+                         placeholder="例如：白色蕾丝短裙，只有下装，没有上衣和鞋"></n-input>
+                <n-button size="small" @click="galTryonExpand">AI 扩写穿搭</n-button>
+              </div>
+              <div v-if="galTryonOutfit" class="bind-tip">补充搭配建议（仅缺失部位，冲突以衣服图为准）：{{ galTryonOutfit }}</div>
+              <div>
+                <div class="wd-row" style="margin-bottom: 6px;">
+                  <span class="wd-label">编辑指令</span>
+                  <n-button size="tiny" quaternary @click="galTryonRebuild">按方案重建</n-button>
+                </div>
+                <n-input v-model:value="galTryonPrompt" type="textarea" :rows="4"
+                         placeholder="点「按方案重建」生成指令，可直接修改"></n-input>
+              </div>
+              <div class="wd-row">
+                <n-select v-model:value="galTryonWf" :options="wfOpts('img')" filterable tag clearable
+                          placeholder="Qwen Edit 工作流（留空=萌绘默认）" style="width: 300px;"></n-select>
+                <n-button size="small" type="primary" :loading="galTryonRunning" @click="galTryonGenerate">开始试穿</n-button>
+              </div>
+              <div v-if="galTryonError" class="bind-tip" style="color: #e88080;">{{ galTryonError }}</div>
+              <img v-if="galTryonPreview" class="try-img clickable-img" :src="galTryonPreview"
+                   alt="本次试穿结果" title="点击查看大图" @click="openViewer(galTryonSrcPath, '试穿结果')">
+
+              <div class="sec-title" style="margin-top: 14px;">试穿图库
+                <span class="cnt">{{ galTryons.length }} 张 · 按分类分组；设为立绘后可在「立绘」页签看到</span>
+              </div>
+              <n-alert v-if="galTryonLoading" type="info" :bordered="false">加载中…</n-alert>
+              <div v-for="grp in galTryonGroups" :key="grp.category" class="lib-sec">
+                <div class="lib-head">{{ grp.label }} <span class="cnt">{{ grp.items.length }} 张</span></div>
+                <div class="lib-grid tall">
+                  <div v-for="r in grp.items" :key="'tryon:' + r.id" class="gal-item">
+                    <img v-if="r.thumb" :src="r.thumb" class="clickable-img" alt="试穿成果"
+                         title="点击查看大图" @click.stop="openViewer(r.path, '试穿成果')">
+                    <div v-else class="gal-meta">文件丢失</div>
+                    <div class="gal-meta">{{ r.name || "未命名" }}{{ r.portrait_file ? " · 已转立绘" : "" }}</div>
+                    <div class="gal-ops">
+                      <w-icon-btn v-if="!r.portrait_file" icon="arrowRight" size="tiny" type="primary"
+                                  tip="设为立绘（正式进立绘库）"
+                                  @click.stop="galTryonSetPortrait(r)"></w-icon-btn>
+                      <w-icon-btn v-else icon="confirm" size="tiny" type="success"
+                                  tip="已转成立绘，点开到「立绘」页签查看"
+                                  @click.stop="switchGalTab('portraits')"></w-icon-btn>
+                      <w-icon-btn icon="edit" size="tiny" tip="改分类 / 名称"
+                                  @click.stop="galTryonBeginEdit(r)"></w-icon-btn>
+                      <w-icon-btn icon="trash" size="tiny" type="error"
+                                  :armed="galTryonDeleteArm === r.id"
+                                  :tip="galTryonDeleteArm === r.id ? '再点一次确认删除' : '删除试穿成果'"
+                                  @click.stop="galTryonDelete(r)"></w-icon-btn>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <n-empty v-if="!galTryonLoading && !galTryons.length"
+                       description="还没有试穿成果：选好角色参考图和衣服，点「开始试穿」"></n-empty>
+              <w-image-picker v-model:show="galTryonCharPickerOpen" :items="galTryonCharItems"
+                              :value="galTryonCharRef ? [galTryonCharRef] : []" :multiple="false"
+                              title="选择角色参考图（图1）"
+                              hint="该角色的参考图 / 立绘，以及全局图库里的单人图或三视图，都能选。"
+                              @update:value="onGalTryonCharConfirm"
+                              @preview="onPickerPreview"></w-image-picker>
+              <w-image-picker v-model:show="galTryonClothPickerOpen" :items="galTryonClothItems"
+                              :value="galTryonClothes" :multiple="true" :max="4"
+                              title="选择衣服（图2 起）"
+                              hint="可多选最多 4 件，点选顺序即 图2 / 图3…；先在侧栏「衣柜」上传衣服。"
+                              @update:value="onGalTryonClothesConfirm"
+                              @preview="onPickerPreview"></w-image-picker>
+              <n-modal v-model:show="galTryonEditOpen" preset="dialog" title="编辑试穿成果"
+                       style="width: 460px;">
+                <div v-if="galTryonEditRow" class="stack">
+                  <n-input v-model:value="galTryonEditName" placeholder="穿搭名称 / 备注"></n-input>
+                  <n-select v-model:value="galTryonEditCat" :options="wardCatOpts"></n-select>
+                </div>
+                <template #action>
+                  <n-button size="small" @click="galTryonEditOpen = false">取消</n-button>
+                  <n-button size="small" type="primary" @click="galTryonSaveEdit">保存</n-button>
+                </template>
+              </n-modal>
             </div>
           </div>
 
@@ -5408,7 +5682,7 @@
                      title: "点击查看大图", onClick: openBig })
         : h("div", { class: "pick-thumb-ph", title: "点右侧文字选择图片", onClick: openBig }, "图");
       var txt = [];
-      if (this.index) txt.push(h("span", { class: "picker-strip-ord" }, String(this.index)));
+      if (this.index) txt.push(h("span", { class: "pick-thumb-ord" }, String(this.index)));
       txt.push(h("span", { class: "pick-thumb-label" }, String(this.label || "点选图片")));
       if (this.sub) txt.push(h("span", { class: "pick-thumb-sub" }, String(this.sub)));
       return h("div", { class: "pick-thumb" + (this.active ? " on" : ""),
@@ -5707,6 +5981,7 @@
         { label: "分群绑定", key: "bind" },
         { label: "素材库", key: "presets" },
         { label: "全局图库", key: "global_refs" },
+        { label: "衣柜", key: "wardrobe" },
         { label: "帮助", key: "help" },
         { label: "配置", key: "config" }
       ];
@@ -5733,6 +6008,8 @@
         saveUiMenu(key);
         if (key === "overview") loadOverview();
         if (key === "global_refs") { loadGlobalRefs(); }
+        // v0.72.0：衣柜试穿的角色参考图候选包含全局图库，进页时一并加载
+        if (key === "wardrobe") { loadWardrobe(); loadGlobalRefs(); }
       }
       (function restoreUiMenu() {
         try {
@@ -5891,6 +6168,286 @@
           await apiPost("global_refs/delete", { path: r.path, confirm: true });
           message.success("已从全局图库移除（文件在回收站可找回）");
           await loadGlobalRefs();
+        } catch (e) { /* 已提示 */ }
+      }
+
+      // ---- 衣柜 / 角色试穿（v0.72.0）----
+      // 图1 = 角色参考图（身份 / 姿势 / 构图锚点），图2 起 = 衣服图。
+      // 与 swap 共用 jobs/start 的 manual 直通，不新增绘图链路。
+      var wardrobeItems = Vue.ref([]);
+      var wardrobeLoading = Vue.ref(false);
+      var wardDeleteArm = Vue.ref("");
+      var wardEditOpen = Vue.ref(false);
+      var wardEditRow = Vue.ref(null);
+      var wardEditName = Vue.ref("");
+      var wardEditCat = Vue.ref("other");
+      var wardEditNote = Vue.ref("");
+      var wardCatOpts = [
+        { label: "上装", value: "top" }, { label: "下装 · 裤", value: "bottom" },
+        { label: "下装 · 裙", value: "skirt" }, { label: "连衣裙", value: "dress" },
+        { label: "套装", value: "set" }, { label: "外套", value: "outer" },
+        { label: "鞋履", value: "shoes" }, { label: "配饰", value: "accessory" },
+        { label: "其他衣物", value: "other" }
+      ];
+      var wardScheme = Vue.ref("complete");
+      var wardSchemeOpts = [
+        { label: "扩写补全（推荐 · 缺上衣/鞋自动配齐）", value: "complete" },
+        { label: "只换指定衣物（不扩写）", value: "only" },
+        { label: "整套重做（以衣服图为灵感自由设计）", value: "full" }
+      ];
+      var wardSchemeHint = Vue.computed(function () {
+        var m = {
+          complete: "图2 只有下装也没关系：按它的颜色 / 材质 / 风格补上上衣与鞋履。",
+          only: "只替换 图2 里出现的部位，图1 原来的其它衣物保持不动。",
+          full: "以 图2 的配色与气质重新设计整套服装。"
+        };
+        return m[wardScheme.value] || m.complete;
+      });
+      var wardMultiView = Vue.ref(false);
+      var wardDesc = Vue.ref("");
+      var wardOutfitText = Vue.ref("");
+      var wardExpanding = Vue.ref(false);
+      var wardPrompt = Vue.ref("");
+      // v0.72.1：出图尺寸由后端 /wardrobe/prompt 按配置下发（不暴露给模板，
+      // 只用来在 override 里显式钉住竖版单人尺寸，绕开 detect_view_layout 误判）
+      var wardSize = Vue.ref({ width: 704, height: 1200 });
+      var wardWf = Vue.ref("");
+      var wardRunning = Vue.ref(false);
+      var wardPreview = Vue.ref("");
+      var wardSrcPath = Vue.ref("");
+      var wardJobId = Vue.ref("");
+      var wardError = Vue.ref("");
+      var wardCharId = Vue.ref(null);
+      var wardCharRef = Vue.ref("");
+      var wardClothes = Vue.ref([]);
+      var wardRefs = Vue.ref([]);
+      var wardPortraits = Vue.ref([]);
+      var wardCharRefPickerOpen = Vue.ref(false);
+      var wardClothesPickerOpen = Vue.ref(false);
+      var wardPollTimer = null;
+
+      var wardRefSources = Vue.computed(function () {
+        return [wardRefs.value, wardPortraits.value, globalRefs.value];
+      });
+      var wardRefPickerItems = Vue.computed(function () {
+        var out = [];
+        var seen = {};
+        var groups = [
+          { list: wardRefs.value, tag: "角色参考图" },
+          { list: wardPortraits.value, tag: "角色立绘" },
+          { list: globalRefs.value, tag: "全局图" }
+        ];
+        for (var g = 0; g < groups.length; g++) {
+          var list = groups[g].list || [];
+          for (var i = 0; i < list.length; i++) {
+            var r = list[i];
+            if (!r.path || r.exists === false || seen[r.path]) continue;
+            seen[r.path] = 1;
+            out.push({ path: r.path, thumb: r.thumb, exists: true,
+              label: "[" + groups[g].tag + "] " + (r.note ? r.note + " · " : "") + grName(r),
+              sub: r.width && r.height ? r.width + "×" + r.height : "" });
+          }
+        }
+        return out;
+      });
+      var wardClothesPickerItems = Vue.computed(function () {
+        return (wardrobeItems.value || []).filter(function (r) { return r.exists !== false && r.path; })
+          .map(function (r) {
+            return { path: r.path, thumb: r.thumb, exists: true,
+              label: "[" + r.category_label + "] " + (r.name || grName(r)),
+              sub: r.note || "" };
+          });
+      });
+      function wardRefNameOf(path) {
+        var all = [].concat(wardRefs.value || [], wardPortraits.value || [], globalRefs.value || []);
+        for (var i = 0; i < all.length; i++) {
+          if (_samePath(all[i].path, path)) {
+            return (all[i].note ? all[i].note + " · " : "") + grName(all[i]);
+          }
+        }
+        return grName({ path: path });
+      }
+      // v0.73.1：上传时没改名会落成一串内容哈希，卡片上糊一长条看不清；
+      // 纯十六进制文件名一律显示「未命名衣物」，其余限长避免撑破卡片。
+      function clothDisplayName(r) {
+        var raw = String((r && (r.name || r.note)) || "").trim();
+        if (!raw || /^(?:c_)?[0-9a-f]{12,}$/i.test(raw)) { return "未命名衣物"; }
+        return raw.length > 14 ? raw.slice(0, 13) + "…" : raw;
+      }
+      function wardClothNameOf(path) {
+        var all = wardrobeItems.value || [];
+        for (var i = 0; i < all.length; i++) {
+          if (_samePath(all[i].path, path)) {
+            return "[" + all[i].category_label + "] " + clothDisplayName(all[i]);
+          }
+        }
+        return grName({ path: path });
+      }
+      function wardCatsOfSelected() {
+        var cats = [];
+        (wardClothes.value || []).forEach(function (p) {
+          var r = (wardrobeItems.value || []).find(function (x) { return _samePath(x.path, p); });
+          var c = r && r.category;
+          if (c && cats.indexOf(c) < 0) cats.push(c);
+        });
+        return cats;
+      }
+      async function loadWardrobe() {
+        wardrobeLoading.value = true;
+        try {
+          var res = await apiGet("wardrobe/list");
+          wardrobeItems.value = (res && res.items) || [];
+        } catch (e) { /* 已提示 */ } finally { wardrobeLoading.value = false; }
+      }
+      function loadWardrobeCharSources() {
+        if (!wardCharId.value) { wardRefs.value = []; wardPortraits.value = []; wardCharRef.value = ""; return; }
+        Promise.all([
+          apiGet("refs/list", { id: wardCharId.value }).catch(function () { return null; }),
+          apiGet("portraits/list", { char_id: wardCharId.value }).catch(function () { return null; })
+        ]).then(function (arr) {
+          wardRefs.value = (arr[0] && arr[0].items) || [];
+          wardPortraits.value = (arr[1] && arr[1].items) || [];
+        });
+      }
+      Vue.watch(wardCharId, function () {
+        wardCharRef.value = "";
+        loadWardrobeCharSources();
+      });
+      Vue.watch([wardScheme, wardMultiView, wardClothes], function () { wardRebuildPrompt(); });
+      async function onWardrobeFiles(files) {
+        var list = Array.prototype.slice.call(files || []);
+        if (!list.length) return;
+        uploading.value = true;
+        var okN = 0;
+        for (var i = 0; i < list.length; i++) {
+          try {
+            await apiUpload(list[i], "wardrobe/upload");
+            okN += 1;
+          } catch (e) { /* 单张失败不挡后续 */ }
+        }
+        uploading.value = false;
+        if (okN) { message.success("已加入衣柜 " + okN + " 件（记得点卡片改名字与类型）"); await loadWardrobe(); }
+      }
+      function beginWardrobeEdit(r) {
+        wardEditRow.value = r;
+        wardEditName.value = r.name || "";
+        wardEditCat.value = r.category || "other";
+        wardEditNote.value = r.note || "";
+        wardEditOpen.value = true;
+      }
+      async function saveWardrobeEdit() {
+        var r = wardEditRow.value;
+        if (!r) return;
+        try {
+          var res = await apiPost("wardrobe/update", { path: r.path, name: wardEditName.value,
+            category: wardEditCat.value, note: wardEditNote.value });
+          r.name = res.name; r.category = res.category; r.category_label = wardCatOpts
+            .find(function (o) { return o.value === res.category; }).label; r.note = res.note;
+          wardEditOpen.value = false; wardEditRow.value = null;
+          message.success("衣物信息已保存");
+          wardRebuildPrompt();
+        } catch (e) { /* 已提示 */ }
+      }
+      async function deleteWardrobe(r) {
+        if (wardDeleteArm.value !== r.path) {
+          wardDeleteArm.value = r.path;
+          message.info("再点一次「删除」确认从衣柜移除");
+          return;
+        }
+        wardDeleteArm.value = "";
+        try {
+          await apiPost("wardrobe/delete", { path: r.path, confirm: true });
+          message.success("已从衣柜移除（文件在回收站可找回）");
+          wardClothes.value = (wardClothes.value || []).filter(function (p) { return p !== r.path; });
+          await loadWardrobe();
+          wardRebuildPrompt();
+        } catch (e) { /* 已提示 */ }
+      }
+      function openWardCharRefPicker() { wardCharRefPickerOpen.value = true; }
+      function onWardCharRefConfirm(vals) {
+        var arr = vals || [];
+        wardCharRef.value = arr.length ? arr[0] : "";
+      }
+      function onWardClothesConfirm(vals) { wardClothes.value = (vals || []).slice(); }
+      function removeWardCloth(p) {
+        wardClothes.value = (wardClothes.value || []).filter(function (x) { return x !== p; });
+      }
+      async function wardRebuildPrompt() {
+        try {
+          var res = await apiPost("wardrobe/prompt", {
+            categories: wardCatsOfSelected(), description: wardDesc.value,
+            scheme: wardScheme.value, outfit_text: wardOutfitText.value,
+            multi_view: !!wardMultiView.value
+          });
+          if (res && res.prompt) wardPrompt.value = res.prompt;
+          if (res && res.width && res.height) {
+            wardSize.value = { width: res.width, height: res.height };
+          }
+        } catch (e) { /* 已提示 */ }
+      }
+      async function wardAiExpand() {
+        wardExpanding.value = true;
+        try {
+          var e = (allEntries.value || []).find(function (x) { return x.id === wardCharId.value; });
+          var res = await apiPost("wardrobe/expand", {
+            description: wardDesc.value, categories: wardCatsOfSelected(),
+            char_name: e ? e.name : ""
+          });
+          wardOutfitText.value = (res && res.text) || "";
+          message.success("已扩写整套穿搭，指令已同步更新");
+          await wardRebuildPrompt();
+        } catch (err) { /* 已提示 */ } finally { wardExpanding.value = false; }
+      }
+      function wardStopPoll() {
+        if (wardPollTimer) { clearInterval(wardPollTimer); wardPollTimer = null; }
+      }
+      function wardPoll() {
+        wardStopPoll();
+        var t0 = Date.now();
+        wardPollTimer = setInterval(async function () {
+          try {
+            var st = await apiGet("jobs/status", { job_id: wardJobId.value });
+            if (!st || !st.status) return;
+            if (st.status === "running" || st.status === "queued") {
+              if (Date.now() - t0 > ((Number(meta.value.draw_timeout) || 120) + 60) * 1000) {
+                wardStopPoll(); wardRunning.value = false; wardError.value = "等待超时，任务可能仍在后台运行";
+              }
+              return;
+            }
+            wardStopPoll(); wardRunning.value = false;
+            if (st.status === "ok") {
+              wardPreview.value = st.preview || "";
+              wardSrcPath.value = st.src_path || "";
+              message.success("试穿完成");
+            } else { wardError.value = String(st.error || st.status); }
+          } catch (e) { /* 轮询瞬时失败继续等 */ }
+        }, 2000);
+      }
+      async function wardGenerate() {
+        wardError.value = ""; wardPreview.value = ""; wardSrcPath.value = "";
+        if (!wardCharId.value) { message.error("请先选角色"); return; }
+        if (!wardCharRef.value) { message.error("请先选角色参考图（图1）"); return; }
+        if (!(wardClothes.value || []).length) { message.error("请至少选一件衣服（图2）"); return; }
+        if (!String(wardPrompt.value || "").trim()) { message.error("编辑指令为空，请点「按方案重建」"); return; }
+        wardRunning.value = true;
+        try {
+          var refs = [wardCharRef.value].concat(wardClothes.value);
+          var ov = { strategy_type: "img2img", ref: refs[0], refs: refs,
+            width: wardSize.value.width, height: wardSize.value.height };
+          if (String(wardWf.value || "").trim()) ov.img2img_workflow = String(wardWf.value).trim();
+          var res = await apiPost("jobs/start", { kind: "try", id: wardCharId.value,
+            prompt: String(wardPrompt.value).slice(0, 2000), override: ov });
+          wardJobId.value = (res && res.job_id) || "";
+          if (!wardJobId.value) { wardRunning.value = false; wardError.value = "任务未创建成功，请稍后重试"; return; }
+          wardPoll();
+        } catch (e) { wardRunning.value = false; }
+      }
+      async function wardArchive() {
+        if (!wardJobId.value) return;
+        try {
+          await apiPost("jobs/archive", { job_id: wardJobId.value });
+          message.success("已存入立绘库");
+          await refreshAll();
         } catch (e) { /* 已提示 */ }
       }
 
@@ -8632,6 +9189,224 @@
         }
       }
 
+      // ---- v0.73.0：角色详情「试穿」页签（成品按分类进图库，不自动进立绘）----
+      var galTryons = Vue.ref([]);
+      var galTryonLoading = Vue.ref(false);
+      var galTryonCharRef = Vue.ref("");
+      var galTryonClothes = Vue.ref([]);
+      var galTryonMultiView = Vue.ref(false);
+      var galTryonDesc = Vue.ref("");
+      var galTryonOutfit = Vue.ref("");
+      var galTryonPrompt = Vue.ref("");
+      var galTryonWf = Vue.ref("");
+      var galTryonSize = Vue.ref({ width: 704, height: 1200 });
+      var galTryonRunning = Vue.ref(false);
+      var galTryonPreview = Vue.ref("");
+      var galTryonSrcPath = Vue.ref("");
+      var galTryonJobId = Vue.ref("");
+      var galTryonError = Vue.ref("");
+      var galTryonScheme = Vue.ref("complete");
+      var galTryonSchemeHint = Vue.computed(function () {
+        var m = {
+          complete: "图2 只有下装也没关系：按它的颜色 / 材质 / 风格补上上衣与鞋履。",
+          only: "只替换 图2 里出现的部位，图1 原来的其它衣物保持不动。",
+          full: "以 图2 的配色与气质重新设计整套服装。"
+        };
+        return m[galTryonScheme.value] || m.complete;
+      });
+      var galTryonCharPickerOpen = Vue.ref(false);
+      var galTryonClothPickerOpen = Vue.ref(false);
+      var galTryonEditOpen = Vue.ref(false);
+      var galTryonEditRow = Vue.ref(null);
+      var galTryonEditName = Vue.ref("");
+      var galTryonEditCat = Vue.ref("other");
+      var galTryonDeleteArm = Vue.ref(0);
+      var galTryonPollTimer = null;
+
+      var galTryonCharItems = Vue.computed(function () {
+        var out = []; var seen = {};
+        var groups = [
+          { list: genSources.value, tag: "角色参考图/立绘" },
+          { list: globalRefs.value, tag: "全局图" }
+        ];
+        for (var g = 0; g < groups.length; g++) {
+          var list = groups[g].list || [];
+          for (var i = 0; i < list.length; i++) {
+            var r = list[i];
+            if (!r.path || r.exists === false || seen[r.path]) continue;
+            seen[r.path] = 1;
+            out.push({ path: r.path, thumb: r.thumb, exists: true,
+              label: "[" + groups[g].tag + "] " + (r.note ? r.note + " · " : "") + grName(r),
+              sub: r.width && r.height ? r.width + "×" + r.height : "" });
+          }
+        }
+        return out;
+      });
+      var galTryonClothItems = Vue.computed(function () {
+        return (wardrobeItems.value || []).filter(function (r) { return r.exists !== false && r.path; })
+          .map(function (r) {
+            return { path: r.path, thumb: r.thumb, exists: true,
+              label: "[" + r.category_label + "] " + (r.name || grName(r)), sub: r.note || "" };
+          });
+      });
+      var galTryonGroups = Vue.computed(function () {
+        var map = {};
+        (galTryons.value || []).forEach(function (r) {
+          var k = r.category || "other";
+          if (!map[k]) { map[k] = { category: k, label: r.category_label || "其他", items: [] }; }
+          map[k].items.push(r);
+        });
+        return Object.keys(map).map(function (k) { return map[k]; });
+      });
+      function galTryonClothNameOf(path) {
+        var all = wardrobeItems.value || [];
+        for (var i = 0; i < all.length; i++) {
+          if (_samePath(all[i].path, path)) {
+            return "[" + all[i].category_label + "] " + clothDisplayName(all[i]);
+          }
+        }
+        return grName({ path: path });
+      }
+      function galTryonCats() {
+        var cats = [];
+        (galTryonClothes.value || []).forEach(function (p) {
+          var r = (wardrobeItems.value || []).find(function (x) { return _samePath(x.path, p); });
+          var c = r && r.category;
+          if (c && cats.indexOf(c) < 0) cats.push(c);
+        });
+        return cats;
+      }
+      async function loadGalTryons() {
+        if (!galCharId.value) { galTryons.value = []; return; }
+        galTryonLoading.value = true;
+        try {
+          var res = await apiGet("tryon/list", { id: galCharId.value });
+          galTryons.value = (res && res.items) || [];
+        } catch (e) { /* 已提示 */ } finally { galTryonLoading.value = false; }
+      }
+      async function galTryonRebuild() {
+        try {
+          var res = await apiPost("wardrobe/prompt", {
+            categories: galTryonCats(), description: galTryonDesc.value,
+            scheme: galTryonScheme.value, outfit_text: galTryonOutfit.value,
+            multi_view: !!galTryonMultiView.value
+          });
+          if (res && res.prompt) galTryonPrompt.value = res.prompt;
+          if (res && res.width && res.height) {
+            galTryonSize.value = { width: res.width, height: res.height };
+          }
+        } catch (e) { /* 已提示 */ }
+      }
+      async function galTryonExpand() {
+        try {
+          var e = (allEntries.value || []).find(function (x) { return x.id === galCharId.value; });
+          var res = await apiPost("wardrobe/expand", {
+            description: galTryonDesc.value, categories: galTryonCats(),
+            char_name: e ? e.name : ""
+          });
+          galTryonOutfit.value = (res && res.text) || "";
+          message.success("已扩写整套穿搭，指令已同步更新");
+          await galTryonRebuild();
+        } catch (err) { /* 已提示 */ }
+      }
+      function galTryonStopPoll() {
+        if (galTryonPollTimer) { clearInterval(galTryonPollTimer); galTryonPollTimer = null; }
+      }
+      function galTryonPoll() {
+        galTryonStopPoll();
+        var t0 = Date.now();
+        galTryonPollTimer = setInterval(async function () {
+          try {
+            var st = await apiGet("jobs/status", { job_id: galTryonJobId.value });
+            if (!st || !st.status) return;
+            if (st.status === "running" || st.status === "queued") {
+              if (Date.now() - t0 > ((Number(meta.value.draw_timeout) || 120) + 60) * 1000) {
+                galTryonStopPoll(); galTryonRunning.value = false;
+                galTryonError.value = "等待超时，任务可能仍在后台运行";
+              }
+              return;
+            }
+            galTryonStopPoll(); galTryonRunning.value = false;
+            if (st.status !== "ok") { galTryonError.value = String(st.error || st.status); return; }
+            galTryonPreview.value = st.preview || "";
+            galTryonSrcPath.value = st.src_path || "";
+            var cats = galTryonCats();
+            await apiPost("tryon/save", { job_id: galTryonJobId.value, id: galCharId.value,
+              categories: cats, category: cats.length ? cats[0] : "other",
+              name: String(galTryonDesc.value || "").slice(0, 40) });
+            message.success("试穿完成，成品已按分类存入试穿图库（未进立绘）");
+            await loadGalTryons();
+          } catch (e) { /* 轮询瞬时失败继续 */ }
+        }, 2000);
+      }
+      async function galTryonGenerate() {
+        galTryonError.value = ""; galTryonPreview.value = ""; galTryonSrcPath.value = "";
+        if (!galCharId.value) { message.error("请先进入某个角色的详情"); return; }
+        if (!galTryonCharRef.value) { message.error("请先选角色参考图（图1）"); return; }
+        if (!(galTryonClothes.value || []).length) { message.error("请至少选一件衣服（图2）"); return; }
+        if (!String(galTryonPrompt.value || "").trim()) { message.error("编辑指令为空，请点「按方案重建」"); return; }
+        galTryonRunning.value = true;
+        try {
+          var refs = [galTryonCharRef.value].concat(galTryonClothes.value);
+          var ov = { strategy_type: "img2img", ref: refs[0], refs: refs,
+            width: galTryonSize.value.width, height: galTryonSize.value.height };
+          if (String(galTryonWf.value || "").trim()) ov.img2img_workflow = String(galTryonWf.value).trim();
+          var res = await apiPost("jobs/start", { kind: "try", id: galCharId.value,
+            prompt: String(galTryonPrompt.value).slice(0, 2000), override: ov });
+          galTryonJobId.value = (res && res.job_id) || "";
+          if (!galTryonJobId.value) { galTryonRunning.value = false; galTryonError.value = "任务未创建成功"; return; }
+          galTryonPoll();
+        } catch (e) { galTryonRunning.value = false; }
+      }
+      async function galTryonSetPortrait(r) {
+        try {
+          var res = await apiPost("tryon/to_portrait", { row_id: r.id });
+          message.success("已设为正式立绘：" + ((res && res.archived) || ""));
+          r.portrait_file = (res && res.archived) || "1";
+          await refreshAll();
+          await loadGalTryons();
+        } catch (e) { /* 已提示 */ }
+      }
+      function galTryonBeginEdit(r) {
+        galTryonEditRow.value = r;
+        galTryonEditName.value = r.name || "";
+        galTryonEditCat.value = r.category || "other";
+        galTryonEditOpen.value = true;
+      }
+      async function galTryonSaveEdit() {
+        var r = galTryonEditRow.value;
+        if (!r) return;
+        try {
+          var res = await apiPost("tryon/update", { row_id: r.id,
+            category: galTryonEditCat.value, name: galTryonEditName.value });
+          r.category = res.category; r.name = res.name;
+          r.category_label = (wardCatOpts.find(function (o) { return o.value === res.category; }) || {}).label || "其他";
+          galTryonEditOpen.value = false; galTryonEditRow.value = null;
+          message.success("分类 / 名称已保存");
+        } catch (e) { /* 已提示 */ }
+      }
+      async function galTryonDelete(r) {
+        if (galTryonDeleteArm.value !== r.id) {
+          galTryonDeleteArm.value = r.id;
+          message.info("再点一次「删除」确认移除试穿成果");
+          return;
+        }
+        galTryonDeleteArm.value = 0;
+        try {
+          await apiPost("tryon/delete", { row_id: r.id, confirm: true });
+          message.success("已移除试穿成果（文件在回收站可找回）");
+          await loadGalTryons();
+        } catch (e) { /* 已提示 */ }
+      }
+      function onGalTryonCharConfirm(vals) {
+        var arr = vals || [];
+        galTryonCharRef.value = arr.length ? arr[0] : "";
+      }
+      function onGalTryonClothesConfirm(vals) { galTryonClothes.value = (vals || []).slice(); }
+      function removeGalTryonCloth(p) {
+        galTryonClothes.value = (galTryonClothes.value || []).filter(function (x) { return x !== p; });
+      }
+
       Vue.watch(galCharId, function (cid) {
         // 换角色（v0.18.2）：立绘/参考图都重取，图生图源与提示词跟着清
         // （别的角色的不能串用）。关键改动——**先清空再取数**：旧版这里保留上
@@ -8652,6 +9427,11 @@
         // v0.42.0：页签回「资料」（已合并速览 / 头像 / 资料表单）
         galTab.value = "profile";
         galSummary.value = null; galAvatarThumb.value = "";
+        // v0.73.0：试穿选择与成果都属于上一位角色，必须一起清（换角色先给骨架态）
+        galTryonCharRef.value = ""; galTryonClothes.value = [];
+        galTryonPrompt.value = ""; galTryonOutfit.value = ""; galTryonDesc.value = "";
+        galTryonPreview.value = ""; galTryonSrcPath.value = ""; galTryonError.value = "";
+        galTryons.value = [];
         // v0.45.1：换角色后**立刻**按新条目填资料表单。旧版只清空、等用户去点
         // 「资料」页签才填——而页签本来就是资料，于是进详情页看到的是空表单
         // （印象语因为另有 watch 才会显示），导入资料后更明显。
@@ -8660,6 +9440,7 @@
         if (!cid) { galSwitching.value = false; return; }
         galSwitching.value = true;
         loadGalSummary();
+        loadGalTryons();
         Promise.all([loadGalItems(cid, seq), loadGalRefs(cid, seq)]).then(function () {
           if (seq === galLoadSeq) galSwitching.value = false;
         });
@@ -8979,6 +9760,7 @@
           { key: "profile", label: "资料" },
           { key: "portraits", label: "立绘 " + galActiveCount.value },
           { key: "refs", label: "参考图 " + galRefs.value.length },
+          { key: "tryon", label: "试穿 " + galTryons.value.length },
           { key: "library", label: "图库" }
         ];
       });
@@ -8990,6 +9772,8 @@
           fillGalProfileFromEntry();
           if (!galSummary.value) { loadGalSummary(); }
         }
+        // v0.73.0：试穿成果按角色取，进页时拉一次
+        if (k === "tryon") { loadGalTryons(); }
       }
       // 速览：入库日期 / 首次被抽 / 累计被抽 / 立绘数 / 平均生成耗时（/char/summary）
       var galSummary = Vue.ref(null);
@@ -11159,6 +11943,8 @@
         // v0.59.2：restoreUiMenu 直接写 menu.value 不走 setMenu，这里补一刀，
         // 否则「服务端记住的页签 = 全局图库」刷新进来列表不加载。
         else if (m === "global_refs") { loadGlobalRefs(); }
+        // v0.72.0：服务端记住的页签 = 衣柜时同样要补加载（restoreUiMenu 不走 setMenu）
+        else if (m === "wardrobe") { loadWardrobe(); loadGlobalRefs(); }
         else if (m === "gallery") { loadGallery(); loadGalRefs(); }
         else if (m === "bind") { loadBindPools(); loadConfig(); }
         else if (m === "config") { loadConfig(); }
@@ -11852,6 +12638,8 @@
             loadTryRefs(), loadDrawerRefs(), loadOverview(),
             // v0.56.0：全局图库随刷新拉一次（试画台/详情的角色替换选择器要用）
             loadGlobalRefs(),
+            // v0.72.0：衣柜随统一刷新拉一次（试穿选衣器与衣柜页共用一份快照）
+            loadWardrobe(),
             // v0.25.6：刷新/切页签时也拉一次补图进度，后台队列不会「看不见」
             pollBatch()
           ]);
@@ -11877,7 +12665,7 @@
         // 用户从「试画台」直达并点选时 globalRefs 仍是空数组 → 弹窗空白。
         return Promise.all([loadGallery(), loadConfig(), loadWorks(), loadWorkflows(),
                             loadLlmProviders(), loadThemes(), loadPresets(),
-                            loadGlobalRefs()]);
+                            loadGlobalRefs(), loadWardrobe()]);
       });
 
       // v0.34.2：全局出图队列轮询（顶部指示器 + 队列面板共用一份数据）
@@ -11971,6 +12759,30 @@
         deleteGlobalRef: deleteGlobalRef,
         grDetailOpen: grDetailOpen, grDetail: grDetail, openGrDetail: openGrDetail,
         grSize: grSize, grShape: grShape, grName: grName,
+        // v0.72.0：衣柜 / 角色试穿
+        wardrobeItems: wardrobeItems, wardrobeLoading: wardrobeLoading,
+        wardDeleteArm: wardDeleteArm, wardEditOpen: wardEditOpen,
+        wardEditRow: wardEditRow, wardEditName: wardEditName,
+        wardEditCat: wardEditCat, wardEditNote: wardEditNote, wardCatOpts: wardCatOpts,
+        onWardrobeFiles: onWardrobeFiles, beginWardrobeEdit: beginWardrobeEdit,
+        saveWardrobeEdit: saveWardrobeEdit, deleteWardrobe: deleteWardrobe,
+        wardCharId: wardCharId, wardCharRef: wardCharRef, wardClothes: wardClothes,
+        wardRefSources: wardRefSources, wardRefPickerItems: wardRefPickerItems,
+        wardClothesPickerItems: wardClothesPickerItems,
+        wardCharRefPickerOpen: wardCharRefPickerOpen,
+        wardClothesPickerOpen: wardClothesPickerOpen,
+        openWardCharRefPicker: openWardCharRefPicker,
+        onWardCharRefConfirm: onWardCharRefConfirm,
+        onWardClothesConfirm: onWardClothesConfirm, removeWardCloth: removeWardCloth,
+        wardRefNameOf: wardRefNameOf, wardClothNameOf: wardClothNameOf,
+        wardScheme: wardScheme, wardSchemeOpts: wardSchemeOpts,
+        wardSchemeHint: wardSchemeHint, wardMultiView: wardMultiView,
+        wardDesc: wardDesc, wardOutfitText: wardOutfitText,
+        wardExpanding: wardExpanding, wardAiExpand: wardAiExpand,
+        wardPrompt: wardPrompt, wardRebuildPrompt: wardRebuildPrompt,
+        wardWf: wardWf, wardRunning: wardRunning, wardPreview: wardPreview,
+        wardSrcPath: wardSrcPath, wardError: wardError,
+        wardGenerate: wardGenerate, wardArchive: wardArchive,
         // v0.61.0：角色替换三档方案（试画台 / 角色详情共用）
         swapScheme: swapScheme, swapSchemeOpts: swapSchemeOpts, swapSchemeHint: swapSchemeHint,
         trySwapGlobal: trySwapGlobal, trySwapChar: trySwapChar,
@@ -12133,6 +12945,28 @@
         doDetailGenerate: doDetailGenerate,
         galTheme: galTheme, galThemeResolved: galThemeResolved,
         galTab: galTab, galTabs: galTabs, switchGalTab: switchGalTab,
+        // v0.73.0：角色详情「试穿」页签（成果按分类进图库，确认后才转立绘）
+        galTryons: galTryons, galTryonLoading: galTryonLoading,
+        galTryonCharRef: galTryonCharRef, galTryonClothes: galTryonClothes,
+        galTryonMultiView: galTryonMultiView, galTryonDesc: galTryonDesc,
+        galTryonOutfit: galTryonOutfit, galTryonPrompt: galTryonPrompt,
+        galTryonWf: galTryonWf, galTryonScheme: galTryonScheme,
+        galTryonSchemeHint: galTryonSchemeHint, galTryonRunning: galTryonRunning,
+        galTryonPreview: galTryonPreview, galTryonSrcPath: galTryonSrcPath,
+        galTryonError: galTryonError, galTryonGroups: galTryonGroups,
+        galTryonCharItems: galTryonCharItems, galTryonClothItems: galTryonClothItems,
+        galTryonCharPickerOpen: galTryonCharPickerOpen,
+        galTryonClothPickerOpen: galTryonClothPickerOpen,
+        galTryonEditOpen: galTryonEditOpen, galTryonEditRow: galTryonEditRow,
+        galTryonEditName: galTryonEditName, galTryonEditCat: galTryonEditCat,
+        galTryonDeleteArm: galTryonDeleteArm,
+        galTryonClothNameOf: galTryonClothNameOf, galTryonRebuild: galTryonRebuild,
+        galTryonExpand: galTryonExpand, galTryonGenerate: galTryonGenerate,
+        galTryonSetPortrait: galTryonSetPortrait, galTryonBeginEdit: galTryonBeginEdit,
+        galTryonSaveEdit: galTryonSaveEdit, galTryonDelete: galTryonDelete,
+        onGalTryonCharConfirm: onGalTryonCharConfirm,
+        onGalTryonClothesConfirm: onGalTryonClothesConfirm,
+        removeGalTryonCloth: removeGalTryonCloth, loadGalTryons: loadGalTryons,
         galSummary: galSummary, galSummaryLoading: galSummaryLoading,
         loadGalSummary: loadGalSummary,
         profileFields: profileFields, tierOpts: tierOpts, galTier: galTier,

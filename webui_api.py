@@ -1682,6 +1682,157 @@ async def h_global_refs_delete(plugin) -> dict:
     return ok({"path": rel, "deleted": True})
 
 
+# ---------- 衣柜（v0.72.0：角色试穿，Qwen Edit 多图链路） ----------
+# 图1 = 角色参考图（身份 / 姿势 / 背景锚点），图2... = 衣服图。
+# 与 swap 复用同一套 jobs/start + raw_prompt 直通，不新增绘图链路。
+
+_WARDROBE_CAT_KEYS = {k for k, _label, _hint in prompt_gen.WARDROBE_CATEGORIES}
+
+
+def _wardrobe_cat(value: str) -> str:
+    s = str(value or "").strip()
+    return s if s in _WARDROBE_CAT_KEYS else "other"
+
+
+async def h_wardrobe_list(plugin) -> dict:
+    """衣柜清单（带缩略 / 存在性 / 类型），图库页与试穿选衣器共用。"""
+    if not plugin._store:
+        return err("插件未初始化完成")
+    items = []
+    for row in plugin._store.list_wardrobe():
+        rel = str(row.get("file") or "")
+        fp = _safe_data_file(plugin, rel)
+        try:
+            size = int(fp.stat().st_size) if fp is not None else 0
+        except OSError:
+            size = 0
+        cat = _wardrobe_cat(row.get("category"))
+        items.append({
+            "path": rel, "rel": rel, "exists": fp is not None,
+            "thumb": _thumb_cached(fp, 420) if fp is not None else None,
+            "cover": _thumb_cached(fp, 1000) if fp is not None else None,
+            "sha256": row.get("sha256", ""),
+            "name": row.get("name", ""), "category": cat,
+            "category_label": prompt_gen.wardrobe_cat_label(cat),
+            "note": row.get("note", ""),
+            "width": int(row.get("width") or 0), "height": int(row.get("height") or 0),
+            "created_at": row.get("created_at", ""),
+            "size": size, "file_name": Path(rel).name,
+            "ext": Path(rel).suffix.lower().lstrip("."),
+        })
+    return ok({"items": items, "total": len(items)})
+
+
+async def h_wardrobe_upload(plugin) -> dict:
+    """上传衣物图到 data/wardrobe/，sha256 内容寻址（同内容只存一份）。"""
+    if request is None:
+        return err("无请求上下文")
+    if not plugin._store:
+        return err("插件未初始化完成")
+    try:
+        files = await request.files
+    except Exception:
+        files = getattr(request, "files", None)
+    f = files.get("file") if files else None
+    if f is None:
+        return err("缺少 file 字段（multipart）")
+    suffix = Path(f.filename or "").suffix.lower()
+    if suffix not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        return err("仅支持 png/jpg/jpeg/webp/gif")
+    raw = f.read()
+    if not raw:
+        return err("空文件")
+    if len(raw) > 15 * 1024 * 1024:
+        return err("图片超过 15MB 上限")
+    try:
+        form = await request.form
+    except Exception:
+        form = getattr(request, "form", None)
+    form = form or {}
+    name = str(form.get("name") or "").strip()[:120] or Path(f.filename or "").stem[:120]
+    category = _wardrobe_cat(form.get("category"))
+    digest = hashlib.sha256(raw).hexdigest()[:16]
+    wd_dir = Path(plugin._data_dir) / "wardrobe"
+    wd_dir.mkdir(parents=True, exist_ok=True)
+    dest = wd_dir / f"c_{digest}{suffix}"
+    if not dest.is_file():
+        dest.write_bytes(raw)
+    w, h = _image_dims(dest)
+    rel = f"wardrobe/{dest.name}"
+    plugin._store.add_wardrobe(rel, digest, w, h, name, category)
+    return ok({"path": rel, "rel": rel, "size": len(raw), "name": name,
+               "category": category, "sha256": digest, "width": w, "height": h})
+
+
+async def h_wardrobe_update(plugin) -> dict:
+    """改衣物名 / 类型 / 备注（只改元数据，不碰文件与其它字段）。"""
+    body = await _body()
+    rel = str(body.get("path") or "").strip()
+    if not rel:
+        return err("缺少 path")
+    if not plugin._store or not plugin._store.get_wardrobe(rel):
+        return err("衣柜里没有这件衣服")
+    name = str(body.get("name") or "").strip()[:120]
+    category = _wardrobe_cat(body.get("category"))
+    note = str(body.get("note") or "").strip()[:500]
+    plugin._store.set_wardrobe_meta(rel, name, category, note)
+    return ok({"path": rel, "name": name, "category": category, "note": note})
+
+
+async def h_wardrobe_delete(plugin) -> dict:
+    """删衣物：两段确认，文件移回收站，删行（误删可手动搬回）。"""
+    body = await _body()
+    if not bool(body.get("confirm")):
+        return err("请二次确认删除")
+    rel = str(body.get("path") or "").strip()
+    if not rel:
+        return err("缺少 path")
+    row = plugin._store.get_wardrobe(rel) if plugin._store else None
+    if not row:
+        return err("衣柜里没有这件衣服")
+    _trash_files(plugin, [rel], meta={rel.replace("\\", "/"): dict(row)})
+    plugin._store.delete_wardrobe(rel)
+    return ok({"path": rel, "deleted": True})
+
+
+async def h_wardrobe_prompt(plugin) -> dict:
+    """本地生成试穿编辑指令（确定性，不调用 LLM，供前端提示词框一键重建）。"""
+    body = await _body()
+    cats = body.get("categories")
+    cats = [str(x or "").strip() for x in cats] if isinstance(cats, list) else []
+    text = prompt_gen.wardrobe_edit_prompt(
+        cats, str(body.get("description") or ""),
+        str(body.get("scheme") or "complete"),
+        str(body.get("outfit_text") or ""),
+        bool(body.get("multi_view")))
+    # v0.72.1：显式下发立绘尺寸。draw.generate_portrait 的 img2img 分支在
+    # strategy.width/height 缺失时会 detect_view_layout(prompt) 猜尺寸——用户
+    # 若在「衣物说明」里写了视图词就会被切成横版；试穿的产物始终是单人竖版立绘，
+    # 所以直接把配置尺寸写进 override，彻底绕开这个猜测。
+    cfg = plugin._draw_cfg()
+    return ok({"prompt": text, "length": len(text),
+               "width": int(cfg.get("draw_width", 700) or 700),
+               "height": int(cfg.get("draw_height", 1200) or 1200)})
+
+
+async def h_wardrobe_expand(plugin) -> dict:
+    """AI 扩写穿搭：把单件衣物描述补成上衣 / 下装 / 鞋履齐全的整套文字。"""
+    body = await _body()
+    cats = body.get("categories")
+    cats = [str(x or "").strip() for x in cats] if isinstance(cats, list) else []
+    try:
+        text, source = await prompt_gen.build_wardrobe_outfit(
+            plugin.context, plugin._draw_cfg(),
+            str(body.get("description") or ""), cats,
+            str(body.get("char_name") or ""))
+    except RuntimeError as exc:
+        return err(str(exc))
+    except Exception as exc:
+        logger.warning(f"[{PLUGIN_NAME}] AI 扩写穿搭失败\n{traceback.format_exc()}")
+        return err(f"AI 扩写穿搭失败：{exc}")
+    return ok({"text": text, "source": source})
+
+
 async def h_job_start(plugin) -> dict:
     body = await _body()
     kind = str(body.get("kind") or "try").strip()
@@ -2012,6 +2163,139 @@ async def h_job_to_ref(plugin) -> dict:
             logger.warning(f"[{PLUGIN_NAME}] 参考图生成信息记录失败（不影响绑定）\n"
                            f"{traceback.format_exc()}")
     return ok({"rel": rel, "path": str(Path(plugin._data_dir) / rel)})
+
+
+# ---------- 试穿成果图库（v0.73.0：角色详情「试穿」页签） ----------
+# 试穿走 kind="try"，_run_job 天然不归档立绘；生成成功后前端调
+# /tryon/save 按分类存进独立图库，用户确认后再 /tryon/to_portrait 转正式立绘。
+
+async def h_tryon_list(plugin) -> dict:
+    """按角色列出试穿成果（带缩略 / 存在性），试穿页与图库汇总页共用。"""
+    if not plugin._store:
+        return err("插件未初始化完成")
+    body = await _body()
+    cid = str(body.get("id") or _q("id", "") or "").strip()
+    items = []
+    for row in plugin._store.list_tryons(cid):
+        rel = str(row.get("file") or "")
+        fp = _safe_data_file(plugin, rel)
+        cat = _wardrobe_cat(row.get("category"))
+        items.append({
+            "id": int(row.get("id") or 0), "char_id": row.get("char_id", ""),
+            "path": rel, "rel": rel, "exists": fp is not None,
+            "thumb": _thumb_cached(fp, 420) if fp is not None else None,
+            "cover": _thumb_cached(fp, 1000) if fp is not None else None,
+            "category": cat, "category_label": prompt_gen.wardrobe_cat_label(cat),
+            "name": row.get("name", ""), "prompt": row.get("prompt", ""),
+            "width": int(row.get("width") or 0), "height": int(row.get("height") or 0),
+            "seed": int(row.get("seed") or 0),
+            "portrait_file": row.get("portrait_file", ""),
+            "created_at": row.get("created_at", ""),
+        })
+    return ok({"items": items, "total": len(items)})
+
+
+async def h_tryon_save(plugin) -> dict:
+    """把已成功 job 的试穿成品存进图库（内容寻址，按分类；不进立绘）。"""
+    body = await _body()
+    jid = str(body.get("job_id") or "").strip()
+    job = plugin._jobs.get(jid)
+    if job is None or job.get("status") != "ok" or not job.get("src_path"):
+        return err("job 不存在或未成功")
+    if job.get("tryon_saved"):
+        return ok({"row_id": job["tryon_saved"], "reused": True})
+    cid = str(job.get("char_id") or body.get("id") or "").strip()
+    if not cid:
+        return err("job 缺角色 id，无法归档试穿成果")
+    src = Path(job["src_path"])
+    if not src.is_file():
+        return err("成品文件已不存在（try_cache 已过期回收）")
+    raw = src.read_bytes()
+    if not raw:
+        return err("成品文件为空")
+    if not plugin._store:
+        return err("插件未初始化完成")
+    digest = hashlib.sha256(raw).hexdigest()[:16]
+    td = Path(plugin._data_dir) / "tryons"
+    td.mkdir(parents=True, exist_ok=True)
+    dest = td / f"t_{digest}{(src.suffix or '.png').lower()}"
+    if not dest.is_file():
+        dest.write_bytes(raw)
+    rel = f"tryons/{dest.name}"
+    category = _wardrobe_cat(body.get("category"))
+    cats = body.get("categories")
+    if not body.get("category") and isinstance(cats, list) and cats:
+        category = _wardrobe_cat(cats[0])
+    row_id = plugin._store.add_tryon(
+        cid, rel, digest, category, str(body.get("name") or "").strip()[:120],
+        str(job.get("prompt") or ""), int(job.get("width") or 0),
+        int(job.get("height") or 0), int(job.get("seed") or 0))
+    job["tryon_saved"] = row_id
+    return ok({"row_id": row_id, "path": rel, "category": category})
+
+
+async def h_tryon_update(plugin) -> dict:
+    """改试穿成果的分类 / 名称备注（只改元数据，不碰文件）。"""
+    body = await _body()
+    try:
+        rid = int(body.get("row_id") or 0)
+    except (TypeError, ValueError):
+        rid = 0
+    if not plugin._store or not plugin._store.get_tryon(rid):
+        return err("试穿成果不存在")
+    category = _wardrobe_cat(body.get("category"))
+    name = str(body.get("name") or "").strip()[:120]
+    plugin._store.set_tryon_meta(rid, category, name)
+    return ok({"row_id": rid, "category": category, "name": name})
+
+
+async def h_tryon_delete(plugin) -> dict:
+    """删试穿成果：两段确认，文件进回收站，删行（可手动搬回）。"""
+    body = await _body()
+    if not bool(body.get("confirm")):
+        return err("请二次确认删除")
+    try:
+        rid = int(body.get("row_id") or 0)
+    except (TypeError, ValueError):
+        rid = 0
+    row = plugin._store.get_tryon(rid) if plugin._store else None
+    if not row:
+        return err("试穿成果不存在")
+    rel = str(row.get("file") or "")
+    _trash_files(plugin, [rel], meta={rel.replace("\\", "/"): dict(row)})
+    plugin._store.delete_tryon(rid)
+    return ok({"row_id": rid, "deleted": True})
+
+
+async def h_tryon_to_portrait(plugin) -> dict:
+    """把试穿成果正式转成立绘（走与试画归档同一套 seq / archive_portrait）。"""
+    body = await _body()
+    try:
+        rid = int(body.get("row_id") or 0)
+    except (TypeError, ValueError):
+        rid = 0
+    if not plugin._store:
+        return err("插件未初始化完成")
+    row = plugin._store.get_tryon(rid)
+    if not row:
+        return err("试穿成果不存在")
+    if row.get("portrait_file"):
+        return ok({"archived": row["portrait_file"], "reused": True})
+    rel = str(row.get("file") or "")
+    src = _safe_data_file(plugin, rel)
+    if src is None or not src.is_file():
+        return err("试穿成果文件已丢失")
+    cid = str(row.get("char_id") or "")
+    date = plugin._today()
+    seq = plugin._store.alloc_portrait_seq(cid)
+    archived = draw.archive_portrait(str(src), plugin._data_dir, cid, date, seq,
+                                     int(row.get("seed") or 0))
+    plugin._store.add_portrait(
+        cid, archived, int(row.get("seed") or 0), date, seq, "tryon",
+        prompt=str(row.get("prompt") or "") or None,
+        width=int(row.get("width") or 0), height=int(row.get("height") or 0))
+    plugin._store.mark_tryon_portrait(rid, archived)
+    return ok({"archived": archived})
 
 
 # ---------- 分群绑定 ----------
@@ -3791,9 +4075,10 @@ async def h_config_set(plugin) -> dict:
 # v0.44.0：新增「帮助」页签（导入格式等文档；放在「配置」之前）
 # v0.46.0：新增「卡片调试」页签（网页里模拟抽卡直接出卡；放在「调试工具」之后）
 # v0.56.0：新增「全局图库」页签（角色替换的画布管理）
+# v0.72.0：新增「衣柜」页签（角色试穿：衣服图管理 + 扩写补全 + 出图）
 _UI_MENUS = ("overview", "chars", "works", "try", "records", "stats",
              "users", "debug", "carddbg", "bind", "presets", "global_refs",
-             "help", "config")
+             "wardrobe", "help", "config")
 
 
 def _ui_state_path(plugin) -> Path:
@@ -6843,6 +7128,13 @@ def register(plugin) -> None:
         ("/global_refs/upload", h_global_refs_upload, ["POST"]),
         ("/global_refs/note", h_global_refs_note, ["POST"]),
         ("/global_refs/delete", h_global_refs_delete, ["POST"]),
+        # v0.72.0：衣柜（角色试穿，衣服图管理 + 编辑指令 + AI 扩写）
+        ("/wardrobe/list", h_wardrobe_list, ["GET", "POST"]),
+        ("/wardrobe/upload", h_wardrobe_upload, ["POST"]),
+        ("/wardrobe/update", h_wardrobe_update, ["POST"]),
+        ("/wardrobe/delete", h_wardrobe_delete, ["POST"]),
+        ("/wardrobe/prompt", h_wardrobe_prompt, ["POST"]),
+        ("/wardrobe/expand", h_wardrobe_expand, ["POST"]),
         ("/refs/list", h_refs_list, ["GET", "POST"]),
         ("/refs/orphans", h_refs_orphans, ["GET", "POST"]),
         ("/refs/orphan_delete", h_refs_orphan_delete, ["POST"]),
@@ -6862,6 +7154,12 @@ def register(plugin) -> None:
         ("/queue/list", h_queue_list, ["GET", "POST"]),
         ("/jobs/archive", h_job_archive, ["POST"]),
         ("/jobs/to_ref", h_job_to_ref, ["POST"]),
+        # v0.73.0：角色试穿成果图库（不自动进立绘，确认后再转）
+        ("/tryon/list", h_tryon_list, ["GET", "POST"]),
+        ("/tryon/save", h_tryon_save, ["POST"]),
+        ("/tryon/update", h_tryon_update, ["POST"]),
+        ("/tryon/delete", h_tryon_delete, ["POST"]),
+        ("/tryon/to_portrait", h_tryon_to_portrait, ["POST"]),
         ("/records/draws", h_records_draws, ["GET", "POST"]),
         ("/records/jobs", h_records_jobs, ["GET", "POST"]),
         ("/records/stats", h_records_stats, ["GET", "POST"]),

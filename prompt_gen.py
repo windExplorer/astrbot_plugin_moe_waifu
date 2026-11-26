@@ -2858,3 +2858,159 @@ def build_prompt_tags(entry: dict) -> str:
     base = "1girl, solo, best quality, looking at viewer"
     tags = str(entry.get("tags_en") or "").strip().rstrip(",")
     return f"{base}, {tags}" if tags else base
+
+
+# ---------- 衣柜 / 角色试穿（v0.72.0） ----------
+# 与 swap 模式共用 Qwen-Image-2.1 Edit 多图链路，但 refs 顺序语义不同：
+#   swap  = [画布, 角色身份]
+#   试穿  = [角色参考图, 衣服图1, 衣服图2, ...]
+# 图1 永远是「人」（身份 / 姿势 / 构图 / 背景 / 画风的锚点），后面的图只提供衣服。
+
+WARDROBE_CATEGORIES = (
+    ("top", "上装", "T恤 / 衬衫 / 毛衣等上衣"),
+    ("bottom", "下装 · 裤", "牛仔裤 / 短裤 / 长裤"),
+    ("skirt", "下装 · 裙", "半身裙 / 百褶裙"),
+    ("dress", "连衣裙", "一件式连衣裙（自带上下装）"),
+    ("set", "套装", "上下成套的搭配"),
+    ("outer", "外套", "开衫 / 夹克 / 大衣"),
+    ("shoes", "鞋履", "鞋 / 靴 / 凉鞋"),
+    ("accessory", "配饰", "帽子 / 包 / 首饰"),
+    ("other", "其他衣物", "不好归类的衣物图"),
+)
+_WARDROBE_CAT_LABELS = {k: label for k, label, _hint in WARDROBE_CATEGORIES}
+_WARDROBE_SCHEMES = ("complete", "only", "full")
+
+
+def wardrobe_cat_label(key: str) -> str:
+    return _WARDROBE_CAT_LABELS.get(str(key or ""), "衣物")
+
+
+def wardrobe_missing_parts(categories) -> list:
+    """按已选衣物类型算出「图里没有、需要扩写补全」的核心部位（纯函数）。"""
+    cats = set(str(x or "") for x in (categories or []))
+    covered_upper = bool(cats & {"top", "set", "dress"})
+    covered_lower = bool(cats & {"bottom", "skirt", "set", "dress"})
+    covered_shoes = "shoes" in cats
+    out = []
+    if not covered_upper:
+        out.append("上衣")
+    if not covered_lower:
+        out.append("下装")
+    if not covered_shoes:
+        out.append("鞋履")
+    return out
+
+
+def wardrobe_edit_prompt(categories=None, description: str = "",
+                         scheme: str = "complete", outfit_text: str = "",
+                         multi_view: bool = False) -> str:
+    """拼出试穿编辑指令（Qwen-Image-2.1 Edit 口语指令，manual 直通）。
+
+    图2 是「必须原样照穿的衣服」而非风格灵感：款式 / 廓形 / 颜色 / 图案 /
+    材质全部以图2 为准；扩写只发生在图2 没展示的核心部位。这是
+    「衣服只有裤子 / 裙子、没有上衣和鞋子」那条用户口径的落点，
+    也是 v0.73.2 修「生成服装与图片完全不一样」的关键口径。
+    multi_view=True 表示**图1 是多视角设定稿**：多个视角只用来核对角色外观，
+    最终仍然只输出一张单人全身立绘，不复刻并列排版。措辞刻意避开
+    「三视图 / 四视图 / multiple views」——draw.detect_view_layout 会按这些词
+    把图生图尺寸切成横/方形，而我们要的是竖版单人立绘；尺寸由 /wardrobe/prompt
+    下发的显式宽高兜底。
+    """
+    cats = [str(x or "") for x in (categories or []) if str(x or "").strip()]
+    what = "、".join([wardrobe_cat_label(c) for c in cats]) if cats else "衣物"
+    s = str(scheme or "complete")
+    if s not in _WARDROBE_SCHEMES:
+        s = "complete"
+    anchor = ("图1 是角色参考" + ("多视角设定稿" if multi_view else "图") +
+              "：以它为准保持五官脸型、发型发色（含挑染与渐变分布）、体型与角色辨识度不变。" +
+              ("图1 的多个视角只用于核对正面外观一致性；只输出一张单人全身立绘"
+               "（正面朝向镜头），不要复刻多视角并列排版。" if multi_view else "") +
+              "姿势动作、构图、背景、光线与画风一律不改。")
+    # v0.73.2：图2 是「必须照穿的衣服」，不是风格灵感。旧模板把这句写成
+    # 「让角色穿上图2 的X」后又跟一句「原服装的款式与轮廓不要残留」，编辑模型
+    # 会把「原服装」误读成图2 那件参考衣服，直接把图2 的款式抹掉；AI 扩写文本
+    # 又是一段看不到图的整套描述，末尾「完整穿搭：…」等于用文字压过图2。
+    wear = (f"图2 是本次要穿的衣服：让图1 角色严格穿上 图2 中的{what}。"
+            "这件衣服的款式、廓形、颜色、图案、材质与细节全部以 图2 为准，"
+            "必须原样照穿，不得重新设计，也不得换成别的款式或颜色。")
+    parts = []
+    if s == "only":
+        parts.append(wear + "图1 角色其它衣物保持原样，不扩写、不新增衣物。")
+    elif s == "full":
+        # full 是管理员主动选的「以图为灵感自由设计」，仍保留自由度，
+        # 但主色与关键款式元素要跟图2 挂钩，否则等于完全无视参考图。
+        parts.append(f"以 图2 的{what}为灵感（保留它的主色与关键款式元素），"
+                     "给图1 角色重新设计整套服装与配饰，其余款式可以自由发挥。")
+    else:
+        missing = wardrobe_missing_parts(cats)
+        parts.append(wear)
+        if missing:
+            parts.append("图2 只展示了" + what + "，没有展示" + "、".join(missing) +
+                         "。只在缺失的" + "、".join(missing) +
+                         "上做补充：按 图2 的颜色、材质与风格搭配；"
+                         "补充的部分不得改变 图2 已展示的这件衣服。")
+        else:
+            parts.append("按 图2 的颜色与材质把穿搭细节补齐，"
+                         "不改变 图2 已展示的这件衣服。")
+    # 明确「旧衣服」是图1 角色身上原本那件，杜绝指代歧义
+    parts.append("图1 角色原本穿着的服装要完全换掉，旧款式不得残留；"
+                 "服装不能遮住脸，保持面部特征与角色辨识度不变。")
+    desc = str(description or "").strip()[:120]
+    if desc:
+        parts.append("（辅助识别 图2 的衣服）" + desc + "。")
+    outfit = str(outfit_text or "").strip()[:220]
+    if outfit:
+        parts.append("补充搭配建议（只用于 图2 没展示的部位；与 图2 冲突时以 图2 为准）："
+                     + outfit + "。")
+    return anchor + "".join(parts)
+
+
+_WARDROBE_EXPAND_SYSTEM = (
+    "你是二次元角色服装搭配师。用户会在图片里展示一件衣服，并文字描述它；"
+    "你只能为【图片里没展示的缺失部位】写搭配建议，"
+    "绝对不要重新描述、改动或替换用户已有的那件衣服。"
+    "只输出一段中文，80 字以内，不要分点、不要解释、不要引号。"
+)
+
+
+async def build_wardrobe_outfit(context, cfg: dict, description: str = "",
+                                categories=None, char_name: str = "") -> tuple:
+    """AI 扩写：只为「图2 没展示的部位」写搭配建议，不重写已有衣服。
+
+    文本模型看不到图片，让它输出整套穿搭会与图2 实际衣服不符，进而压过
+    视觉参考（v0.73.1 实测「生成出来的衣服和图片完全不一样」的根因之一）。
+    产出落回前端提示词框，由 wardrobe_edit_prompt 降级为「补充搭配建议」，
+    冲突时以图2 为准。返回 (text, "llm")；未配置对话模型 / 超时 / 空返回抛
+    RuntimeError（handler 转成可读错误）。
+    """
+    provider = await _resolve_provider(context, cfg.get("prompt_llm_provider", ""))
+    if provider is None:
+        raise RuntimeError("未找到可用的对话模型——AI 扩写需要先在插件配置里选好对话模型")
+    cats = [wardrobe_cat_label(x) for x in (categories or []) if str(x or "").strip()]
+    lines = []
+    if char_name:
+        lines.append(f"角色：{char_name}。")
+    if cats:
+        lines.append("图片中已展示的衣物类型：" + "、".join(cats) + "。")
+    lines.append("图片中已展示的衣物描述：" + (str(description or "").strip()[:200]
+                          or "用户未写文字，请按衣物类型推断，不要臆造具体款式。"))
+    missing = wardrobe_missing_parts(categories)
+    if missing:
+        lines.append("只给这些缺失部位写搭配建议：" + "、".join(missing) + "。")
+    else:
+        lines.append("没有缺失部位，只写与已有衣物配套的配饰建议。")
+    lines.append("不要描述或改动已有的那件衣服，只输出缺失部位的搭配建议。")
+    timeout = int(cfg.get("prompt_llm_timeout", 30) or 30)
+    if timeout <= 0:
+        timeout = 30
+    try:
+        resp = await asyncio.wait_for(
+            provider.text_chat(prompt="\n".join(lines), session_id=None,
+                               system_prompt=_WARDROBE_EXPAND_SYSTEM),
+            timeout=timeout)
+    except asyncio.TimeoutError:
+        raise RuntimeError("AI 扩写超时了，请再点一次")
+    text = sanitize_llm_output(getattr(resp, "completion_text", "") or "", limit=220)
+    if not text:
+        raise RuntimeError("AI 扩写没有返回内容，请再点一次")
+    return text, "llm"

@@ -12,7 +12,8 @@
   作品眉标（小字 + 档位色竖线）→ 角色名（漫画体大标题）→ 一句话简介
   （profile.tagline → bio → title，柔和小字）→ 档位色分隔短线 →
   印象语（左侧引文竖线）→ 统计行（档位色圆点）→ 日期（最淡）。
-- **去掉左上角「今日老婆」胶囊**（用户：好像不要会更好）。
+- 左上角「今日老婆」标识：v0.45.0 曾按用户口径去掉，v0.74.0 用户要求加回
+  （小胶囊；档位章选 top_left 时自动下移避让）。
 - **漫画体**（用户：字体不太好看，能用漫画体吗）：随包 `fonts/` 分发一款开源
   漫画体（站酷快乐体，SIL OFL 1.1），名字 / 档位字母 / 印象语优先用它；用户也
   可把自己的字体丢进 `data_dir/fonts/`（文件名含 comic/kuaile/漫画 等即优先）。
@@ -42,7 +43,7 @@ CARD_W, CARD_H = 700, 1200
 
 # v0.54.6：卡面版式版本。改了版式就 +1，落库时随卡图记下；重发卡时版本低的
 # 一律重渲染一次（否则磁盘上那张旧图会一直带旧版元素，比如 v0.54.5 删掉的「重抽」标）。
-CARD_VER = 2
+CARD_VER = 3
 _CARD_RADIUS = 30       # 圆角卡片
 _PAD_X = 54             # 左右安全边（文字一律从这里起排）
 _FOOT_PAD = 36          # 页脚下沿到卡片底边的距离（统计/日期当页脚，贴着底边）
@@ -415,6 +416,26 @@ def _tier_seal(size: int, letter: str, rgb: tuple, data_dir=None) -> Image.Image
     return layer.rotate(-7, resample=Image.BICUBIC, center=(s / 2, s / 2))
 
 
+def _today_badge(data_dir=None) -> Image.Image:
+    """左上角「今日老婆」小标识（v0.74.0，用户要求加回）。
+
+    v0.45.0 曾按用户口径去掉这个胶囊；现在重新加上，做成不抢戏的小胶囊：
+    半透明深色底 + 粉色细描边 + 漫画体白字。自带底色，不依赖顶部压暗。
+    """
+    text = "今日老婆"
+    f = load_font(18, "comic", data_dir)
+    fb = load_font(18, "name", data_dir)
+    tw = int(text_width(text, f, fb))
+    pad_x, pad_y = 12, 6
+    w, h = tw + pad_x * 2, f.size + pad_y * 2
+    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle((0, 0, w - 1, h - 1), radius=h // 2,
+                        fill=(24, 16, 26, 176), outline=(255, 122, 178, 220), width=1)
+    _mixed(im, (pad_x, pad_y), text, f, fb, (255, 255, 255, 248))
+    return im
+
+
 def _wrap(text: str, font, max_w: int, max_lines: int = 2, fallback=None) -> list:
     """按像素宽度折行（中文逐字），最多 max_lines 行；fallback 支持缺字回落。"""
     lines, cur, cur_w = [], "", 0.0
@@ -606,6 +627,13 @@ def render_card(portrait_path, entry: dict, *, date_str: str, same_count: int = 
     layer.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(9)), (sx, sy + 7))
     layer.alpha_composite(seal, (sx, sy))
     bottom -= nsize + 16
+
+    # ---- 左上角「今日老婆」标识（v0.74.0，用户要求加回）----
+    # 档位章在 top_left 时占 (28,28)~(152,152)，标识下移到章下方，避免叠字。
+    badge = _today_badge(data_dir)
+    badge_x = _PAD_X
+    badge_y = 34 if seal_pos != "top_left" else 28 + _SEAL + 32 + 12
+    layer.alpha_composite(badge, (badge_x, badge_y))
 
     # ---- 第 0 层（最上）：作品眉标（只写作品名，不再拼类型后缀） ----
     series = str(entry.get("series") or "").strip()

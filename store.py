@@ -198,6 +198,35 @@ CREATE TABLE IF NOT EXISTS global_refs (
   note       TEXT NOT NULL DEFAULT '',    -- 管理员备注（图的说明/用途）
   created_at TEXT NOT NULL
 );
+-- v0.72.0：衣柜（试穿用的衣物图）。与全局画布 / 角色参考图都分开：
+-- 一张图 = 一件（或一套）衣服，路径相对 data 目录（wardrobe/c_<sha16>.<ext>）。
+CREATE TABLE IF NOT EXISTS wardrobe (
+  file       TEXT PRIMARY KEY,            -- wardrobe/ 相对路径
+  sha256     TEXT NOT NULL DEFAULT '',
+  width      INTEGER NOT NULL DEFAULT 0,
+  height     INTEGER NOT NULL DEFAULT 0,
+  name       TEXT NOT NULL DEFAULT '',    -- 衣服名（如「白色蕾丝连衣裙」）
+  category   TEXT NOT NULL DEFAULT 'other', -- top/bottom/skirt/dress/set/outer/shoes/accessory/other
+  note       TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+-- v0.73.0：角色试穿成果图库。试穿出图不自动进立绘库，先按分类存这里；
+-- 用户确认好看后再用 /tryon/to_portrait 正式转成立绘。
+CREATE TABLE IF NOT EXISTS tryon_works (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  char_id      TEXT NOT NULL,             -- 所属角色（与立绘库同维度）
+  file         TEXT NOT NULL UNIQUE,      -- tryons/t_<sha16>.<ext>，相对 data 目录
+  sha256       TEXT NOT NULL DEFAULT '',
+  category     TEXT NOT NULL DEFAULT 'other', -- 穿搭分类（来自衣服类型，可改）
+  name         TEXT NOT NULL DEFAULT '',  -- 穿搭名 / 备注
+  prompt       TEXT NOT NULL DEFAULT '',  -- 本次编辑指令（溯源用）
+  width        INTEGER NOT NULL DEFAULT 0,
+  height       INTEGER NOT NULL DEFAULT 0,
+  seed         INTEGER NOT NULL DEFAULT 0,
+  portrait_file TEXT NOT NULL DEFAULT '', -- 已转成立绘时的相对路径（空=未转）
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tryon_works_char ON tryon_works(char_id, created_at);
 """
 
 # 老库补列（PRAGMA 探测 → ALTER TABLE，绝不重建已有表）。
@@ -1200,6 +1229,123 @@ class Store:
     def delete_global_ref(self, file: str) -> bool:
         cur = self._conn.execute(
             "DELETE FROM global_refs WHERE file=?", (str(file or ""),))
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    # ---------- wardrobe（v0.72.0：衣柜 / 角色试穿的衣物图） ----------
+
+    def add_wardrobe(self, file: str, sha256: str = "", width: int = 0,
+                     height: int = 0, name: str = "", category: str = "other",
+                     note: str = "") -> None:
+        """登记一件衣物（同路径重复登记覆盖元数据，不改 created_at）。"""
+        self._conn.execute(
+            "INSERT INTO wardrobe (file, sha256, width, height, name, category,"
+            " note, created_at) VALUES (?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(file) DO UPDATE SET sha256=excluded.sha256,"
+            " width=excluded.width, height=excluded.height, name=excluded.name,"
+            " category=excluded.category, note=excluded.note",
+            (str(file or ""), str(sha256 or ""), int(width or 0), int(height or 0),
+             str(name or "")[:120], str(category or "other")[:32],
+             str(note or "")[:500], _now()),
+        )
+        self._conn.commit()
+
+    def list_wardrobe(self) -> list:
+        rows = self._conn.execute(
+            "SELECT * FROM wardrobe ORDER BY created_at DESC, file DESC").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_wardrobe(self, file: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM wardrobe WHERE file=?", (str(file or ""),)).fetchone()
+        return dict(row) if row else None
+
+    def set_wardrobe_meta(self, file: str, name: str, category: str, note: str) -> bool:
+        cur = self._conn.execute(
+            "UPDATE wardrobe SET name=?, category=?, note=? WHERE file=?",
+            (str(name or "")[:120], str(category or "other")[:32],
+             str(note or "")[:500], str(file or "")))
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    def delete_wardrobe(self, file: str) -> bool:
+        cur = self._conn.execute(
+            "DELETE FROM wardrobe WHERE file=?", (str(file or ""),))
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    # ---------- tryon_works（v0.73.0：角色试穿成果图库） ----------
+
+    def add_tryon(self, char_id: str, file: str, sha256: str = "",
+                  category: str = "other", name: str = "", prompt: str = "",
+                  width: int = 0, height: int = 0, seed: int = 0) -> int:
+        """登记一张试穿成果，返回行 id（同 file 重复登记覆盖元数据）。"""
+        cur = self._conn.execute(
+            "INSERT INTO tryon_works (char_id, file, sha256, category, name, prompt,"
+            " width, height, seed, portrait_file, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,'',?)"
+            " ON CONFLICT(file) DO UPDATE SET category=excluded.category,"
+            " name=excluded.name, prompt=excluded.prompt",
+            (str(char_id or ""), str(file or ""), str(sha256 or ""),
+             str(category or "other")[:32], str(name or "")[:120],
+             str(prompt or "")[:2000], int(width or 0), int(height or 0),
+             int(seed or 0), _now()),
+        )
+        self._conn.commit()
+        row = self._conn.execute(
+            "SELECT id FROM tryon_works WHERE file=?", (str(file or ""),)).fetchone()
+        return int(row["id"]) if row else 0
+
+    def list_tryons(self, char_id: str = "") -> list:
+        """按角色列出试穿成果（最新在前）；char_id 空 = 全表。"""
+        if str(char_id or "").strip():
+            rows = self._conn.execute(
+                "SELECT * FROM tryon_works WHERE char_id=?"
+                " ORDER BY created_at DESC, id DESC", (str(char_id),)).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM tryon_works ORDER BY created_at DESC, id DESC").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_tryon(self, row_id: int) -> dict | None:
+        try:
+            rid = int(row_id)
+        except (TypeError, ValueError):
+            return None
+        row = self._conn.execute(
+            "SELECT * FROM tryon_works WHERE id=?", (rid,)).fetchone()
+        return dict(row) if row else None
+
+    def set_tryon_meta(self, row_id: int, category: str, name: str) -> bool:
+        try:
+            rid = int(row_id)
+        except (TypeError, ValueError):
+            return False
+        cur = self._conn.execute(
+            "UPDATE tryon_works SET category=?, name=? WHERE id=?",
+            (str(category or "other")[:32], str(name or "")[:120], rid))
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    def mark_tryon_portrait(self, row_id: int, portrait_file: str) -> bool:
+        """标记该试穿成果已转成正式立绘（记下立绘相对路径，不重复转）。"""
+        try:
+            rid = int(row_id)
+        except (TypeError, ValueError):
+            return False
+        cur = self._conn.execute(
+            "UPDATE tryon_works SET portrait_file=? WHERE id=?",
+            (str(portrait_file or ""), rid))
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    def delete_tryon(self, row_id: int) -> bool:
+        try:
+            rid = int(row_id)
+        except (TypeError, ValueError):
+            return False
+        cur = self._conn.execute(
+            "DELETE FROM tryon_works WHERE id=?", (rid,))
         self._conn.commit()
         return cur.rowcount > 0
 

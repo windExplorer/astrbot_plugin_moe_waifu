@@ -88,6 +88,24 @@ with tempfile.TemporaryDirectory() as td:
     check("立绘满版（边缘不再有档位色宽边框）", edge[:3] == (120, 190, 200))
     check("圆角外像素透明", corner[3] == 0)
 
+    # v0.74.0：左上角「今日老婆」标识（用户要求加回；v0.45.0 曾去掉）
+    badge = card._today_badge()
+    check("今日老婆标识是带透明底的胶囊", badge.mode == "RGBA"
+          and badge.width > 40 and badge.height >= 24)
+    badge_src = td / "badge_src.png"
+    Image.new("RGB", (card.CARD_W, card.CARD_H), (120, 190, 200)).save(badge_src)
+    badge_out = td / "badge_card.png"
+    card.render_card(badge_src, ENTRY, date_str="2026-11-11", out_path=badge_out)
+    with Image.open(badge_src) as a, Image.open(badge_out) as b:
+        pa, pb = a.convert("RGB"), b.convert("RGB")
+        changed = sum(1 for x in range(54, 200) for y in range(34, 70)
+                      if pa.getpixel((x, y)) != pb.getpixel((x, y)))
+    check("左上角确实画上标识（差异像素 %d）" % changed, changed > 600)
+    check("版式变更递增 CARD_VER", card.CARD_VER == 3)
+    cs = Path(card.__file__).read_text(encoding="utf-8")
+    check("top_left 印章时标识下移避让",
+          'badge_y = 34 if seal_pos != "top_left"' in cs)
+
     # 档位印章（替代五角星）：四档底色互不相同，S 为金色系
     seals = {}
     for t in ("S", "A", "B", "C"):

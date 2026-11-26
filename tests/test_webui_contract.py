@@ -110,6 +110,23 @@ piResult piResultText piDoImport piBusy piFocus piOnlyFocus
 cdMode cdCharId cdPortrait cdPortraitOpts cdUid cdDate cdNonce cdGroup cdEnsure
 cdTier cdTierOpts cdSame cdTotal cdRank cdTagline cdQuote cdHintText
 cdBusy cdResult doCardDebug cdShuffle
+wardrobeItems wardrobeLoading wardDeleteArm wardEditOpen wardEditRow wardEditName
+wardEditCat wardEditNote wardCatOpts onWardrobeFiles beginWardrobeEdit saveWardrobeEdit
+deleteWardrobe wardCharId wardCharRef wardClothes wardRefSources wardRefPickerItems
+wardClothesPickerItems wardCharRefPickerOpen wardClothesPickerOpen openWardCharRefPicker
+onWardCharRefConfirm onWardClothesConfirm removeWardCloth wardRefNameOf wardClothNameOf
+wardScheme wardSchemeOpts wardSchemeHint wardMultiView wardDesc wardOutfitText
+wardExpanding wardAiExpand wardPrompt wardRebuildPrompt wardWf wardRunning wardPreview
+wardSrcPath wardError wardGenerate wardArchive
+galTryons galTryonLoading galTryonCharRef galTryonClothes galTryonMultiView
+galTryonDesc galTryonOutfit galTryonPrompt galTryonWf galTryonScheme
+galTryonSchemeHint galTryonRunning galTryonPreview galTryonSrcPath galTryonError
+galTryonGroups galTryonCharItems galTryonClothItems galTryonCharPickerOpen
+galTryonClothPickerOpen galTryonEditOpen galTryonEditRow galTryonEditName
+galTryonEditCat galTryonDeleteArm galTryonClothNameOf galTryonRebuild
+galTryonExpand galTryonGenerate galTryonSetPortrait galTryonBeginEdit
+galTryonSaveEdit galTryonDelete onGalTryonCharConfirm onGalTryonClothesConfirm
+removeGalTryonCloth
 """.split()
 
 ROUTES = """
@@ -136,6 +153,8 @@ ROUTES = """
 /presets
 /avatars/batch /avatars/batch_status /avatars/batch_stop
 /avatars/batch_preview /avatars/thumbs
+/wardrobe/list /wardrobe/upload /wardrobe/update /wardrobe/delete /wardrobe/prompt /wardrobe/expand
+/tryon/list /tryon/save /tryon/update /tryon/delete /tryon/to_portrait
 """.split()
 
 STORE_METHODS = """
@@ -143,6 +162,8 @@ _migrate upsert_draw update_draw_card list_records record_detail list_events
 list_groups list_platforms list_users user_profile stats_range count_events
 set_group_name user_char_count today_char_stats first_event
 debug_log debug_recent debug_audit debug_queries reset_char_day
+add_wardrobe list_wardrobe get_wardrobe set_wardrobe_meta delete_wardrobe
+add_tryon list_tryons get_tryon set_tryon_meta mark_tryon_portrait delete_tryon
 """.split()
 
 
@@ -158,9 +179,9 @@ def main():
     ui_block = re.search(r"_UI_MENUS = \((.*?)\)", api, re.S)
     check("后端存在 _UI_MENUS", ui_block is not None)
     back_keys = re.findall(r'"(\w+)"', ui_block.group(1)) if ui_block else []
-    # v0.56.0：新增「全局图库」页签 → 13 → 14
+    # v0.56.0：新增「全局图库」页签 → 13 → 14；v0.72.0：新增「衣柜」→ 15
     check("页签前后一致（页签记忆不会写入被拒）",
-          front_keys == back_keys and len(front_keys) == 14
+          front_keys == back_keys and len(front_keys) == 15
           and front_keys[0] == "overview",
           f"front={front_keys} back={back_keys}")
     # v0.46.0：卡片调试页签（模拟抽卡直接出卡）
