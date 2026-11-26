@@ -386,6 +386,18 @@ check("单图模板指令仍带灰底 / 标准站姿 / 微笑 / 单人单头",
 check("其它主题不受单图专用指令影响",
       "角色占满画面高度" not in prompt_gen.build_local_instruction(
           ENTRY, prompt_gen.pick_variations(42, tpl3), theme_id="tpl_3view"))
+# v0.77.0：半身模板主题 + 真机验证的备选指令（膝上取景、上半身占主画面）
+tpl_half = prompt_gen.get_theme("tpl_half")
+check("半身模板主题存在", tpl_half is not None)
+inst_half = prompt_gen.build_local_instruction(
+    ENTRY, prompt_gen.pick_variations(42, tpl_half), theme_id="tpl_half")
+check("半身模板指令膝上取景且面部清晰",
+      "膝上构图" in inst_half and "上半身占据画面主要区域" in inst_half
+      and "面部大而清晰" in inst_half, inst_half[:140])
+check("半身模板不混入全身占满画幅口径", "角色占满画面高度" not in inst_half)
+check("半身模板仍是灰底站姿微笑单人单头",
+      all(k in inst_half for k in ("浅灰渐变摄影棚", "温柔微笑",
+                                  "只保留一颗头部", "输出单人竖版立绘")))
 check("单图专用指令无参考图时不提参考图",
       _ref_clause := prompt_gen.build_local_instruction(
           ENTRY, p1s, theme_id="tpl_single", ref_mode="none"),

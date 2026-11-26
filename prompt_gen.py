@@ -1175,6 +1175,12 @@ THEMES = (
      "outfit_kw": [], "bg_kw": ["灰"], "pose_kw": ["标准站姿"],
      "expression_kw": ["微笑"], "compose_kw": ["单张全身立绘"],
      "plain_dims": _TPL_PLAIN},
+    # v0.77.0：半身模板——单图模板全身脸太小，用户真机验证「膝上取景 + 上半身
+    # 占主画面 + 面部大而清晰」的备选指令，做成独立固定底稿主题。
+    {"id": "tpl_half", "label": "【模板】半身 · 正面（灰底）",
+     "outfit_kw": [], "bg_kw": ["灰"], "pose_kw": ["标准站姿"],
+     "expression_kw": ["微笑"], "compose_kw": ["单张全身立绘"],
+     "plain_dims": _TPL_PLAIN},
     {"id": "tpl_3view", "label": "【模板】三视图（正/侧/背 · 灰底）",
      "outfit_kw": [], "bg_kw": ["灰"], "pose_kw": ["标准站姿"],
      "expression_kw": ["微笑"], "compose_kw": ["三视图"],
@@ -1978,16 +1984,27 @@ _TPL_SINGLE_BASE = (
     "保持人物的面部特征、发型发色与角色辨识度不变。"
     "画面中只出现这一个人物、只保留一颗头部，输出单人竖版立绘"
 )
+# v0.77.0：半身备选指令（用户真机验证）——全身占满后脸仍不够大时用膝上取景
+_TPL_HALF_BASE = (
+    "生成一张标准日系动漫插画风格的角色立绘：膝上构图，角色上半身占据画面主要区域，"
+    "面部大而清晰、五官锐利可辨，镜头聚焦于人物脸部。"
+    "背景为浅灰渐变摄影棚。"
+    "角色双臂自然下垂，正面朝向镜头，表情温柔微笑。"
+    "保持人物的面部特征、发型发色与角色辨识度不变。"
+    "画面中只出现这一个人物、只保留一颗头部，输出单人竖版立绘"
+)
 
 
-def _tpl_single_instruction(entry: dict, custom: str = "", ref_mode: str = "") -> str:
-    """tpl_single 固定底稿的图生图指令（v0.76.0，真机验证通过）。
+def _tpl_single_instruction(entry: dict, custom: str = "", ref_mode: str = "",
+                            half: bool = False) -> str:
+    """tpl_single / tpl_half 固定底稿的图生图指令（v0.76.0 / v0.77.0，真机验证通过）。
 
-    只替换这个模板的通用拼装，不动其它主题：全身但占满画幅 + 镜头拉近 +
-    面部清晰 + 日系动漫画风，解决旧版「远景全身看不清脸」。固有特征 / 挑染 /
-    显式附加要求按既有口径追加；无参考图时不提参考图，单图源保留多视图收敛条款。
+    只替换这两个模板的通用拼装，不动其它主题：全身占满画幅 或 膝上半身取景，
+    都以「镜头拉近 + 面部清晰 + 日系动漫画风」解决旧版「远景全身看不清脸」。
+    固有特征 / 挑染 / 显式附加要求按既有口径追加；无参考图时不提参考图，
+    单图源保留多视图收敛条款。
     """
-    text = _TPL_SINGLE_BASE
+    text = _TPL_HALF_BASE if half else _TPL_SINGLE_BASE
     addons = []
     feat_zh = identity_feature_text(entry, "zh")
     if feat_zh:
@@ -2018,9 +2035,10 @@ def build_local_instruction(entry: dict, picks: dict, custom: str = "",
     全身但占满画幅 + 镜头拉近 + 面部清晰 + 标准日系动漫画风，绕开通用拼装
     的「远景全身看不清脸」。其余主题一律走原拼装，不受影响。
     """
-    if str(theme_id or "") == "tpl_single":
+    if str(theme_id or "") in ("tpl_single", "tpl_half"):
         return _tpl_single_instruction(entry, custom,
-                                       ref_mode or template_ref_mode(entry))
+                                       ref_mode or template_ref_mode(entry),
+                                       half=(theme_id == "tpl_half"))
     parts = []
     for label, zh in variation_zh_list(picks):
         if label == "构图视图":
