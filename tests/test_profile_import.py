@@ -5,8 +5,8 @@
   ① 解析容错——单对象 / 数组 / {entries} 三种形态、中文键别名、印象语按行；
   ② 匹配三档——id > 名字+作品 > 全库唯一名字；
   ③ 冲突策略——skip 只补空（已有内容一个字都不改）、overwrite 才覆盖；
-  ④ 维度开关——未启用的维度绝不写库；
-  ⑤ 未匹配新建——有 tags_en 才建，且不碰其它卷；
+  ④ 维度开关——未启用的维度绝不写库；tags_en 默认不写，显式开启才按冲突策略处理；
+  ⑤ 未匹配新建——tags_en 可留空也能建，且不碰其它卷；
   ⑥ 资产安全——strategy / cover / verified / avatar 原样保留。
 """
 import asyncio
@@ -86,6 +86,11 @@ check("中文键别名认得出",
 check("未知键被丢弃", "不认识的键" not in items[0]["incoming"])
 check("印象语按行切分", items[0]["incoming"].get("quotes") == ["呀嚯！", "可可！"])
 check("评级归一成大写", items[0]["incoming"].get("tier") == "S")
+tag_items, _, _, _ = webui_api._profile_import_parse(json.dumps(
+    {"name": "薄荷", "画图标签": "mint, blue hair"}, ensure_ascii=False))
+check("画图标签别名进 incoming（v0.81.0）",
+      tag_items[0]["incoming"].get("tags_en") == "mint, blue hair"
+      and tag_items[0]["tags_en"] == "mint, blue hair", str(tag_items[0]))
 
 arr_items, _, _, _ = webui_api._profile_import_parse(json.dumps(
     [{"name": "A", "bio": "x"}, {"name": "B", "bio": "y"}], ensure_ascii=False))
@@ -144,14 +149,16 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
           quotes=["旧台词"], tier="A"),
     ])
     _dump(other_path, "other", [
-        E("nanally", "娜娜莉", "异环"),
+        E("nanally", "娜娜莉", "异环", tags_en=""),  # v0.81.0：验证 tags_en 只补空
     ])
     # v0.69.0 DB 真源：_load_pack_file 走 store，测试须先灌库（生产由 initialize 做）
     st.migrate_relational(pools, root)
     payload = json.dumps({"entries": [
         {"id": "mint", "bio": "新简介", "height": "152cm", "tagline": "卡面一句",
-         "quotes": "新台词一\n新台词二", "tier": "S"},
-        {"name": "娜娜莉", "series": "异环", "cv": "宋媛媛"},
+         "quotes": "新台词一\n新台词二", "tier": "S",
+         "tags_en": "new mint tags, blue hair"},
+        {"name": "娜娜莉", "series": "异环", "cv": "宋媛媛",
+         "tags_en": "new nanally tags"},
         {"name": "早雾", "series": "异环", "tags_en": "1girl, twintails",
          "bio": "小霸王"},
         {"name": "无名氏", "series": "异环", "bio": "没有 tags 建不出来"},
@@ -172,11 +179,12 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
           and by_name["早雾"]["can_create"])
     check("未匹配且无 tags_en 也可新建（v0.78.0）", by_name["无名氏"]["can_create"])
     check("预览带回当前值", by_name["薄荷"]["current"].get("bio") == "旧简介"
-          and by_name["薄荷"]["current"].get("quotes") == ["旧台词"])
+          and by_name["薄荷"]["current"].get("quotes") == ["旧台词"]
+          and by_name["薄荷"]["current"].get("tags_en") == "1girl")
     fcnt = {f["key"]: f["count"] for f in d["fields"]}
     check("维度命中条数正确", fcnt["bio"] == 3 and fcnt["quotes"] == 1
           and fcnt["height"] == 1 and fcnt["tier"] == 1
-          and fcnt["tagline"] == 1, str(fcnt))
+          and fcnt["tagline"] == 1 and fcnt["tags_en"] == 3, str(fcnt))
     check("预览不写盘", _entry(game_path, "mint").get("profile") == {"bio": "旧简介"})
 
     # ---------- 3) skip：只补空 ----------
@@ -191,6 +199,9 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
           mint["profile"]["tagline"] == "卡面一句", str(mint["profile"]))
     check("skip 不动已有印象语", mint.get("quotes") == ["旧台词"])
     check("skip 不动已有评级", mint.get("tier") == "A")
+    check("tags_en 默认不写（v0.81.0：老行为不变）",
+          mint["tags_en"] == "1girl"
+          and st.find_entry("nanally")["tags_en"] == "", str(mint["tags_en"]))
     check("资产字段原样保留",
           mint["strategy"] == assets and mint["cover"] == "cover.png"
           and mint["verified"] is True, str(mint))
@@ -214,6 +225,9 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
           mint.get("quotes") == ["新台词一", "新台词二"]
           and mint.get("quote") == "新台词一", str(mint.get("quotes")))
     check("overwrite 覆盖评级", mint.get("tier") == "S")
+    check("overwrite 也不碰未开启的 tags_en（默认关）",
+          mint["tags_en"] == "1girl"
+          and st.find_entry("nanally")["tags_en"] == "", str(mint["tags_en"]))
     check("overwrite 仍不碰资产字段",
           mint["strategy"] == assets and mint["cover"] == "cover.png")
     check("create_missing 建出新角色", d2["created"] >= 1, str(d2["created"]))
@@ -244,6 +258,36 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
     check("未启用的维度绝不写库", mint["profile"]["bio"] == "只该写简介"
           and mint.get("tier") == "S" and mint.get("quotes") == ["新台词一", "新台词二"],
           str(mint))
+
+    # ---------- 5b) tags_en 可选维度（v0.81.0）：显式开启才按冲突策略 ----------
+    fields_tags = ["tags_en"]
+    asyncio.run(_call(webui_api.h_profile_import, plugin, {
+        "text": json.dumps([{"id": "mint", "tags_en": "explicit overwrite tags"}],
+                           ensure_ascii=False),
+        "conflict": "overwrite", "fields": fields_tags,
+    }))
+    check("显式开 tags_en + overwrite 才覆盖",
+          st.find_entry("mint")["tags_en"] == "explicit overwrite tags",
+          str(st.find_entry("mint")["tags_en"]))
+    asyncio.run(_call(webui_api.h_profile_import, plugin, {
+        "text": json.dumps([{"id": "nanally", "tags_en": "explicit fill tags"}],
+                           ensure_ascii=False),
+        "conflict": "skip", "fields": fields_tags,
+    }))
+    check("显式开 tags_en + skip 只补空",
+          st.find_entry("nanally")["tags_en"] == "explicit fill tags",
+          str(st.find_entry("nanally")["tags_en"]))
+    asyncio.run(_call(webui_api.h_profile_import, plugin, {
+        "text": json.dumps([{"id": "mint", "tags_en": "should not land"}],
+                           ensure_ascii=False),
+        "conflict": "skip", "fields": fields_tags,
+    }))
+    check("显式开但 skip 不动已有 tags_en",
+          st.find_entry("mint")["tags_en"] == "explicit overwrite tags")
+    check("tags_en 覆盖不牵连资料 / 资产",
+          st.find_entry("mint")["profile"]["bio"] == "只该写简介"
+          and st.find_entry("mint")["strategy"] == assets
+          and st.find_entry("mint")["cover"] == "cover.png")
 
     # ---------- 6) only：只导勾选的条目 ----------
     payload3 = json.dumps([

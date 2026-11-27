@@ -321,6 +321,16 @@ check("后端迁移只改 series、ids 为空即全部",
       and "wanted = [str(x).strip() for x in ids] if ids else list(targets)" in API
       and 'raw.__setitem__("series", dst)' in API)
 
+# ---------- v0.81.0：资料导入可选覆盖 tags_en（默认关） ----------
+check("资料导入有画图标签维度且默认关闭",
+      '{ key: "tags_en", label: "画图标签（tags_en）" }' in PAGE
+      and 'd[x.key] = x.key !== "tags_en";' in PAGE
+      and "画图标签（tags_en）默认关闭" in PAGE)
+check("后端 tags_en 是可选字段且缺省不带入",
+      'PROFILE_IMPORT_FIELDS = tuple(_PROFILE_KEYS) + ("quotes", "tier", "tags_en")' in API
+      and 'default_fields = [f for f in PROFILE_IMPORT_FIELDS if f != "tags_en"]' in API
+      and 'elif key == "tags_en":' in API)
+
 # ---------- ⑥ 图生图默认源 ----------
 check("自动选源优先级：出卡源 → 主参考 → 第一张",
       "function _defaultGenSource()" in PAGE

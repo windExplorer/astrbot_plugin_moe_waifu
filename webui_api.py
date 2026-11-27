@@ -6200,9 +6200,10 @@ async def h_profile_gen(plugin) -> dict:
 # 与 /pools/import 的分工：那个是**建角色**（id/name/tags_en + 画法），
 # 这个是**补资料**（profile / 印象语 / 评级），两者互不替代。
 
-# 可导入的「维度」：8 个百科字段 + 印象语 + 评级。
-# 与 _PROFILE_KEYS 的差别只在 quotes / tier 不在 profile dict 里。
-PROFILE_IMPORT_FIELDS = tuple(_PROFILE_KEYS) + ("quotes", "tier")
+# 可导入的「维度」：8 个百科字段 + 印象语 + 评级 + tags_en（v0.81.0 可选）。
+# 与 _PROFILE_KEYS 的差别：quotes / tier / tags_en 不在 profile dict 里。
+# tags_en 默认不写：老用户开 overwrite 不应突然冲掉工坊里手调的画图标签。
+PROFILE_IMPORT_FIELDS = tuple(_PROFILE_KEYS) + ("quotes", "tier", "tags_en")
 
 # 手写 JSON 常见的中文键别名（键名大小写、空格不敏感）。
 # 用户多半是照着角色页手抄或让别家 AI 生成，不该强迫他们记住英文键名。
@@ -6220,6 +6221,9 @@ _PROFILE_KEY_ALIASES = {
     "印象语": "quotes", "台词": "quotes", "语录": "quotes", "口头禅": "quotes",
     "quotes": "quotes", "quote": "quotes",
     "评级": "tier", "稀有度": "tier", "tier": "tier",
+    "tags_en": "tags_en", "tagsen": "tags_en", "tags": "tags_en",
+    "画图标签": "tags_en", "英文标签": "tags_en", "出图标签": "tags_en",
+    "标签": "tags_en",
 }
 
 # 冲突策略：skip = 只补空（已有内容的字段一律不动）；overwrite = 用导入内容覆盖。
@@ -6248,6 +6252,8 @@ def _imp_field_value(key: str, value):
     """维度取值清洗：quotes 去重成列表、tier 限定评级、tagline 限 60 字。"""
     if key == "quotes":
         return _clean_quote_lines(value)
+    if key == "tags_en":
+        return _imp_str(value, 400)
     if key == "tier":
         t = _imp_str(value, 2).upper()
         return t if t in ("S", "A", "B", "C", "D") else ""
@@ -6279,13 +6285,16 @@ def _profile_import_item(raw) -> tuple:
             val = _imp_field_value(key, v)
             if val:
                 incoming[key] = val
+    # v0.81.0：tags_en 既是「未匹配时新建」的字段，也是可选覆盖维度。
+    # 走别名表读进 incoming，纯 tags_en 的条目也算有可导入维度。
+    tags = _imp_str(incoming.get("tags_en") or "", 400)
     if not incoming:
         return None, "没有任何可导入的资料字段"
     return {
         "id": cid,
         "name": name,
         "series": series,
-        "tags_en": _imp_str(raw.get("tags_en") or raw.get("tags") or "", 400),
+        "tags_en": tags,
         "category": _imp_str(raw.get("category") or raw.get("分类") or "", 20).lower(),
         "color": _imp_str(raw.get("color") or raw.get("颜色") or "", 20),
         "incoming": incoming,
@@ -6404,6 +6413,10 @@ def _entry_profile_now(raw) -> dict:
     tier = _imp_str(e.get("tier"), 2).upper()
     if tier:
         out["tier"] = tier
+    # v0.81.0：tags_en 也进「当前值」，前端预览才能算出写入 / 覆盖 / 跳过
+    tags = _imp_str(e.get("tags_en"), 400)
+    if tags:
+        out["tags_en"] = tags
     return out
 
 
@@ -6436,6 +6449,12 @@ def _apply_profile_fields(raw, incoming: dict, current: dict,
                 skipped.append(key)
                 continue
             raw["tier"] = val
+        elif key == "tags_en":
+            # v0.81.0：显式开启维度才到这里；仍按现有冲突策略，且只写 tags_en
+            if current.get("tags_en") and conflict == "skip":
+                skipped.append(key)
+                continue
+            raw["tags_en"] = val
         else:
             continue
         written.append(key)
@@ -6544,10 +6563,11 @@ async def h_profile_import_preview(plugin) -> dict:
 async def h_profile_import(plugin) -> dict:
     """角色资料导入 · 执行。
 
-    body：text（同预览）、fields（启用的维度，缺省全开）、
+    body：text（同预览）、fields（启用的维度，缺省 = 除 tags_en 外全开）、
     conflict（skip=只补空 / overwrite=覆盖）、create_missing（未匹配是否建新角色）、
     only（勾选的条目 key 列表，缺省全部）、pack（新建角色的卷名）。
-    写的是卷文件原条目（只动本次维度），不动 strategy / 参考图 / 封面 / 头像。
+    tags_en 必须显式列进 fields 才会处理（v0.81.0，默认关）；写的是卷文件原条目
+    （只动本次维度），不动 strategy / 参考图 / 封面 / 头像。
     """
     body = await _body()
     text = str(body.get("text") or "").strip()
@@ -6557,11 +6577,14 @@ async def h_profile_import(plugin) -> dict:
         items, pack_hint, series_hint, _bad = _profile_import_parse(text)
     except ValueError as exc:
         return err(str(exc))
+    # v0.81.0：tags_en 是可选覆盖项，缺省 / 空 fields 都不带它，
+    # 老调用方与老用户的 overwrite 不会突然改掉工坊里手调的画图标签。
+    default_fields = [f for f in PROFILE_IMPORT_FIELDS if f != "tags_en"]
     raw_fields = body.get("fields")
     fields = ([str(f) for f in raw_fields if str(f) in PROFILE_IMPORT_FIELDS]
-              if isinstance(raw_fields, list) else [])
+              if isinstance(raw_fields, list) else list(default_fields))
     if not fields:
-        fields = list(PROFILE_IMPORT_FIELDS)
+        fields = list(default_fields)
     conflict = str(body.get("conflict") or "").strip().lower()
     if conflict not in PROFILE_IMPORT_CONFLICTS:
         conflict = "skip"

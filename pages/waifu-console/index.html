@@ -5064,6 +5064,9 @@
               <n-button size="tiny" @click="piDimsAll(true)">维度全开</n-button>
               <n-button size="tiny" @click="piDimsAll(false)">维度全关</n-button>
             </div>
+            <div class="bind-tip" style="margin-top:6px;">
+              画图标签（tags_en）默认关闭；开启后按下面的「已有内容时」策略写入。它决定出图特征，覆盖前请确认 JSON 里写全了。
+            </div>
           </div>
           <div class="av-mode-row">
             <span style="font-size:13px;">已有内容时</span>
@@ -10305,7 +10308,7 @@
               desc: "印象语，每行（每个元素）一句，建议 10 句、最多 20 句；卡片按种子随机取一句。" },
             { name: "tier", type: "枚举", required: false, desc: "评级 S / A / B / C / D。" },
             { name: "tags_en", type: "字符串", required: false,
-              desc: "仅「未匹配 + 勾了新建」时写入新角色；留空也能建，只是出图没有角色特征。" }
+              desc: "未匹配新建时照常写入新角色（v0.81.0）；对已有角色默认不写，需在「导入维度」里打开「画图标签（tags_en）」才会按冲突策略补空 / 覆盖。留空也能建，只是出图没有角色特征。" }
           ],
           example: HELP_EXAMPLE_PROFILE,
           exampleNote: "第一条按名字匹配，第二条按 id 匹配",
@@ -10314,7 +10317,8 @@
             "冲突策略二选一：跳过（只补空，已有内容的字段一个字都不改）／覆盖（用 JSON 的值替换）。",
             "「一句话简介」（tagline）就是卡面印的那一行：填了就印它，没填才退到简介 / 身份 / 称号。",
             "维度开关是整维生效：只想补印象语，就把其它维度全关，其他内容绝不会被动。",
-            "「已有内容」的判定：资料字段非空串、印象语非空数组、评级非空。空值才叫空缺。",
+            "画图标签（tags_en）默认关；打开后也只按冲突策略改 tags_en，不会顺手改作品 / 颜色 / 画法 / 封面。空值不会写进去，不能靠导入清空标签。",
+            "「已有内容」的判定：资料字段非空串、印象语非空数组、评级非空、tags_en 非空串。空值才叫空缺。",
             "只写资料：strategy（参考图 / 画法）、cover、avatar、verified、added_at 一概不碰。",
             "预览里的「写入 / 覆盖 / 跳过」是按当前开关实时算的，改开关立刻变；改完不用重新解析。"
           ]
@@ -10383,7 +10387,9 @@
       // 维度清单 = 资料 8 个字段 + 印象语 + 评级；顺序与资料页表单一致
       var PI_EXTRA_DIMS = [
         { key: "quotes", label: "印象语" },
-        { key: "tier", label: "评级" }
+        { key: "tier", label: "评级" },
+        // v0.81.0：画图标签可选覆盖，默认关——它是出图特征，不该被资料导入悄悄改掉
+        { key: "tags_en", label: "画图标签（tags_en）" }
       ];
       var piDimList = Vue.computed(function () {
         var counts = {};
@@ -10504,7 +10510,10 @@
       });
       function piDefaultDims() {
         var d = {};
-        piDimList.value.forEach(function (x) { d[x.key] = true; });
+        piDimList.value.forEach(function (x) {
+          // v0.81.0：tags_en 默认关，显式打开后才按「已有内容时」策略处理
+          d[x.key] = x.key !== "tags_en";
+        });
         return d;
       }
       function piDimsAll(on) {
