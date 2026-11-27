@@ -2,6 +2,26 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.77.2 (2026-11-27)
+
+**大图查看器顶栏补上原图尺寸与存储大小；本地原图取磁盘真值，不靠 base64 估算。**
+
+- **需求（用户）**：工坊点开大图只能看图，看不出这张图实际多少像素、占多少存储。
+- **改动**：
+  - `webui_api.py` 的 `/image/data` 在 data URL 之外多返回 `width` / `height`
+    （沿用 `_image_dims`，Pillow 延迟导入）与 `size`（`stat().st_size`，精确到字节）；
+    `stat()` 只调一次，25MB 预览上限不变。
+  - `pages/waifu-console/index.html` 的公共 lightbox 顶栏新增 `wlb-meta`，
+    显示 `宽 × 高 · B/KB/MB`。本地原图用后端真值；QQ 头像这类只有 data URL
+    的入口（`openImageViewerUrl`）读 `naturalWidth/naturalHeight`，字节数按
+    base64 载荷扣掉 padding 反推——两条看图路径都有元信息。换图 / 打开时
+    先清残留，加载失败不显示上一张的旧值。
+  - 长标题 `text-overflow: ellipsis`、元信息 `flex: none`，窄屏不被标题挤没。
+- **守卫**：`test_ui_v042.py` 加两条（顶栏元信息三件套、后端 stat 真值）；
+  `test_ui_v042` / `test_webui_contract` / `test_inline_js` /
+  `test_template_compile` / `test_html_integrity` / `test_waifu_api` /
+  `test_mobile_responsive` 全过。
+
 ## v0.77.1 (2026-11-26)
 
 **修复 swap 固定提示词强行要求挑染：纯色发角色不再被写死加「不得涂成单一发色」。**

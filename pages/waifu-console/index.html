@@ -245,8 +245,12 @@
   .wlb.show { display: flex; }
   .wlb-bar { display: flex; align-items: center; justify-content: space-between;
     padding: 10px 16px; color: #fff; }
-  .wlb-title { font-size: 14px; opacity: .9; }
-  .wlb-tools { display: flex; align-items: center; gap: 8px; position: relative; }
+  .wlb-info { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+  .wlb-title { font-size: 14px; opacity: .9; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  /* v0.77.2：大图顶栏的「尺寸 × 存储大小」，窄屏也不被长标题挤没 */
+  .wlb-meta { font-size: 12px; opacity: .72; flex: none; white-space: nowrap; }
+  .wlb-tools { display: flex; align-items: center; gap: 8px; position: relative; flex: none; }
   .wlb-btn { background: transparent; border: none; color: #fff; font-size: 16px;
     cursor: pointer; padding: 4px 10px; border-radius: 6px; text-decoration: none;
     line-height: 1.2; font-family: inherit; }
@@ -5145,7 +5149,8 @@
     el.tabIndex = -1;
     el.innerHTML =
       '<div class="wlb-bar">' +
-        '<span class="wlb-title"></span>' +
+        '<div class="wlb-info"><span class="wlb-title"></span>' +
+          '<span class="wlb-meta"></span></div>' +
         '<div class="wlb-tools">' +
           '<button type="button" class="wlb-btn" data-act="out" aria-label="缩小">−</button>' +
           '<span class="wlb-scale">100%</span>' +
@@ -5163,6 +5168,36 @@
     var scale = 1, ox = 0, oy = 0;
     var pointers = new Map(), dragInfo = null, pinch = null, moved = false;
     var prevFocus = null;
+    // v0.77.2：顶栏元信息（原图像素尺寸 + 文件存储大小）。本地原图由后端
+    // /image/data 给精确值；QQ 头像那类手里只有 data URL 的，尺寸读
+    // naturalWidth/Height、字节数按 base64 载荷反推（padding 要扣掉）。
+    var metaEl = el.querySelector(".wlb-meta");
+    function dataUrlBytes(src) {
+      var s = String(src || "");
+      var comma = s.indexOf(",");
+      if (s.indexOf("data:") !== 0 || comma < 0) return 0;
+      var b64 = s.slice(comma + 1);
+      var pad = /=+$/.test(b64) ? b64.match(/=+$/)[0].length : 0;
+      return Math.max(0, Math.floor(b64.length * 3 / 4) - pad);
+    }
+    function fmtSize(n) {
+      if (!n || n <= 0) return "";
+      if (n < 1024) return n + " B";
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+      return (n / 1024 / 1024).toFixed(2) + " MB";
+    }
+    function showMeta(meta, src) {
+      var w = Number(meta && meta.width) || 0;
+      var h = Number(meta && meta.height) || 0;
+      var size = Number(meta && meta.size) || 0;
+      if (!w || !h) { w = img.naturalWidth || 0; h = img.naturalHeight || 0; }
+      if (!size) size = dataUrlBytes(src);
+      var parts = [];
+      if (w && h) parts.push(w + " × " + h);
+      var readable = fmtSize(size);
+      if (readable) parts.push(readable);
+      metaEl.textContent = parts.join(" · ");
+    }
     function apply() {
       img.style.transform = "translate(" + ox + "px," + oy + "px) scale(" + scale + ")";
       el.querySelector(".wlb-scale").textContent = Math.round(scale * 100) + "%";
@@ -5245,7 +5280,10 @@
     }
     stage.addEventListener("pointerup", endPointer);
     stage.addEventListener("pointercancel", endPointer);
-    function setSrc(src, downloadName) {
+    function setSrc(src, downloadName, meta) {
+      metaEl.textContent = "";     // 换图先清上一张的元信息
+      img.onload = function () { showMeta(meta, src); };
+      img.onerror = function () { metaEl.textContent = ""; };
       img.src = src;
       img.style.visibility = "";   // 新图就位才显示（v0.6.2 清残留）
       var dl = el.querySelector('[data-act="dl"]');
@@ -5257,6 +5295,7 @@
       open: function (title) {
         prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         el.querySelector(".wlb-title").textContent = title || "查看大图";
+        metaEl.textContent = "";
         el.querySelector('[data-act="dl"]').download =
           String(title || "image").replace(/[\\/:*?"<>|]+/g, "_");
         // v0.6.2：打开先藏掉旧图——不 clear 的话，新图加载完成前会显示上一张的残留
@@ -5815,7 +5854,10 @@
         apiGet("image/data", { path: path }).then(function (res) {
           var url = (res && res.data_url) || "";
           if (!url) { lightbox.close(); message.error("原图加载失败"); return; }
-          lightbox.setSrc(url, name);
+          lightbox.setSrc(url, name, {
+            width: res && res.width, height: res && res.height,
+            size: res && res.size
+          });
         }).catch(function () { lightbox.close(); });
       }
       // v0.50.0：手里已经是 data URL（QQ 头像 / 后端缩略）时直接喂 lightbox，

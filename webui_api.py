@@ -2843,13 +2843,18 @@ async def h_image_data(plugin) -> dict:
     fp = _safe_data_file(plugin, path)
     if fp is None:
         return err("图片不存在或不在数据目录内")
-    if fp.stat().st_size > 25 * 1024 * 1024:
+    st = fp.stat()
+    if st.st_size > 25 * 1024 * 1024:
         return err("图片超过 25MB，无法预览")
+    w, h = _image_dims(fp)
     import base64 as _b64
     import mimetypes as _mimetypes
     mime = _mimetypes.guess_type(str(fp))[0] or "image/png"
     data_url = "data:" + mime + ";base64," + _b64.b64encode(fp.read_bytes()).decode("ascii")
-    return ok({"data_url": data_url, "name": fp.name})
+    # v0.77.2：大图查看器顶栏的「尺寸 / 存储大小」直接取磁盘真值，
+    # 不依赖前端从 base64 反推（本地原图这条路必须精确到字节）。
+    return ok({"data_url": data_url, "name": fp.name,
+               "width": w, "height": h, "size": int(st.st_size)})
 
 
 async def h_llm_providers(plugin) -> dict:

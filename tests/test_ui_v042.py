@@ -280,6 +280,15 @@ check("角色头像缺图兜底为文字头像（首字 + 应援色）",
 check("data URL 也能进 lightbox（不经 /image/data）",
       "function openImageViewerUrl" in PAGE and "lightbox.setSrc(src, name)" in PAGE)
 
+# ---------- v0.77.2：大图顶栏显示尺寸与存储大小 ----------
+check("大图顶栏显示原图像素尺寸 + 文件存储大小",
+      'class="wlb-meta"' in PAGE and "function fmtSize" in PAGE
+      and "function dataUrlBytes" in PAGE and "function showMeta" in PAGE
+      and 'metaEl.textContent = parts.join(" · ");' in PAGE)
+check("本地原图的尺寸/大小来自后端 stat 真值（不是 base64 反推）",
+      "lightbox.setSrc(url, name, {" in PAGE
+      and '"width": w, "height": h, "size": int(st.st_size)' in API)
+
 # ---------- ⑥ 图生图默认源 ----------
 check("自动选源优先级：出卡源 → 主参考 → 第一张",
       "function _defaultGenSource()" in PAGE
