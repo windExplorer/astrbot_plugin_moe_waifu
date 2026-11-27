@@ -2,6 +2,23 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.78.0 (2026-11-27)
+
+**角色 tag（tags_en）留空也能保存——撤掉必填限制，三条建角色路径统一口径。**
+
+- **需求（用户）**：角色 tag 为空就不让保存，不合理；应当允许留空，想补时再到工坊补。
+- **根因**：`pool.normalize_entry` 把 `tags_en` 当硬门槛，前端 `saveForm`、导入、
+  资料导入新建又各自拦了一道；出图侧 `draw.build_prompt` 其实早就能处理空 tags
+  （退回基础提示词），限制只存在于保存层。
+- **改动**：
+  - `pool.normalize_entry`：硬门槛只剩 `id` / `name`，`tags_en` 留空保留为空串。
+  - `webui_api.py`：`/pools/save_entry`、`/pools/import` 的错误文案同步改；
+    资料导入未匹配新建只看名字（`can_create` 同理），空 tags 照常写入新角色。
+  - 前端 `saveForm` 只校验 id / 名字；编辑抽屉、导入说明、帮助页与 README
+    全部改口「可留空」，并提醒空 tags 出图只靠参考图 / LoRA，建议后补。
+- **守卫**：`test_pool` 空 tags 放行、`test_profile_import` 两条改为空 tags 也能建、
+  `test_ui_v042` 两条（保存校验 + 文案）；十个相关测试全过。
+
 ## v0.77.2 (2026-11-27)
 
 **大图查看器顶栏补上原图尺寸与存储大小；本地原图取磁盘真值，不靠 base64 估算。**

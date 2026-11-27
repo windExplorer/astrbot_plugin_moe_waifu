@@ -567,7 +567,7 @@ async def h_save_entry(plugin) -> dict:
         return err(f"未知类型：{pack_name}（请先在「类型管理」里添加）")
     normalized = pool.normalize_entry(entry, pack_name)
     if normalized is None:
-        return err("条目不完整：id / name / tags_en 必填")
+        return err("条目不完整：id / name 必填（tags_en 可留空，后补即可）")
     st = getattr(plugin, "_store", None)
     if st is None or not hasattr(st, "save_entry"):
         return err("角色库尚未初始化（DB 不可用）")
@@ -614,7 +614,7 @@ async def h_import_pack(plugin) -> dict:
     接受两种 JSON 形态：
       - 整卷对象：{"pack": "卷名", "title": "...", "entries": [ {...}, ... ]}
       - 纯数组：[{...}, ...]
-    每条需含 id / name / tags_en（走 normalize_entry 校验，不合格整条跳过）。
+    每条需含 id / name（tags_en 可留空，走 normalize_entry 校验，不合格整条跳过）。
 
     v0.23.0：查重范围扩到**全库**——同 id 已存在算重复；overwrite 开启时只用
     导入内容更新基础字段，`strategy` / `cover` / `verified` 全部保留本地值。
@@ -677,7 +677,7 @@ async def h_import_pack(plugin) -> dict:
                                       or (raw or {}).get("name") or "?"),
                             "reason": "字段不合法"})
     if not good:
-        return err("没有合法条目（每条需 id / name / tags_en）")
+        return err("没有合法条目（每条需 id / name；tags_en 可留空）")
 
     pools_dir = _pools_dir(plugin)
     pools_dir.mkdir(parents=True, exist_ok=True)
@@ -6375,8 +6375,8 @@ def _slug_char_id(name: str) -> str:
 
 def _profile_import_new_entry(plugin, item: dict, pack_name: str,
                               series_hint: str, idx: dict) -> dict | None:
-    """未匹配条目建成新角色（只有带 tags_en 才建：没画面提示的条目画不出来）。"""
-    if not item.get("name") or not item.get("tags_en"):
+    """未匹配条目建成新角色（v0.78.0：tags_en 可留空，只有名字是硬门槛）。"""
+    if not item.get("name"):
         return None
     cid = item.get("id") or _slug_char_id(item["name"])
     while cid in idx["by_id"]:
@@ -6395,7 +6395,7 @@ def _profile_import_new_entry(plugin, item: dict, pack_name: str,
         "category": pack_name,
         "tier": inc.get("tier") or "",
         "strategy": {"type": "base"},
-        "tags_en": item["tags_en"],
+        "tags_en": item.get("tags_en") or "",
         "quote": quotes[0] if quotes else "",
         "quotes": quotes,
         "color": item.get("color") or "#E8B4C8",
@@ -6448,7 +6448,7 @@ async def h_profile_import_preview(plugin) -> dict:
             "pack": pack,
             "current": current,
             "incoming": it["incoming"],
-            "can_create": bool(it["name"] and it["tags_en"]),
+            "can_create": bool(it["name"]),
             "tags_en": it["tags_en"],
         })
     fields = [{"key": k, "count": sum(1 for r in rows if r["incoming"].get(k))}
@@ -6518,7 +6518,7 @@ async def h_profile_import(plugin) -> dict:
                          if create_missing else None)
             if new_entry is None:
                 reason = ("未匹配到角色" if not create_missing
-                          else "未匹配到角色，且缺少 tags_en 无法新建")
+                          else "未匹配到角色，且缺少名字无法新建")
                 results.append({**head, "status": "skipped", "reason": reason,
                                 "written": [], "skipped": []})
                 continue

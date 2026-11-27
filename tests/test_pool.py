@@ -86,7 +86,9 @@ check("gal 归并到游戏", pool.normalize_entry(
     dict(good, category="gal"), "p")["category"] == "game")
 check("空分类落 other", pool.normalize_entry(
     dict(good, category=""), "p")["category"] == "other")
-check("缺 tags 拒收", pool.normalize_entry({"id": "x", "name": "名"}, "p") is None)
+_nt = pool.normalize_entry({"id": "x", "name": "名"}, "p")
+check("tags_en 留空照常建角色（v0.78.0 用户口径）",
+      _nt is not None and _nt["tags_en"] == "")
 check("缺 id 拒收", pool.normalize_entry({"name": "名", "tags_en": "t"}, "p") is None)
 
 # v0.35.0：人设固装三开关——布尔归一，旧条目缺字段默认 False（不保护）

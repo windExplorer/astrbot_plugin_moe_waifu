@@ -92,7 +92,7 @@ AstrBot Dashboard → 插件 → 萌萌今日老婆 → 打开插件 Page（仅�
 | `category` | `anime` 动漫 / `gal` galgame / `game` 游戏 / `other` 其他 |
 | `tier` | 仅作卡片徽章展示（S/A/B…），不参与抽卡权重 |
 | `strategy` | **画法策略**：`base`（底模认识的角色 tag 直出）/ `lora`（`{"type":"lora","loras":["xxx:0.8"]}`）/ `img2img`（`{"type":"img2img","ref":"<官方立绘 URL 或本地路径>"}`） |
-| `tags_en` | 英文 danbooru 角色标签（角色 tag + 系列 tag + 稳定外观特征）。括号要写成 `\(` `\)` 转义 |
+| `tags_en` | 英文 danbooru 角色标签（角色 tag + 系列 tag + 稳定外观特征）。可留空——留空也能保存角色，但出图只靠参考图 / LoRA，建议后补。括号要写成 `\(` `\)` 转义 |
 | `verified` | 试画验证过「画得对」才参与抽卡（可在配置里放宽） |
 | `keep_headwear` / `keep_outerwear` / `keep_footwear` | **人设固装**（v0.35.0）：帽子 / 外套 / 鞋袜属于角色特色（如女巫的尖顶帽）时整维沉默——抽卡与补图不再随机摘掉或更换它们（不产出「摘掉帽子」类指令、外观 tags 不剥离），始终按角色原本设定画。**v0.54.8 起 `keep_headwear` 默认 `true`**（帽类外观多为角色特征），外套 / 鞋袜仍需显式开启；要恢复「随机摘帽」就把它存成 `false` |
 | `color` | 角色应援色（hex），整张卡随它定色 |

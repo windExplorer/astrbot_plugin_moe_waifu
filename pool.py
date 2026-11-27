@@ -466,11 +466,16 @@ def install_seed_pool(pools_dir: Path, bundled_json: Path, logger=None,
 
 
 def normalize_entry(entry: dict, pack_name: str) -> dict | None:
-    """条目归一化 + 必要字段校验；不合格返回 None（宁可少一个角色，不可脏数据进池）。"""
+    """条目归一化 + 必要字段校验；不合格返回 None（宁可少一个角色，不可脏数据进池）。
+
+    v0.78.0（用户口径）：tags_en 不再必填——出图标签可以后补，img2img /
+    LoRA 策略的角色留空也能建；draw.build_prompt 遇空 tags 会退回基础词，
+    不会因空串崩掉。硬门槛只剩 id / name。
+    """
     cid = str(entry.get("id") or "").strip()
     name = str(entry.get("name") or "").strip()
     tags = str(entry.get("tags_en") or "").strip()
-    if not cid or not name or not tags:
+    if not cid or not name:
         return None
     strategy = entry.get("strategy") if isinstance(entry.get("strategy"), dict) else {}
     stype = str(strategy.get("type") or "base").strip().lower()

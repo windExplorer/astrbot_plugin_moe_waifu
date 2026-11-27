@@ -289,6 +289,15 @@ check("本地原图的尺寸/大小来自后端 stat 真值（不是 base64 反�
       "lightbox.setSrc(url, name, {" in PAGE
       and '"width": w, "height": h, "size": int(st.st_size)' in API)
 
+# ---------- v0.78.0：角色 tag 留空也能保存 ----------
+check("角色 tag（tags_en）留空也能保存",
+      'message.error("id / 名字都不能为空")' in PAGE
+      and '|| !String(f.tags_en || "").trim()' not in PAGE
+      and "英文 danbooru 角色 tag（可留空" in PAGE)
+check("导入 / 帮助文案不再把 tags_en 写成必填",
+      "每条需含 <b>id / name</b>（tags_en 可留空）" in PAGE
+      and 'exampleNote: "最小可用：id + name（tags_en 可后补）"' in PAGE)
+
 # ---------- ⑥ 图生图默认源 ----------
 check("自动选源优先级：出卡源 → 主参考 → 第一张",
       "function _defaultGenSource()" in PAGE

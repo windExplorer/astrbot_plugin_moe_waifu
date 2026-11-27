@@ -170,7 +170,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
           and by_name["娜娜莉"]["match_by"] == "名字+作品")
     check("未匹配但有 tags_en 可新建", not by_name["早雾"]["matched"]
           and by_name["早雾"]["can_create"])
-    check("未匹配且无 tags_en 不可新建", not by_name["无名氏"]["can_create"])
+    check("未匹配且无 tags_en 也可新建（v0.78.0）", by_name["无名氏"]["can_create"])
     check("预览带回当前值", by_name["薄荷"]["current"].get("bio") == "旧简介"
           and by_name["薄荷"]["current"].get("quotes") == ["旧台词"])
     fcnt = {f["key"]: f["count"] for f in d["fields"]}
@@ -228,8 +228,11 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
           and zaowu["series"] == "异环", str(zaowu))
     check("新建条目未验证（待人工过目）", zaowu["verified"] is False)
     check("新建条目有入库日期", bool(zaowu.get("added_at")))
-    check("缺 tags_en 的条目不建",
-          st._conn.execute("SELECT 1 FROM characters WHERE name='无名氏'").fetchone() is None)
+    wm_rows = st._conn.execute(
+        "SELECT char_id FROM characters WHERE name='无名氏'").fetchall()
+    wuming = st.find_entry(wm_rows[0]["char_id"]) if wm_rows else {}
+    check("缺 tags_en 的条目也建出来（tags 为空）",
+          len(wm_rows) == 1 and wuming.get("tags_en") == "", str(wuming))
 
     # ---------- 5) 维度开关 ----------
     payload2 = json.dumps([{"id": "mint", "bio": "只该写简介", "tier": "D",

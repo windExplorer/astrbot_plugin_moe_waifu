@@ -4863,7 +4863,7 @@
                             placeholder="重绘强度" style="width: 220px;"></n-input-number>
           </div>
           <n-input v-model:value="form.tags_en" type="textarea" :rows="4"
-                   placeholder="英文 danbooru 角色 tag（必填）。角色 tag + 系列 tag + 稳定外观特征；括号写成 \\( \\) 转义，如 rem \\(re:zero\\)"></n-input>
+                   placeholder="英文 danbooru 角色 tag（可留空；留空则出图只靠参考图 / LoRA，建议后补）。角色 tag + 系列 tag + 稳定外观特征；括号写成 \\( \\) 转义，如 rem \\(re:zero\\)"></n-input>
           <!-- v0.68.0：用户标签（替代卷的启停粒度）——命中「停用标签」的角色不入抽卡 -->
           <n-input v-model:value="form.user_tags"
                    placeholder="标签（可选；逗号分隔，如：测试, 未完工）——命中配置页「停用标签」的角色不参与抽卡"></n-input>
@@ -4917,7 +4917,7 @@
       <div class="stack">
         <n-alert type="info" :show-icon="false">
           粘贴角色 JSON（支持「角色数组」<code>[...]</code> 或「整卷对象」<code>{"pack","entries"}</code>），或选 .json 文件。
-          每条需含 <b>id / name / tags_en</b>。导入即写入 <b>pools/&lt;卷名&gt;.json</b>，
+          每条需含 <b>id / name</b>（tags_en 可留空）。导入即写入 <b>pools/&lt;卷名&gt;.json</b>，
           更新插件不会被覆盖；<b>全库按 id 去重</b>，已存在的角色默认不导入。
           未选卷默认并入<b>其他卷</b>，未填作品并入<b>「其他」作品</b>。
           <div>只补简介 / 生日 / 声优 / 印象语这些资料请用「导入资料」；字段与示例见
@@ -5071,7 +5071,7 @@
                 <span style="opacity:.6;">{{ r.id || "—" }}</span>
                 <span v-if="r.matched" class="pi-tag">库里已有 · {{ r.pack }}</span>
                 <span v-else-if="r.can_create" class="pi-tag">将新建</span>
-                <span v-else class="pi-tag">无法新建（缺 tags_en）</span>
+                <span v-else class="pi-tag">无法新建（缺名字）</span>
                 <span v-if="r.match_by" class="pi-tag keep">按{{ r.match_by }}匹配</span>
               </div>
               <div style="display:flex; flex-wrap:wrap; gap:5px; margin-top:6px;">
@@ -7038,9 +7038,10 @@
       }
       async function saveForm() {
         var f = form.value;
-        if (!String(f.id || "").trim() || !String(f.name || "").trim()
-            || !String(f.tags_en || "").trim()) {
-          message.error("id / 名字 / tags_en 都不能为空");
+        // v0.78.0：tags_en 不再必填——留空也能保存（img2img / LoRA 策略靠参考图
+        // 与 LoRA 出图，空 tags 只是退回基础提示词），硬门槛只剩 id / 名字。
+        if (!String(f.id || "").trim() || !String(f.name || "").trim()) {
+          message.error("id / 名字都不能为空");
           return;
         }
         saving.value = true;
@@ -10080,14 +10081,14 @@
         {
           key: "import_char",
           title: "角色导入（建角色）",
-          intro: "把一个角色从零建进角色库：id / 名字 / 出图标签是硬门槛，其余可留空后到工坊慢慢补。",
+          intro: "把一个角色从零建进角色库：id / 名字是硬门槛，出图标签可留空后到工坊补。",
           where: "入口：角色库 →「导入角色」；作品库 →「批量导入角色」（作品名已预填，导入的条目统一归该作品）。",
           fields: [
             { name: "id", type: "字符串", required: true,
               desc: "角色唯一标识，全库唯一（不同卷之间也不能重名）。建议 ASCII 小写 + 下划线。" },
             { name: "name", type: "字符串", required: true, desc: "展示名，卡片与列表都显示它。" },
-            { name: "tags_en", type: "字符串", required: true,
-              desc: "英文 danbooru 风格标签，逗号分隔——出图靠它，写得越准画得越像。" },
+            { name: "tags_en", type: "字符串", required: false,
+              desc: "英文 danbooru 风格标签，逗号分隔——出图靠它，写得越准画得越像。留空也能建角色，但出图只靠参考图 / LoRA，建议后补。" },
             { name: "series", type: "字符串", required: false,
               desc: "作品名；作品库按它归类，留空则算「未填作品」。" },
             { name: "category", type: "枚举", required: false,
@@ -10102,7 +10103,7 @@
               desc: "是否启用。导入的条目一律按未验证入库，人工确认画得对再打开开关。" }
           ],
           example: HELP_EXAMPLE_CHAR,
-          exampleNote: "最小可用：id + name + tags_en",
+          exampleNote: "最小可用：id + name（tags_en 可后补）",
           notes: [
             "全库按 id 去重，同时也拦「同名同作品但 id 不同」——避免同一个人在界面上出现两份。",
             "勾「覆盖已有角色」时只改基础字段（名字 / 作品 / 标签 / 评级 / 印象语 / 颜色），参考图、封面、验证状态原样保留。",
@@ -10112,7 +10113,7 @@
         {
           key: "import_profile",
           title: "角色资料导入（补档案）",
-          intro: "插件联网检索拿不到资料时的兜底通道：把手上的角色档案（简介 / 生日 / 声优 / 印象语…）灌进已有角色；JSON 里带 tags_en 且勾了新建时，也能顺手把库里没有的角色建出来。",
+          intro: "插件联网检索拿不到资料时的兜底通道：把手上的角色档案（简介 / 生日 / 声优 / 印象语…）灌进已有角色；勾了新建时，也能顺手把库里没有的角色建出来（tags_en 可留空）。",
           where: "入口：角色库 →「导入资料」；角色详情 → 资料页签 →「从 JSON 导入资料」（会带上当前角色，可勾「只处理这个角色」）。",
           fields: [
             { name: "id", type: "字符串", required: false,
@@ -10133,7 +10134,7 @@
               desc: "印象语，每行（每个元素）一句，建议 10 句、最多 20 句；卡片按种子随机取一句。" },
             { name: "tier", type: "枚举", required: false, desc: "评级 S / A / B / C / D。" },
             { name: "tags_en", type: "字符串", required: false,
-              desc: "仅「未匹配 + 勾了新建」时用：没有它建不出角色，只能跳过。" }
+              desc: "仅「未匹配 + 勾了新建」时写入新角色；留空也能建，只是出图没有角色特征。" }
           ],
           example: HELP_EXAMPLE_PROFILE,
           exampleNote: "第一条按名字匹配，第二条按 id 匹配",
