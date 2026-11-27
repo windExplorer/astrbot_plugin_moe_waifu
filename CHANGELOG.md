@@ -2,6 +2,26 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.79.0 (2026-11-27)
+
+**图片可以命名 / 重命名：大图顶栏 ✎ 改的是显示名映射，磁盘文件名与所有引用都不动。**
+
+- **需求（用户）**：图片要能起名、改名，但不能直接改磁盘文件名（角色立绘 / 参考图
+  都按路径引用，改文件名等于把引用改坏）；入口放在大图上，看图时随手改。
+- **改动**：
+  - `store.py` 新增 `image_names(path→name)` 表与 `set_image_name` /
+    `get_image_name` / `get_image_names`：path 是 data 目录下的正斜杠相对路径，
+    与图片类型无关——立绘 / 参考图 / 全局画布 / 卡图共用一张表；清空名字 = 删映射行，
+    界面回退到文件名。老库启动时随 SCHEMA 自动建表，不需要迁移。
+  - `webui_api.py` 新增 `/image/name`（与 `/image/data` 共用 `_safe_data_file` 与
+    `_image_rel_key`，相对 / 绝对路径归一成同一个 key）；`/image/data` 顺带返回
+    `display_name` 和归一后的 `path`。
+  - `pages/waifu-console/index.html` 的公共 lightbox 顶栏加 ✎ 与纯 DOM 输入层：
+    Enter 保存 / Esc 取消，改名后标题立即更新；只有拿到本地 path 的图才显示按钮，
+    QQ 头像这类 data URL 入口自动隐藏。
+- **守卫**：`test_ui_v042` 三条、`test_global_refs_swap` 真库三条（写 / 批量读 / 清空）；
+  九个相关测试全过。
+
 ## v0.78.0 (2026-11-27)
 
 **角色 tag（tags_en）留空也能保存——撤掉必填限制，三条建角色路径统一口径。**

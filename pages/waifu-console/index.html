@@ -265,6 +265,25 @@
     transform: translate(-50%, -50%); color: #fff; font-size: 13px; opacity: .7; }
   .wlb.loading .wlb-loading { display: block; }
   .wlb:not(.loading) .wlb-loading { display: none; }
+  /* v0.79.0：顶栏 ✎ 命名——只改显示名映射，磁盘文件名与引用都不动 */
+  .wlb-rename { position: absolute; inset: 0; z-index: 2; display: none;
+    align-items: center; justify-content: center; background: rgba(8,6,10,.72); }
+  .wlb.rename-open .wlb-rename { display: flex; }
+  .wlb-rename-box { width: min(420px, 90vw); background: #2a2530; color: #fff;
+    border: 1px solid rgba(255,255,255,.18); border-radius: 12px; padding: 18px;
+    box-shadow: 0 18px 60px rgba(0,0,0,.5); }
+  .wlb-rename-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+  .wlb-rename-input { width: 100%; box-sizing: border-box; padding: 9px 10px;
+    border-radius: 8px; border: 1px solid rgba(255,255,255,.25);
+    background: rgba(255,255,255,.08); color: #fff; font-size: 14px; outline: none; }
+  .wlb-rename-input:focus { border-color: #f0a0c0; }
+  .wlb-rename-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  .wlb-rename-actions button { border: 1px solid rgba(255,255,255,.22); background: transparent;
+    color: #fff; border-radius: 7px; padding: 6px 14px; cursor: pointer;
+    font-size: 13px; font-family: inherit; }
+  .wlb-rename-actions button[data-act="rename-save"] {
+    background: #d63384; border-color: #d63384; }
+  .wlb-btn[hidden] { display: none; }
   /* ---- 间距修缮（v0.5.10）：区块级子元素统一留白，别挤在一起 ---- */
   .stack > * + * { margin-top: 12px; }
   /* ---- 固定布局（v0.6.0）：顶栏/底栏钉死，只有中间内容区滚动 ----
@@ -5156,12 +5175,23 @@
           '<span class="wlb-scale">100%</span>' +
           '<button type="button" class="wlb-btn" data-act="in" aria-label="放大">＋</button>' +
           '<button type="button" class="wlb-btn" data-act="reset" aria-label="复位">⟲</button>' +
+          '<button type="button" class="wlb-btn" data-act="rename" aria-label="命名" ' +
+            'title="给这张图起名（不改磁盘文件名）" hidden>✎</button>' +
           '<a class="wlb-btn" data-act="dl" aria-label="下载原图">⬇</a>' +
           '<button type="button" class="wlb-btn" data-act="close" aria-label="关闭">✕</button>' +
         '</div>' +
       '</div>' +
       '<div class="wlb-stage"><img class="wlb-img" alt="" draggable="false"></div>' +
-      '<div class="wlb-loading">加载原图…</div>';
+      '<div class="wlb-loading">加载原图…</div>' +
+      '<div class="wlb-rename"><div class="wlb-rename-box">' +
+        '<div class="wlb-rename-title">图片命名</div>' +
+        '<input class="wlb-rename-input" type="text" maxlength="120" ' +
+          'placeholder="给这张图起个名字（磁盘文件名不变）">' +
+        '<div class="wlb-rename-actions">' +
+          '<button type="button" data-act="rename-cancel">取消</button>' +
+          '<button type="button" data-act="rename-save">保存</button>' +
+        '</div>' +
+      '</div></div>';
     document.body.appendChild(el);
     var img = el.querySelector(".wlb-img");
     var stage = el.querySelector(".wlb-stage");
@@ -5172,6 +5202,9 @@
     // /image/data 给精确值；QQ 头像那类手里只有 data URL 的，尺寸读
     // naturalWidth/Height、字节数按 base64 载荷反推（padding 要扣掉）。
     var metaEl = el.querySelector(".wlb-meta");
+    var renameBtn = el.querySelector('[data-act="rename"]');
+    var renameInput = el.querySelector(".wlb-rename-input");
+    var currentPath = "", renameHandler = null, renameBefore = "";
     function dataUrlBytes(src) {
       var s = String(src || "");
       var comma = s.indexOf(",");
@@ -5198,6 +5231,31 @@
       if (readable) parts.push(readable);
       metaEl.textContent = parts.join(" · ");
     }
+    // v0.79.0：改名走注入的 handler（setup 里的 apiPost），只写映射表。
+    // data URL 入口（QQ 头像等）没有 data 路径，✎ 按钮自动隐藏。
+    function openRename() {
+      if (!currentPath) return;
+      renameBefore = el.querySelector(".wlb-title").textContent || "";
+      renameInput.value = renameBefore === "查看大图" ? "" : renameBefore;
+      el.classList.add("rename-open");
+      renameInput.focus();
+      renameInput.select();
+    }
+    function closeRename() { el.classList.remove("rename-open"); }
+    function saveRename() {
+      var next = String(renameInput.value || "").trim();
+      if (!renameHandler || !currentPath || next === renameBefore) { closeRename(); return; }
+      renameInput.disabled = true;
+      renameHandler(currentPath, next).then(function (res) {
+        renameInput.disabled = false;
+        closeRename();
+        el.querySelector(".wlb-title").textContent =
+          (res && res.name != null ? res.name : next) || "查看大图";
+      }).catch(function () {
+        renameInput.disabled = false;
+        message.error("图片命名保存失败");
+      });
+    }
     function apply() {
       img.style.transform = "translate(" + ox + "px," + oy + "px) scale(" + scale + ")";
       el.querySelector(".wlb-scale").textContent = Math.round(scale * 100) + "%";
@@ -5212,12 +5270,18 @@
         t.closest('input, textarea, select, [contenteditable="true"]') !== null;
     }
     function close() {
+      closeRename();
       el.classList.remove("show");
       document.body.style.overflow = "";
       document.removeEventListener("keydown", onKey, true);
       if (prevFocus && prevFocus.isConnected) prevFocus.focus();
     }
     function onKey(e) {
+      if (el.classList.contains("rename-open")) {
+        if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); closeRename(); }
+        else if (e.key === "Enter") { e.stopPropagation(); e.preventDefault(); saveRename(); }
+        return;
+      }
       if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); close(); return; }
       if (isTyping(e.target)) return;
       if (e.key === "+" || e.key === "=") zoom(BTN);
@@ -5230,13 +5294,21 @@
     }
     el.addEventListener("click", function (ev) {
       var t = ev.target;
-      var btn = t.closest && t.closest(".wlb-btn");
+      // v0.79.0：[data-act] 一起接管，命名弹窗里的取消 / 保存也能命中
+      var btn = t.closest && t.closest("[data-act]");
       if (btn) {
         var act = btn.getAttribute("data-act");
         if (act === "in") zoom(BTN);
         else if (act === "out") zoom(-BTN);
         else if (act === "reset") reset();
         else if (act === "close") close();
+        else if (act === "rename") openRename();
+        else if (act === "rename-cancel") closeRename();
+        else if (act === "rename-save") saveRename();
+        return;
+      }
+      if (el.classList.contains("rename-open")) {
+        if (t.classList && t.classList.contains("wlb-rename")) closeRename();
         return;
       }
       if (moved) return;
@@ -5280,7 +5352,7 @@
     }
     stage.addEventListener("pointerup", endPointer);
     stage.addEventListener("pointercancel", endPointer);
-    function setSrc(src, downloadName, meta) {
+    function setSrc(src, downloadName, meta, path) {
       metaEl.textContent = "";     // 换图先清上一张的元信息
       img.onload = function () { showMeta(meta, src); };
       img.onerror = function () { metaEl.textContent = ""; };
@@ -5289,6 +5361,12 @@
       var dl = el.querySelector('[data-act="dl"]');
       dl.href = src;
       dl.download = downloadName || "image";
+      // v0.79.0：只有 data 目录内的本地图才有 path，data URL 头像不显示 ✎
+      currentPath = String(path || "");
+      renameBtn.hidden = !currentPath;
+      if (meta && meta.display_name) {
+        el.querySelector(".wlb-title").textContent = String(meta.display_name);
+      }
       el.classList.remove("loading");
     }
     return {
@@ -5301,6 +5379,7 @@
         // v0.6.2：打开先藏掉旧图——不 clear 的话，新图加载完成前会显示上一张的残留
         img.removeAttribute("src");
         img.style.visibility = "hidden";
+        currentPath = ""; renameBtn.hidden = true; closeRename();  // v0.79.0：不串上一张
         moved = false; reset();
         el.classList.add("show", "loading");
         document.body.style.overflow = "hidden";
@@ -5308,6 +5387,7 @@
         el.focus();
       },
       setSrc: setSrc,
+      setRenameHandler: function (fn) { renameHandler = fn; },
       close: close
     };
   }
@@ -5847,6 +5927,10 @@
 
       // ---- 大图查看器（公共 lightbox 组件，见脚本区 createLightbox） ----
       // 点击缩略图 → 弹 lightbox → 经 /image/data 拉原图 data URL 填入。
+      // v0.79.0：lightbox 建在 setup 外，命名 handler 在这里注入（用 apiPost）。
+      lightbox.setRenameHandler(function (path, name) {
+        return apiPost("image/name", { path: path, name: name });
+      });
       function openViewer(path, title) {
         if (!path) { message.error("该图片还没有文件（先试画或补图）"); return; }
         var name = String(title || "查看大图");
@@ -5856,8 +5940,8 @@
           if (!url) { lightbox.close(); message.error("原图加载失败"); return; }
           lightbox.setSrc(url, name, {
             width: res && res.width, height: res && res.height,
-            size: res && res.size
-          });
+            size: res && res.size, display_name: res && res.display_name
+          }, res && res.path ? res.path : path);
         }).catch(function () { lightbox.close(); });
       }
       // v0.50.0：手里已经是 data URL（QQ 头像 / 后端缩略）时直接喂 lightbox，

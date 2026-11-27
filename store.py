@@ -198,6 +198,14 @@ CREATE TABLE IF NOT EXISTS global_refs (
   note       TEXT NOT NULL DEFAULT '',    -- 管理员备注（图的说明/用途）
   created_at TEXT NOT NULL
 );
+-- v0.79.0：图片显示名映射（path -> name）。只记名字，不改磁盘文件、
+-- 不碰 portraits / refs / global_refs / wardrobe 里的任何引用；立绘、参考图、
+-- 全局画布、卡图共用一张表，读不到就回退文件名。
+CREATE TABLE IF NOT EXISTS image_names (
+  path       TEXT PRIMARY KEY,            -- data 目录下的正斜杠相对路径
+  name       TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL
+);
 -- v0.72.0：衣柜（试穿用的衣物图）。与全局画布 / 角色参考图都分开：
 -- 一张图 = 一件（或一套）衣服，路径相对 data 目录（wardrobe/c_<sha16>.<ext>）。
 CREATE TABLE IF NOT EXISTS wardrobe (
@@ -1218,6 +1226,47 @@ class Store:
         row = self._conn.execute(
             "SELECT * FROM global_refs WHERE file=?", (str(file or ""),)).fetchone()
         return dict(row) if row else None
+
+    # ---------- image_names（v0.79.0：图片显示名，不动磁盘文件） ----------
+    def set_image_name(self, path: str, name: str) -> str:
+        """设置图片显示名；空名字 = 删映射行（界面回退到文件名）。"""
+        key = str(path or "").strip().replace("\\", "/")
+        val = str(name or "").strip()[:120]
+        if not key:
+            return ""
+        if not val:
+            self._conn.execute("DELETE FROM image_names WHERE path=?", (key,))
+            self._conn.commit()
+            return ""
+        self._conn.execute(
+            "INSERT INTO image_names (path, name, updated_at) VALUES (?,?,?) "
+            "ON CONFLICT(path) DO UPDATE SET name=excluded.name, "
+            "updated_at=excluded.updated_at", (key, val, _now()))
+        self._conn.commit()
+        return val
+
+    def get_image_name(self, path: str) -> str:
+        row = self._conn.execute(
+            "SELECT name FROM image_names WHERE path=?",
+            (str(path or "").strip().replace("\\", "/"),)).fetchone()
+        return str(row["name"] or "") if row else ""
+
+    def get_image_names(self, paths) -> dict:
+        """批量取显示名 -> {path: name}；只返回已命名的图片。"""
+        keys = [str(p or "").strip().replace("\\", "/") for p in (paths or [])]
+        keys = [k for k in keys if k]
+        if not keys:
+            return {}
+        out: dict = {}
+        for i in range(0, len(keys), 400):
+            chunk = keys[i:i + 400]
+            qs = ",".join("?" for _ in chunk)
+            rows = self._conn.execute(
+                f"SELECT path, name FROM image_names WHERE path IN ({qs})", chunk
+            ).fetchall()
+            for row in rows:
+                out[row["path"]] = str(row["name"] or "")
+        return out
 
     def set_global_ref_note(self, file: str, note: str) -> bool:
         cur = self._conn.execute(

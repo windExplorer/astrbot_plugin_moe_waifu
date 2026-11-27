@@ -399,6 +399,20 @@ def _safe_data_file(plugin, path: str) -> Path | None:
         return None
 
 
+def _image_rel_key(plugin, fp: Path | None, raw: str) -> str:
+    """图片在 data 目录下的正斜杠相对路径——显示名映射表的统一 key。
+
+    调用方可能传相对路径，也可能传绝对路径；统一归一后前端拿同一个 key
+    读写名字，不会因为书写形式不同而映射出两份名字。
+    """
+    if fp is not None:
+        try:
+            return fp.relative_to(Path(plugin._data_dir).resolve()).as_posix()
+        except Exception:
+            pass
+    return str(raw or "").strip().replace("\\", "/")
+
+
 def _works_meta_path(plugin) -> Path:
     return Path(plugin._data_dir) / "works_meta.json"
 
@@ -2853,8 +2867,34 @@ async def h_image_data(plugin) -> dict:
     data_url = "data:" + mime + ";base64," + _b64.b64encode(fp.read_bytes()).decode("ascii")
     # v0.77.2：大图查看器顶栏的「尺寸 / 存储大小」直接取磁盘真值，
     # 不依赖前端从 base64 反推（本地原图这条路必须精确到字节）。
-    return ok({"data_url": data_url, "name": fp.name,
-               "width": w, "height": h, "size": int(st.st_size)})
+    # v0.79.0：display_name 取显示名映射，前端顶栏优先显示它。
+    rel = _image_rel_key(plugin, fp, path)
+    store_obj = getattr(plugin, "_store", None)
+    display = (store_obj.get_image_name(rel)
+               if store_obj is not None and hasattr(store_obj, "get_image_name") else "")
+    return ok({"data_url": data_url, "name": fp.name, "display_name": display,
+               "path": rel, "width": w, "height": h, "size": int(st.st_size)})
+
+
+async def h_image_name(plugin) -> dict:
+    """图片显示名读写（v0.79.0）：只改 image_names 映射，磁盘文件与引用都不动。
+
+    POST 带 name = 改名（空串清除映射，界面回退文件名）；不带 name = 只读当前名。
+    与 /image/data 共用 _safe_data_file + _image_rel_key，路径口径完全一致。
+    """
+    body = await _body()
+    path = str(body.get("path") or _q("path", "") or "").strip()
+    fp = _safe_data_file(plugin, path)
+    if fp is None:
+        return err("图片不存在或不在数据目录内")
+    rel = _image_rel_key(plugin, fp, path)
+    store_obj = getattr(plugin, "_store", None)
+    if store_obj is None or not hasattr(store_obj, "set_image_name"):
+        return err("插件尚未初始化完成（DB 不可用）")
+    if "name" in body:
+        name = store_obj.set_image_name(rel, str(body.get("name") or ""))
+        return ok({"path": rel, "name": name})
+    return ok({"path": rel, "name": store_obj.get_image_name(rel)})
 
 
 async def h_llm_providers(plugin) -> dict:
@@ -7145,6 +7185,7 @@ def register(plugin) -> None:
         ("/refs/orphan_delete", h_refs_orphan_delete, ["POST"]),
         ("/refs/set_draw_source", h_refs_set_draw_source, ["POST"]),
         ("/image/data", h_image_data, ["GET", "POST"]),
+        ("/image/name", h_image_name, ["GET", "POST"]),
         ("/refs/bind", h_refs_bind, ["POST"]),
         ("/refs/unbind", h_refs_unbind, ["POST"]),
         # v0.65.0：参考图软删除（与立绘同款停用 / 启用口径）

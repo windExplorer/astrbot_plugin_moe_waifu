@@ -298,6 +298,19 @@ check("导入 / 帮助文案不再把 tags_en 写成必填",
       "每条需含 <b>id / name</b>（tags_en 可留空）" in PAGE
       and 'exampleNote: "最小可用：id + name（tags_en 可后补）"' in PAGE)
 
+# ---------- v0.79.0：图片命名（映射表，不改磁盘文件名） ----------
+check("大图顶栏有命名入口与输入层",
+      'data-act="rename"' in PAGE and "wlb-rename-input" in PAGE
+      and "renameBtn.hidden = !currentPath" in PAGE
+      and "setRenameHandler: function (fn)" in PAGE)
+check("命名走 apiPost，读图带回显示名",
+      'apiPost("image/name"' in PAGE and "display_name: res && res.display_name" in PAGE)
+check("后端命名接口与映射表齐备",
+      '"/image/name", h_image_name' in API
+      and "_image_rel_key(plugin, fp, path)" in API
+      and "CREATE TABLE IF NOT EXISTS image_names" in STORE
+      and "def set_image_name" in STORE and "def get_image_names" in STORE)
+
 # ---------- ⑥ 图生图默认源 ----------
 check("自动选源优先级：出卡源 → 主参考 → 第一张",
       "function _defaultGenSource()" in PAGE

@@ -169,6 +169,14 @@ def main():
             check("真库：备注可读", s.get_global_ref("global_refs/g_1.png")["note"] == "画布")
             s.set_global_ref_note("global_refs/g_1.png", "改过")
             check("真库：备注可改", s.get_global_ref("global_refs/g_1.png")["note"] == "改过")
+            # v0.79.0：显示名映射（独立于 note，也不动磁盘文件）
+            s.set_image_name("global_refs/g_1.png", "主参考")
+            check("真库：图片显示名可写", s.get_image_name("global_refs/g_1.png") == "主参考")
+            check("真库：批量取名", s.get_image_names(
+                ["global_refs/g_1.png", "global_refs/g_2.png"])
+                == {"global_refs/g_1.png": "主参考"})
+            s.set_image_name("global_refs/g_1.png", "")
+            check("真库：清空名字删映射", s.get_image_name("global_refs/g_1.png") == "")
             check("真库：删除生效", s.delete_global_ref("global_refs/g_2.png")
                   and len(s.list_global_refs()) == 1)
             s.close()  # Windows 下不关连接会导致临时目录清理报 WinError 32
