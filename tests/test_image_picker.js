@@ -113,6 +113,9 @@ const ce = html.indexOf('\n      function openTryRefPicker()', cs);
 if (cs < 0 || ce < 0) fail('找不到 _tryRefPickerItem / picker computed 区块');
 const compSrc = html.slice(cs, ce);
 const fakeVue = { computed: fn => ({ get value() { return fn(); } }) };
+// v0.82.0：picker 候选改用统一显示名函数，测试桩也要跟着注入
+const grNameStub = r => String((r && (r.display_name || r.path || r.file || r.abs) || '')
+  .split('/').pop());
 const fakeGlobal = [{ path: 'global_refs/g1.webp', thumb: 'data:g', note: '画布',
                       exists: true, width: 2160, height: 3156, size: 12345 }];
 const fakeRefs = [{ path: 'refs/r1.png', thumb: 'data:r', note: '主参考',
@@ -216,12 +219,12 @@ if (gs < 0) fail('找不到 galSwapCharPickerItems 定义');
 const ge = html.indexOf('\n      function openGalSwapGlobalPicker()', gs);
 let galBuilt;
 try {
-  galBuilt = new Function('Vue', 'genSources',
+  galBuilt = new Function('Vue', 'genSources', 'grName',
     html.slice(gs, ge) + '\nreturn galSwapCharPickerItems;')(
     fakeVue, { value: [
       { kind: 'ref', path: 'refs/r1.png', thumb: 'data:r' },
       { kind: 'portrait', path: 'portraits/c1/p1.png', thumb: 'data:p' }
-    ] });
+    ] }, grNameStub);
 } catch (e) { fail('galSwapCharPickerItems 求值抛错: ' + e.message); }
 // v0.62.0：口径已放开——参考图 + 立绘都要进候选，且立绘项标注「立绘」
 if (galBuilt.value.length !== 2
@@ -230,12 +233,12 @@ if (galBuilt.value.length !== 2
   fail('角色详情身份图候选应含参考图+立绘（v0.62.0）');
 }
 // 去重：同一 path 只保留一份
-const dupBuilt = new Function('Vue', 'genSources',
+const dupBuilt = new Function('Vue', 'genSources', 'grName',
   html.slice(gs, ge) + '\nreturn galSwapCharPickerItems;')(
   fakeVue, { value: [
     { kind: 'ref', path: 'refs/r1.png', thumb: 'data:r' },
     { kind: 'portrait', path: 'refs/r1.png', thumb: 'data:r2' }
-  ] });
+  ] }, grNameStub);
 if (dupBuilt.value.length !== 1) fail('身份图候选没对同 path 去重');
 
 // v0.62.0：试画台身份候选 = 参考图 + 立绘（abs 当 path）
@@ -244,7 +247,7 @@ if (ts2 < 0) fail('找不到 trySwapCharPickerItems 定义');
 const te2 = html.indexOf('\n      function openTryRefPicker()', ts2);
 let tryBuilt;
 try {
-  tryBuilt = new Function('Vue', 'tryRefPickerItems', 'tryPortraits',
+  tryBuilt = new Function('Vue', 'tryRefPickerItems', 'tryPortraits', 'grName',
     html.slice(ts2, te2) + '\nreturn trySwapCharPickerItems;')(
     fakeVue, { value: [{ path: 'refs/a.png', thumb: 'data:a', label: '参考图', sub: '' }] },
     { value: [
@@ -252,7 +255,7 @@ try {
         active: true, exists: true, display_no: 2, width: 832, height: 1216 },
       { abs: 'X:/data/portraits/c1/p3.png', thumb: '', file: 'p3.png',
         active: false, exists: true }  // 停用立绘应被排除
-    ] });
+    ] }, grNameStub);
 } catch (e) { fail('trySwapCharPickerItems 求值抛错: ' + e.message); }
 if (tryBuilt.value.length !== 2) fail('试画台身份候选应=1参考图+1启用立绘（停用不算）');
 if (!tryBuilt.value.some(it => it.path === 'X:/data/portraits/c1/p2.png'

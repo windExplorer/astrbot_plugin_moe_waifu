@@ -2,6 +2,27 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.82.0 (2026-11-27)
+
+**图片改名后，所有图片列表直接显示改过的名字——名字不再只活在大图顶栏里。**
+
+- **现象 / 需求（用户）**：v0.79.0 的大图 ✎ 能改显示名，但列表仍显示文件名 / #序号；
+  用户指出「这才是名字的用处体现之一」。
+- **根因**：`image_names` 映射当时只有 `/image/data` 与 `/image/name` 两条路在读，
+  各列表接口没有把它带出来；前端也直接 `path.split("/").pop()` 显示文件名。
+- **改动**：
+  - `webui_api.py` 新增 `_attach_image_names()`：一次批量查映射（`store.get_image_names`），
+    给 `/portraits/list`（`file`）、`/refs/list` 启用与停用图、`/refs/orphans`、
+    `/global_refs/list`、`/wardrobe/list`、`/tryon/list` 都补 `display_name`。
+    没有映射的项为空串，前端照旧回落文件名 / #序号；不改磁盘、不改引用。
+  - `pages/waifu-console/index.html`：`grName(r)` 成为统一显示名入口（优先 `display_name`，
+    再认 `path` / `file` / `abs`），全局图库卡片、参考图墙、立绘墙、图库页、未绑定图、
+    试穿 / 衣柜卡片以及各处选图下拉都改走它；卡片 meta 与看大图标题同步用名字。
+    衣柜 note / 试穿自身 name 仍保留，但显示名优先；真实路径留在 tooltip / 详情。
+  - 改名保存成功后 `patchImageDisplayName()` 立即改内存里的列表项，不用切页刷新。
+- **守卫**：`test_global_refs_swap` 真库批量带名；`test_ui_v042` 三条静态守卫；
+  `test_image_picker.js` 的 picker 桩同步注入 `grName`。相关九套测试全过。
+
 ## v0.81.0 (2026-11-27)
 
 **角色资料导入新增「画图标签 tags_en」可选维度：默认关，显式开启后才按只补空 / 覆盖策略写入。**

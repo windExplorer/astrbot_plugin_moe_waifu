@@ -1470,7 +1470,7 @@
                    卡片不再定高封面，按原图比例铺，短长图都能紧密排布。 -->
               <div v-if="globalRefs.length > 0" class="gr-waterfall" :style="{ '--gr-cols': grCols }">
                 <div v-for="(r, ri) in globalRefs" :key="r.path" class="gr-card">
-                  <div class="gr-card-cover" @click="openViewer(r.path, '全局参考图')">
+                  <div class="gr-card-cover" @click="openViewer(r.path, grName(r) || '全局参考图')">
                     <!-- v0.64.0：瀑布流封面用 1000px 高清 cover，回退 420px thumb；
                          选择器弹窗仍用 thumb，避免首屏把每图 1000px 全拉一遍 -->
                     <img v-if="r.thumb" :src="r.cover || r.thumb" alt="全局参考图" title="点击查看大图"
@@ -1572,7 +1572,7 @@
               <n-alert v-if="wardrobeLoading" type="info" :bordered="false">加载中…</n-alert>
               <div v-if="wardrobeItems.length > 0" class="gr-waterfall" :style="{ '--gr-cols': 4 }">
                 <div v-for="(r, ri) in wardrobeItems" :key="r.path" class="gr-card">
-                  <div class="gr-card-cover" @click="openViewer(r.path, '衣物图')">
+                  <div class="gr-card-cover" @click="openViewer(r.path, r.display_name || '衣物图')">
                     <img v-if="r.thumb" :src="r.cover || r.thumb" alt="衣物图" title="点击查看大图">
                     <div v-else class="picker-noimg">文件丢失</div>
                     <span class="gr-card-idx">{{ ri + 1 }}</span>
@@ -1581,7 +1581,7 @@
                     <div class="gr-card-note" :class="{ empty: !r.name }"
                          :title="'点这里编辑第 ' + (ri + 1) + ' 件的名字 / 类型 / 备注'"
                          @click="beginWardrobeEdit(r)">
-                      {{ r.name || "＋ 点这里命名" }}
+                      {{ r.display_name || r.name || "＋ 点这里命名" }}
                     </div>
                     <div class="gr-card-meta">
                       <n-tag size="tiny" :bordered="false">{{ r.category_label }}</n-tag>
@@ -2355,7 +2355,7 @@
                     </div>
                     <img v-if="it.thumb" :src="it.thumb" class="clickable-img"
                          title="点击查看大图" alt="立绘缩略"
-                         @click.stop="openViewer(it.file, '#' + it.display_no)">
+                         @click.stop="openViewer(it.file, it.display_name || ('#' + it.display_no))">
                     <div v-else class="gal-meta">文件丢失</div>
                     <!-- 已停用：只能看详情 / 恢复 / 彻底删除 -->
                     <div class="gal-ops" v-if="!it.active">
@@ -2405,7 +2405,7 @@
                          会抛 TypeError → 整个立绘墙渲染中断（真机「只有标题没图片」
                          的根因；mock fixture 是字符串才一直没炸）——必须先 String() -->
                     <div class="gal-meta" :title="it.seed != null ? 'seed ' + it.seed : ''">
-                      #{{ it.display_no }} · {{ it.date }} · seed {{ String(it.seed == null ? "" : it.seed).slice(0, 8) }}{{ String(it.seed == null ? "" : it.seed).length > 8 ? "…" : "" }}{{ it.duration_ms > 0 ? " · 耗时 " + fmtDur(it.duration_ms) : "" }}{{ isCover(it) ? " · 封面" : "" }}{{ galDrawRefAbs === it.abs ? " · 出卡源" : "" }}{{ !it.active ? " · 已停用" : "" }}
+                      {{ it.display_name ? it.display_name + ' · ' : '' }}#{{ it.display_no }} · {{ it.date }} · seed {{ String(it.seed == null ? "" : it.seed).slice(0, 8) }}{{ String(it.seed == null ? "" : it.seed).length > 8 ? "…" : "" }}{{ it.duration_ms > 0 ? " · 耗时 " + fmtDur(it.duration_ms) : "" }}{{ isCover(it) ? " · 封面" : "" }}{{ galDrawRefAbs === it.abs ? " · 出卡源" : "" }}{{ !it.active ? " · 已停用" : "" }}
                     </div>
                   </div>
                 </n-gi>
@@ -2446,7 +2446,7 @@
                                  'pin-main': galMainRef === r.path, 'pin-draw': galDrawRef === r.path }">
                     <img v-if="r.thumb" :src="r.thumb" class="clickable-img"
                          title="点击查看大图" alt="参考图"
-                         @click.stop="openViewer(r.path, '参考图')">
+                         @click.stop="openViewer(r.path, r.display_name || '参考图')">
                     <div v-else class="gal-meta">文件丢失</div>
                     <div class="gal-ops">
                       <!-- v0.20.0：参考图生成信息详情（试画/立绘转入的图带提示词） -->
@@ -2474,7 +2474,7 @@
                                   @click.stop="disableGalRef(r)"></w-icon-btn>
                     </div>
                     <div class="gal-meta">
-                      {{ galMainRef === r.path ? "主参考" : "备选" }}{{ galDrawRef === r.path ? " · 出卡源" : "" }}{{ r.meta && r.meta.duration_ms > 0 ? " · 耗时 " + fmtDur(r.meta.duration_ms) : "" }}
+                      {{ r.display_name ? r.display_name + ' · ' : '' }}{{ galMainRef === r.path ? "主参考" : "备选" }}{{ galDrawRef === r.path ? " · 出卡源" : "" }}{{ r.meta && r.meta.duration_ms > 0 ? " · 耗时 " + fmtDur(r.meta.duration_ms) : "" }}
                     </div>
                   </div>
                 </n-gi>
@@ -2493,7 +2493,7 @@
                     <div class="gal-item is-disabled">
                       <img v-if="r.thumb" :src="r.thumb" class="clickable-img"
                            title="点击查看大图" alt="已停用参考图"
-                           @click.stop="openViewer(r.path, '参考图（已停用）')">
+                           @click.stop="openViewer(r.path, r.display_name || '参考图（已停用）')">
                       <div v-else class="gal-meta">文件丢失</div>
                       <div class="gal-ops">
                         <w-icon-btn icon="refresh" size="tiny" type="success"
@@ -2506,7 +2506,7 @@
                                     @click.stop="deleteGalRefHard(r)"></w-icon-btn>
                       </div>
                       <div class="gal-meta">
-                        已停用{{ r.meta && r.meta.duration_ms > 0 ? " · 耗时 " + fmtDur(r.meta.duration_ms) : "" }}
+                        {{ r.display_name ? r.display_name + ' · ' : '' }}已停用{{ r.meta && r.meta.duration_ms > 0 ? " · 耗时 " + fmtDur(r.meta.duration_ms) : "" }}
                       </div>
                     </div>
                   </n-gi>
@@ -2531,7 +2531,7 @@
                       <div class="gal-item">
                         <img v-if="o.thumb" :src="o.thumb" class="clickable-img"
                              title="点击查看大图" alt="未绑定图片"
-                             @click.stop="openViewer(o.path, '未绑定图片')">
+                             @click.stop="openViewer(o.path, o.display_name || '未绑定图片')">
                         <div v-else class="gal-meta">预览不可用</div>
                         <div class="gal-ops">
                           <n-button size="tiny" type="primary" secondary
@@ -2542,6 +2542,7 @@
                                             ? '再点一次确认物理删除文件' : '物理删除这个文件'"
                                       @click.stop="deleteOrphan(o)"></w-icon-btn>
                         </div>
+                        <div class="gal-meta">{{ grName(o) }} · 未绑定</div>
                         <div class="gal-meta" v-if="o.duration_ms > 0">
                           生成转入 · 耗时 {{ fmtDur(o.duration_ms) }}
                         </div>
@@ -2576,9 +2577,9 @@
                 <div v-if="galRefsView.length" class="lib-grid">
                   <div v-for="r in galRefsView" :key="'libref:' + r.path" class="gal-item">
                     <img v-if="r.thumb" :src="r.thumb" class="clickable-img" alt="参考图"
-                         title="点击查看大图" @click.stop="openViewer(r.path, '参考图')">
+                         title="点击查看大图" @click.stop="openViewer(r.path, r.display_name || '参考图')">
                     <div v-else class="gal-meta">文件丢失</div>
-                    <div class="gal-meta">{{ galMainRef === r.path ? "主参考" : "备选" }}{{ galDrawRef === r.path ? " · 出卡源" : "" }}</div>
+                    <div class="gal-meta">{{ r.display_name ? r.display_name + ' · ' : '' }}{{ galMainRef === r.path ? "主参考" : "备选" }}{{ galDrawRef === r.path ? " · 出卡源" : "" }}</div>
                   </div>
                 </div>
                 <div v-else class="lib-empty">还没有参考图：到「参考图」页签上传，或从立绘转入。</div>
@@ -2591,9 +2592,9 @@
                   <div v-for="it in galItems" :key="'libp:' + it.file" class="gal-item"
                        :class="{ 'is-disabled': !it.active }">
                     <img v-if="it.thumb" :src="it.thumb" class="clickable-img" alt="立绘"
-                         title="点击查看大图" @click.stop="openViewer(it.file, '#' + it.display_no)">
+                         title="点击查看大图" @click.stop="openViewer(it.file, it.display_name || ('#' + it.display_no))">
                     <div v-else class="gal-meta">文件丢失</div>
-                    <div class="gal-meta">#{{ it.display_no }}{{ !it.active ? " · 已停用" : "" }}{{ isCover(it) ? " · 封面" : "" }}</div>
+                    <div class="gal-meta">{{ it.display_name ? it.display_name + ' · ' : '' }}#{{ it.display_no }}{{ !it.active ? " · 已停用" : "" }}{{ isCover(it) ? " · 封面" : "" }}</div>
                   </div>
                 </div>
                 <div v-else class="lib-empty">还没有立绘：到「立绘」页签补图，或去试画台试一张。</div>
@@ -2603,9 +2604,9 @@
                 <div v-if="galTryons.length" class="lib-grid tall">
                   <div v-for="r in galTryons" :key="'libtryon:' + r.id" class="gal-item">
                     <img v-if="r.thumb" :src="r.thumb" class="clickable-img" alt="试穿成果"
-                         title="点击查看大图" @click.stop="openViewer(r.path, '试穿成果')">
+                         title="点击查看大图" @click.stop="openViewer(r.path, r.display_name || '试穿成果')">
                     <div v-else class="gal-meta">文件丢失</div>
-                    <div class="gal-meta">{{ r.category_label }}{{ r.name ? ' · ' + r.name : '' }}{{ r.portrait_file ? ' · 已转立绘' : '' }}</div>
+                    <div class="gal-meta">{{ r.category_label }}{{ (r.display_name || r.name) ? ' · ' + (r.display_name || r.name) : '' }}{{ r.portrait_file ? ' · 已转立绘' : '' }}</div>
                   </div>
                 </div>
                 <div v-else class="lib-empty">还没有试穿成果：到「试穿」页签选角色参考图和衣服生成。</div>
@@ -2678,9 +2679,9 @@
                 <div class="lib-grid tall">
                   <div v-for="r in grp.items" :key="'tryon:' + r.id" class="gal-item">
                     <img v-if="r.thumb" :src="r.thumb" class="clickable-img" alt="试穿成果"
-                         title="点击查看大图" @click.stop="openViewer(r.path, '试穿成果')">
+                         title="点击查看大图" @click.stop="openViewer(r.path, r.display_name || '试穿成果')">
                     <div v-else class="gal-meta">文件丢失</div>
-                    <div class="gal-meta">{{ r.name || "未命名" }}{{ r.portrait_file ? " · 已转立绘" : "" }}</div>
+                    <div class="gal-meta">{{ r.display_name || r.name || "未命名" }}{{ r.portrait_file ? " · 已转立绘" : "" }}</div>
                     <div class="gal-ops">
                       <w-icon-btn v-if="!r.portrait_file" icon="arrowRight" size="tiny" type="primary"
                                   tip="设为立绘（正式进立绘库）"
@@ -5965,8 +5966,27 @@
       // ---- 大图查看器（公共 lightbox 组件，见脚本区 createLightbox） ----
       // 点击缩略图 → 弹 lightbox → 经 /image/data 拉原图 data URL 填入。
       // v0.79.0：lightbox 建在 setup 外，命名 handler 在这里注入（用 apiPost）。
+      // v0.82.0：保存名字后同步改内存里的列表项——否则要等用户手动切页才看到新名字。
+      function patchImageDisplayName(path, name) {
+        var key = String(path || "").replace(/\\/g, "/");
+        if (!key) { return; }
+        [globalRefs.value, galItems.value, galRefs.value, galRefsDisabled.value,
+         galOrphans.value, wardrobeItems.value, galTryons.value, tryPortraits.value
+        ].forEach(function (rows) {
+          (rows || []).forEach(function (r) {
+            var p = String((r && (r.path || r.file || r.abs)) || "").replace(/\\/g, "/");
+            if (p === key || p.slice(-(key.length + 1)) === "/" + key) {
+              r.display_name = name;
+            }
+          });
+        });
+      }
       lightbox.setRenameHandler(function (path, name) {
-        return apiPost("image/name", { path: path, name: name });
+        return apiPost("image/name", { path: path, name: name }).then(function (res) {
+          patchImageDisplayName(res && res.path ? res.path : path,
+                                res && res.name != null ? res.name : name);
+          return res;
+        });
       });
       function openViewer(path, title) {
         if (!path) { message.error("该图片还没有文件（先试画或补图）"); return; }
@@ -6298,12 +6318,17 @@
         return ratio > 1.05 ? "· 横版" : (ratio < 0.95 ? "· 竖版" : "· 方图");
       }
       function grName(r) {
-        return String((r && r.path || "").split("/").pop() || (r && r.path || ""));
+        // v0.82.0：大图 ✎ 改的是 image_names 映射，所有图片列表统一优先显示它；
+        // 没有映射才回落文件名。立绘项用 file / abs，参考图与全局图库用 path。
+        var named = String((r && r.display_name) || "").trim();
+        if (named) { return named; }
+        var p = String((r && (r.path || r.file || r.abs)) || "");
+        return p.split("/").pop() || p;
       }
       var globalRefOpts = Vue.computed(function () {
         return (globalRefs.value || []).filter(function (r) { return r.exists !== false; })
           .map(function (r) {
-            var nm = String((r.path || "").split("/").pop() || r.path || "");
+            var nm = grName(r);
             return { label: (r.note ? r.note + " · " : "") + nm, value: r.path };
           });
       });
@@ -6439,7 +6464,7 @@
         return (wardrobeItems.value || []).filter(function (r) { return r.exists !== false && r.path; })
           .map(function (r) {
             return { path: r.path, thumb: r.thumb, exists: true,
-              label: "[" + r.category_label + "] " + (r.name || grName(r)),
+              label: "[" + r.category_label + "] " + (r.display_name || r.name || grName(r)),
               sub: r.note || "" };
           });
       });
@@ -6455,7 +6480,7 @@
       // v0.73.1：上传时没改名会落成一串内容哈希，卡片上糊一长条看不清；
       // 纯十六进制文件名一律显示「未命名衣物」，其余限长避免撑破卡片。
       function clothDisplayName(r) {
-        var raw = String((r && (r.name || r.note)) || "").trim();
+        var raw = String((r && (r.display_name || r.name || r.note)) || "").trim();
         if (!raw || /^(?:c_)?[0-9a-f]{12,}$/i.test(raw)) { return "未命名衣物"; }
         return raw.length > 14 ? raw.slice(0, 13) + "…" : raw;
       }
@@ -7474,7 +7499,7 @@
       var trySwapCharOpts = Vue.computed(function () {
         return (tryRefs.value || []).filter(function (r) { return r.exists !== false; })
           .map(function (r, i) {
-            var nm = String((r.path || "").split("/").pop() || ("参考图 " + (i + 1)));
+            var nm = grName(r) || ("参考图 " + (i + 1));
             return { label: (r.note ? r.note + " · " : "") + nm, value: r.path };
           });
       });
@@ -7490,7 +7515,7 @@
       function _tryRefPickerItem(r, i) {
         return {
           path: r.path, thumb: r.thumb, exists: r.exists !== false,
-          label: (r.note ? r.note + " · " : "") + String((r.path || "").split("/").pop() || ("参考图 " + (i + 1))),
+          label: (r.note ? r.note + " · " : "") + (grName(r) || ("参考图 " + (i + 1))),
           sub: (r.width && r.height ? r.width + "×" + r.height : "") || (r.source ? "来源：" + r.source : "")
         };
       }
@@ -7506,7 +7531,7 @@
           out.push({
             path: p.abs, thumb: p.thumb || "", exists: true,
             label: "立绘 · #" + (p.display_no || i + 1) + " · "
-                   + String((p.file || "").split("/").pop() || ("立绘 " + (i + 1))),
+                   + (grName(p) || ("立绘 " + (i + 1))),
             sub: "角色立绘" + (p.width && p.height ? " · " + p.width + "×" + p.height : "")
           });
         });
@@ -8522,8 +8547,8 @@
         return (genSources.value || []).filter(function (g) {
           if (!g.path || g.kind !== "ref" || seen[g.path]) { return false; }
           seen[g.path] = 1; return true;
-        }).map(function (g) {
-          var nm = String((g.path || "").split("/").pop() || "参考图");
+        })        .map(function (g) {
+          var nm = grName(g) || "参考图";
           return { label: "参考图 · " + nm, value: g.path };
         });
       });
@@ -8543,7 +8568,7 @@
           seen[g.path] = 1; return true;
         }).map(function (g, i) {
           var isPortrait = g.kind === "portrait";
-          var nm = String((g.path || "").split("/").pop() || ((isPortrait ? "立绘 " : "参考图 ") + (i + 1)));
+          var nm = grName(g) || ((isPortrait ? "立绘 " : "参考图 ") + (i + 1));
           return { path: g.path, thumb: g.thumb || "", exists: true,
                    label: (isPortrait ? "立绘 · #" + (g.display_no || i + 1) : "参考图") + " · " + nm,
                    sub: isPortrait ? "本角色立绘" : "本角色已绑定" };
@@ -8586,13 +8611,14 @@
         // v0.19.8：用 galRefsView 的展示序（主参考第一、出卡源第二）
         galRefsView.value.forEach(function (r) {
           out.push({ kind: "ref", path: r.path, thumb: r.thumb,
-                     seq: 0, display_no: 0 });
+                     display_name: r.display_name || "", seq: 0, display_no: 0 });
         });
         galItems.value.forEach(function (it) {
           // v0.29.6：停用（软删除）的立绘不进生成源——立绘墙有「显示停用」
           // 开关只是供查看/恢复，停用图不应再被选为图生图参考
           if (it.abs && it.active) {
             out.push({ kind: "portrait", path: it.abs, thumb: it.thumb,
+                       display_name: it.display_name || "",
                        seq: it.seq, display_no: it.display_no });
           }
         });
@@ -9485,7 +9511,7 @@
         return (wardrobeItems.value || []).filter(function (r) { return r.exists !== false && r.path; })
           .map(function (r) {
             return { path: r.path, thumb: r.thumb, exists: true,
-              label: "[" + r.category_label + "] " + (r.name || grName(r)), sub: r.note || "" };
+              label: "[" + r.category_label + "] " + (r.display_name || r.name || grName(r)), sub: r.note || "" };
           });
       });
       var galTryonGroups = Vue.computed(function () {

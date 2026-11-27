@@ -413,6 +413,31 @@ def _image_rel_key(plugin, fp: Path | None, raw: str) -> str:
     return str(raw or "").strip().replace("\\", "/")
 
 
+def _attach_image_names(plugin, items: list, path_key: str = "path") -> list:
+    """给图片列表项补 `display_name`（v0.82.0）：只读映射，不改路径。
+
+    一个列表一次批量查，避免每张图一次 SQL。各列表的路径字段不统一
+    （立绘是 `file`，参考图 / 全局图库是 `path`），所以允许指定 key；
+    没有映射的项返回空串，前端继续回落文件名 / #序号。
+    """
+    out = list(items or [])
+    if not out:
+        return out
+    st = getattr(plugin, "_store", None)
+    keys = {}
+    for it in out:
+        raw = (it.get(path_key) or it.get("file") or it.get("abs")) if isinstance(it, dict) else ""
+        key = str(raw or "").strip().replace("\\", "/")
+        if key:
+            keys[id(it)] = key
+    names = (st.get_image_names(list(keys.values()))
+             if st is not None and hasattr(st, "get_image_names") and keys else {})
+    for it in out:
+        if isinstance(it, dict):
+            it["display_name"] = names.get(keys.get(id(it), ""), "")
+    return out
+
+
 def _works_meta_path(plugin) -> Path:
     return Path(plugin._data_dir) / "works_meta.json"
 
@@ -1153,6 +1178,8 @@ async def h_portraits_list(plugin) -> dict:
             # v0.21.0：软删除标记（0 = 已停用）
             "active": int(row.get("active") or 0),
         })
+    # v0.82.0：立绘墙也要显示大图里改过的名字（file 是路径字段）
+    _attach_image_names(plugin, items, "file")
     return ok({"char_id": cid, "items": items})
 
 
@@ -1631,6 +1658,8 @@ async def h_global_refs_list(plugin) -> dict:
             "size": size, "file_name": Path(rel).name,
             "ext": Path(rel).suffix.lower().lstrip("."),
         })
+    # v0.82.0：全局图库卡片的名字用映射名，note 仍是用户自己的标签
+    _attach_image_names(plugin, items, "path")
     return ok({"items": items, "total": len(items)})
 
 
@@ -1734,6 +1763,8 @@ async def h_wardrobe_list(plugin) -> dict:
             "size": size, "file_name": Path(rel).name,
             "ext": Path(rel).suffix.lower().lstrip("."),
         })
+    # v0.82.0：衣柜也有自己的 name，但大图 ✎ 的显示名优先级更高
+    _attach_image_names(plugin, items, "path")
     return ok({"items": items, "total": len(items)})
 
 
@@ -2206,6 +2237,8 @@ async def h_tryon_list(plugin) -> dict:
             "portrait_file": row.get("portrait_file", ""),
             "created_at": row.get("created_at", ""),
         })
+    # v0.82.0：试穿成果有自己的 name，但大图 ✎ 的显示名优先级更高
+    _attach_image_names(plugin, items, "path")
     return ok({"items": items, "total": len(items)})
 
 
@@ -2510,6 +2543,8 @@ async def h_refs_list(plugin) -> dict:
     for it in items + items_disabled:
         m = metas.get(it["path"])
         it["meta"] = dict(m) if m else None
+    # v0.82.0：启用 / 停用的参考图都带回大图里改过的名字
+    _attach_image_names(plugin, items + items_disabled, "path")
     # draw_ref 存的是归一后的相对路径；立绘卡用绝对路径比较，所以再给一份
     # 绝对路径（v0.12.0：否则「设为出卡源」的立绘卡片不会高亮）。
     draw_raw = str(st.get("draw_ref") or "")
@@ -2610,7 +2645,8 @@ def _orphan_items(plugin) -> list:
         except Exception:
             for it in items:
                 it["duration_ms"] = 0
-    return items
+    # v0.82.0：找回的孤儿图也显示用户改过的名字
+    return _attach_image_names(plugin, items, "path")
 
 
 async def h_refs_orphans(plugin) -> dict:

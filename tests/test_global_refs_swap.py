@@ -161,6 +161,7 @@ def main():
     # 5) store 真库 CRUD
     try:
         import store as store_mod
+        import webui_api as api_mod
         with tempfile.TemporaryDirectory() as td:
             s = store_mod.Store(Path(td) / "t.db")
             s.add_global_ref("global_refs/g_1.png", "h1", 10, 20, note="画布")
@@ -175,6 +176,18 @@ def main():
             check("真库：批量取名", s.get_image_names(
                 ["global_refs/g_1.png", "global_refs/g_2.png"])
                 == {"global_refs/g_1.png": "主参考"})
+            # v0.82.0：列表项批量带显示名（改名后列表直接可见）
+            class _P:
+                _data_dir = Path(td)
+                _store = s
+            rows = [{"path": "global_refs/g_1.png"},
+                    {"path": "global_refs/g_2.png"},
+                    {"file": "portraits/c1/a.png"}]
+            api_mod._attach_image_names(_P(), rows, "path")
+            check("列表项带回显示名（无映射回落空串）",
+                  rows[0]["display_name"] == "主参考"
+                  and rows[1]["display_name"] == ""
+                  and rows[2]["display_name"] == "")
             s.set_image_name("global_refs/g_1.png", "")
             check("真库：清空名字删映射", s.get_image_name("global_refs/g_1.png") == "")
             check("真库：删除生效", s.delete_global_ref("global_refs/g_2.png")

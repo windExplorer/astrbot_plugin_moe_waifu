@@ -331,6 +331,20 @@ check("后端 tags_en 是可选字段且缺省不带入",
       and 'default_fields = [f for f in PROFILE_IMPORT_FIELDS if f != "tags_en"]' in API
       and 'elif key == "tags_en":' in API)
 
+# ---------- v0.82.0：图片显示名进列表 ----------
+check("图片列表统一优先显示改名映射",
+      'var named = String((r && r.display_name) || "").trim();' in PAGE
+      and "r.path || r.file || r.abs" in PAGE
+      and "it.display_name ? it.display_name + ' · ' : ''" in PAGE
+      and "r.display_name ? r.display_name + ' · ' : ''" in PAGE)
+check("改名保存后立刻同步内存里的列表项",
+      "function patchImageDisplayName(path, name)" in PAGE
+      and "patchImageDisplayName(res && res.path ? res.path : path" in PAGE)
+check("后端各图片列表批量带 display_name",
+      "def _attach_image_names(plugin, items: list, path_key: str = \"path\")" in API
+      and '_attach_image_names(plugin, items, "file")' in API
+      and '_attach_image_names(plugin, items + items_disabled, "path")' in API)
+
 # ---------- ⑥ 图生图默认源 ----------
 check("自动选源优先级：出卡源 → 主参考 → 第一张",
       "function _defaultGenSource()" in PAGE
