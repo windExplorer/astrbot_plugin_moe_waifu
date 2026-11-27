@@ -311,6 +311,16 @@ check("后端命名接口与映射表齐备",
       and "CREATE TABLE IF NOT EXISTS image_names" in STORE
       and "def set_image_name" in STORE and "def get_image_names" in STORE)
 
+# ---------- v0.80.0：作品角色迁移（勾选 / 全选） ----------
+check("作品详情有迁移入口且可全选 / 勾选角色",
+      '@click="openWorkMigrate"' in PAGE and "wmToggleAll" in PAGE
+      and 'n-checkbox-group v-model:value="wmSel"' in PAGE
+      and 'apiPost("works/migrate"' in PAGE)
+check("后端迁移只改 series、ids 为空即全部",
+      '"/works/migrate", h_works_migrate' in API
+      and "wanted = [str(x).strip() for x in ids] if ids else list(targets)" in API
+      and 'raw.__setitem__("series", dst)' in API)
+
 # ---------- ⑥ 图生图默认源 ----------
 check("自动选源优先级：出卡源 → 主参考 → 第一张",
       "function _defaultGenSource()" in PAGE

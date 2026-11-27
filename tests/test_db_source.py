@@ -95,6 +95,48 @@ with tempfile.TemporaryDirectory() as td:
     st3.rename_pack("custom", "novel", "小说")
     c1 = next(e for e in st3.load_pack_data("novel")["entries"] if e["id"] == "c1")
     check("改名后角色 category 同步为新键", c1.get("category") == "novel", str(c1))
+
+    # --- 6) v0.80.0：作品角色迁移（勾选 / 全选走同一 handler） ---
+    import asyncio
+    import pool as pool_mod
+    pool_mod.set_packs_provider(st3.load_packs)
+    api.set_pack_save(st3.save_pack_data)
+    st3.save_pack_data({"pack": "game", "title": "game", "enabled": True,
+                        "entries": [
+                            {"id": "m1", "name": "甲", "series": "源作品",
+                             "category": "game", "tags_en": "1girl", "strategy": {}},
+                            {"id": "m2", "name": "乙", "series": "源作品",
+                             "category": "game", "tags_en": "1girl", "strategy": {}},
+                            {"id": "m3", "name": "丙", "series": "目标作品",
+                             "category": "game", "tags_en": "1girl", "strategy": {}},
+                        ]})
+    plugin3 = SimpleNamespace(_data_dir=root, _store=st3)
+
+    class _Req:
+        def __init__(self, body):
+            self.body = body
+
+        async def get_json(self, silent=True):
+            return self.body
+
+    api.request = _Req({"from": "源作品", "to": "目标作品",
+                        "ids": ["m1"], "confirm": True})
+    res = asyncio.run(api.h_works_migrate(plugin3))
+    check("迁移：勾选 1 个角色改 series", res.get("status") == "ok"
+          and res["data"]["count"] == 1, str(res))
+    rows = st3.load_pack_data("game")["entries"]
+    e1 = next(e for e in rows if e["id"] == "m1")
+    e2 = next(e for e in rows if e["id"] == "m2")
+    check("迁移：只影响勾选的角色", e1["series"] == "目标作品"
+          and e2["series"] == "源作品", str((e1.get("series"), e2.get("series"))))
+    wm = st3.find_entry("m1") or {}
+    check("迁移：work_id 随之指向新作品", wm.get("series") == "目标作品", str(wm))
+    api.request = _Req({"from": "源作品", "to": "目标作品", "confirm": True})
+    res2 = asyncio.run(api.h_works_migrate(plugin3))
+    check("迁移：ids 省略 = 该作品全部角色", res2.get("status") == "ok"
+          and res2["data"]["count"] == 1, str(res2))
+    api.request = None
+    pool_mod.set_packs_provider(None)
     st3.close()
 
 # 还原全局钩子，避免污染同进程其它测试

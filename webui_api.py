@@ -2385,6 +2385,45 @@ async def h_works(plugin) -> dict:
     return ok({"works": works, "version": _version_of()})
 
 
+async def h_works_migrate(plugin) -> dict:
+    """作品角色迁移：把源作品里选中的角色改 series 到目标作品（v0.80.0）。
+
+    只改条目的 series——work_id 由 sync_pack_file 自动派生；角色、立绘、
+    参考图、封面一个不删。ids 省略 / 空数组 = 迁移该作品全部角色。
+    """
+    body = await _body()
+    src = str(body.get("from") or "").strip()
+    dst = str(body.get("to") or "").strip()
+    if not src or not dst:
+        return err("缺少源作品或目标作品")
+    if src == dst:
+        return err("源作品和目标作品不能相同")
+    if not bool(body.get("confirm")):
+        return err("请二次确认迁移（会改这些角色的作品归属）")
+    ids = body.get("ids")
+    if ids is not None and not isinstance(ids, list):
+        return err("ids 需为角色 id 数组")
+    targets = []
+    for pack in pool.load_packs(_pools_dir(plugin), logger):
+        for raw in pack.get("entries") or []:
+            e = pool.normalize_entry(raw, pack["pack"])
+            if e is not None and e["series"] == src:
+                targets.append(e["id"])
+    if not targets:
+        return err(f"源作品「{src}」下没有角色")
+    wanted = [str(x).strip() for x in ids] if ids else list(targets)
+    sel = [cid for cid in dict.fromkeys(wanted) if cid in targets]
+    if not sel:
+        return err("选中的角色不在源作品里")
+    migrated, missing = [], []
+    for cid in sel:
+        pack_name = _set_entry_field(
+            plugin, cid, lambda e, raw: raw.__setitem__("series", dst))
+        (migrated if pack_name else missing).append(cid)
+    return ok({"from": src, "to": dst, "migrated": migrated,
+               "count": len(migrated), "missing": missing})
+
+
 async def h_set_cover(plugin) -> dict:
     """设置/清除角色封面（entry.cover）。path 传空串清除。"""
     body = await _body()
@@ -7095,6 +7134,7 @@ def register(plugin) -> None:
     routes = [
         ("/pools", h_pools, ["GET"]),
         ("/works", h_works, ["GET"]),
+        ("/works/migrate", h_works_migrate, ["POST"]),
         ("/workflows", h_workflows, ["GET"]),
         ("/llm_providers", h_llm_providers, ["GET"]),
         ("/themes", h_themes, ["GET"]),

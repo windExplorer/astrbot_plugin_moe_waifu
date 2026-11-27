@@ -1402,6 +1402,8 @@
                           @click="openNewForWork(currentWork.series)">添加角色</n-button>
                 <!-- v0.29.0：作品详情批量导入——作品名已预填，导入的条目自动归本作品 -->
                 <n-button size="small" @click="openImportForWork(currentWork.series)">批量导入</n-button>
+                <!-- v0.80.0：把本作品的角色勾选迁到另一部作品（可全选） -->
+                <n-button size="small" @click="openWorkMigrate">迁移角色</n-button>
                 <n-button size="small" @click="openWorkCover">设置作品封面</n-button>
                 <n-button size="small" :loading="refreshing" @click="refreshAll">刷新</n-button>
               </n-space>
@@ -5140,6 +5142,38 @@
       </template>
     </n-modal>
 
+    <!-- ============ 作品角色迁移（v0.80.0：勾选角色改挂到另一部作品） ============ -->
+    <n-modal v-model:show="wmOpen" preset="dialog" title="迁移角色到其它作品" style="width: 560px;">
+      <div class="stack">
+        <div class="bind-tip" style="margin-top: 0;">
+          把「{{ currentWork ? currentWork.series : "" }}」中勾选的角色改挂到目标作品：只改条目的
+          作品名，角色本身、立绘、参考图、封面都不动。配置页「分群绑定」里若写了旧作品名，
+          迁移后请手动改成新名。
+        </div>
+        <n-select v-model:value="wmTo" :options="wmTargets" size="small"
+                  filterable placeholder="选择目标作品"></n-select>
+        <n-checkbox :checked="wmSel.length === (currentWork ? currentWork.characters.length : 0)"
+                    :disabled="!currentWork || !currentWork.characters.length"
+                    @update:checked="wmToggleAll">
+          全选 / 取消（已选 {{ wmSel.length }} / {{ currentWork ? currentWork.characters.length : 0 }}）
+        </n-checkbox>
+        <n-checkbox-group v-model:value="wmSel" style="max-height:260px;overflow:auto;">
+          <div v-for="c in (currentWork ? currentWork.characters : [])" :key="c.id"
+               style="padding:3px 0;">
+            <n-checkbox :value="c.id" :label="c.name + '（' + c.id + '）'"></n-checkbox>
+          </div>
+        </n-checkbox-group>
+        <div v-if="wmResult" class="bind-tip">
+          已迁移 {{ wmResult.count }} 个角色到「{{ wmResult.to }}」。
+        </div>
+      </div>
+      <template #action>
+        <n-button @click="wmOpen=false">关闭</n-button>
+        <n-button type="primary" :loading="wmBusy" :disabled="!wmTo || !wmSel.length"
+                  @click="doWorkMigrate">{{ wmArmed ? "确认迁移" : "迁移选中" }}</n-button>
+      </template>
+    </n-modal>
+
   </n-config-provider>
 </div>
 
@@ -6879,6 +6913,59 @@
         dedupeResult.value = null;
         dedupeOpen.value = true;
         loadDuplicates();
+      }
+      // ---- 作品角色迁移（v0.80.0：只改 series，work_id 由 sync_pack_file 派生） ----
+      var wmOpen = Vue.ref(false);
+      var wmTo = Vue.ref("");
+      var wmSel = Vue.ref([]);
+      var wmBusy = Vue.ref(false);
+      var wmArmed = Vue.ref(false);
+      var wmResult = Vue.ref(null);
+      var wmTargets = Vue.computed(function () {
+        var cur = currentWork.value;
+        return (works.value || []).filter(function (w) {
+          return !cur || w.series !== cur.series;
+        }).map(function (w) {
+          return { label: w.series + "（" + w.total + " 角色）", value: w.series };
+        });
+      });
+      function openWorkMigrate() {
+        var cur = currentWork.value;
+        if (!cur) return;
+        wmTo.value = "";
+        wmSel.value = (cur.characters || []).map(function (c) { return c.id; });
+        wmArmed.value = false;
+        wmResult.value = null;
+        wmOpen.value = true;
+      }
+      function wmToggleAll(checked) {
+        var cur = currentWork.value;
+        wmSel.value = checked
+          ? (cur ? (cur.characters || []).map(function (c) { return c.id; }) : [])
+          : [];
+      }
+      async function doWorkMigrate() {
+        var cur = currentWork.value;
+        if (!cur || !wmTo.value || !wmSel.value.length || wmBusy.value) return;
+        if (!wmArmed.value) {
+          wmArmed.value = true;
+          message.info("再点一次「确认迁移」，把 " + wmSel.value.length
+                       + " 个角色挂到「" + wmTo.value + "」");
+          return;
+        }
+        wmBusy.value = true;
+        try {
+          var res = await apiPost("works/migrate", {
+            from: cur.series, to: wmTo.value, ids: wmSel.value, confirm: true
+          });
+          wmResult.value = res;
+          wmArmed.value = false;
+          message.success("已迁移 " + (res.count || 0) + " 个角色");
+          wmOpen.value = false;
+          await refreshAll();
+        } catch (e) { /* 已提示 */ } finally {
+          wmBusy.value = false;
+        }
       }
       async function doDedupe() {
         var sel = dedupeSelected.value || {};
@@ -12890,6 +12977,11 @@
         dedupeResult: dedupeResult, dedupeSelectedCount: dedupeSelectedCount,
         dedupeDupCount: dedupeDupCount, openDedupe: openDedupe,
         loadDuplicates: loadDuplicates, doDedupe: doDedupe,
+        // v0.80.0：作品角色迁移（全选 / 勾选）
+        wmOpen: wmOpen, wmTo: wmTo, wmSel: wmSel, wmBusy: wmBusy,
+        wmArmed: wmArmed, wmResult: wmResult, wmTargets: wmTargets,
+        openWorkMigrate: openWorkMigrate, wmToggleAll: wmToggleAll,
+        doWorkMigrate: doWorkMigrate,
         catLabel: catLabel, stratLabel: stratLabel, portraitCount: portraitCount, delArm: delArm,
         tryCharId: tryCharId, charOpts: charOpts, tryEntry: tryEntry,
         // v0.57.0：试画台角色筛选
